@@ -1,7 +1,7 @@
 API Reference
 =============
 
-SHALOM 프레임워크의 자율 소재 탐색을 위한 핵심 모듈 API 문서입니다.
+Documentation for the modules within the SHALOM framework.
 
 Core
 ----
@@ -11,10 +11,38 @@ Core
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: shalom.core.schemas
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.core.sandbox
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Agents
 ------
 
 .. automodule:: shalom.agents.design_layer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.agents.simulation_layer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.agents.review_layer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Tools
+-----
+
+.. automodule:: shalom.tools.ase_builder
    :members:
    :undoc-members:
    :show-inheritance:

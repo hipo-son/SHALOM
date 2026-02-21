@@ -1,0 +1,18 @@
+ vasp.6.3.2 27Jun22 (build Aug 04 2022 13:45:19) complex                        
+                            
+ INCAR:
+   SYSTEM = Dummy Synthesis
+   ENCUT  =  400.000000
+   EDIFF  = 0.1E-04
+   ISMEAR =     0;   SIGMA  =   0.050
+
+ FREE ENERGIE OF THE ION-ELECTRON SYSTEM (eV)
+  ---------------------------------------------------
+  free  energy   TOTEN  =       -34.567890 eV
+
+  General timing and accounting informations for this job:
+  ========================================================
+
+          Total CPU time used (sec):        3.500
+          User time (sec):                  3.400
+          System time (sec):                0.100

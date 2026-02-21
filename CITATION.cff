@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+title: 'SHALOM: System of Hierarchical Agents for Logical Orchestration of Materials'
+message: 'If you use this software, please cite it as below.'
+type: software
+authors:
+  - given-names: User
+    family-names: Name
+    affiliation: Organization
+repository-code: 'https://github.com/hipo-son/SHALOM'
+url: 'https://github.com/hipo-son/SHALOM'
+abstract: >-
+  LLM-based multi-agent framework for computational materials
+  science, enabling closed-loop autonomous material discovery.
+license: MIT
+version: 0.1.0

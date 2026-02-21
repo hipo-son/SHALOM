@@ -1,16 +1,27 @@
 Quickstart
 ==========
 
-간단한 자율 소재 탐색 파이프라인 예제입니다.
+A simple pipeline for an autonomous material search using the SHALOM framework.
 
 .. code-block:: python
 
-    from shalom.core import LLMProvider
-    from shalom.agents.design_layer import PlannerAgent
+    from shalom.core.llm_provider import LLMProvider
+    from shalom.agents.design_layer import CoarseSelector, FineSelector
     
-    provider = LLMProvider(model="claude-3-opus")
-    planner = PlannerAgent(provider)
+    # Initialize the provider with your preferred LLM
+    llm = LLMProvider(provider_type="openai", model_name="gpt-4o")
     
-    result = planner.plan("Find a stable 2D material with bandgap > 1.0eV")
-    print(result)
+    objective = "Find a stable 2D material with bandgap > 1.0eV"
+    
+    # Step 1: Coarse Selection
+    coarse = CoarseSelector(llm)
+    candidates = coarse.select(objective)
+    
+    # Step 2: Fine Selection & Ranking
+    fine = FineSelector(llm)
+    winner = fine.rank_and_select(objective, candidates)
+    
+    print(f"Top Material: {winner.candidate.material_name}")
+    print(f"Score: {winner.score}")
+
 

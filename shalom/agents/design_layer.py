@@ -1,74 +1,101 @@
 import json
-from typing import List, Dict, Any
-from pydantic import BaseModel, create_model
+from typing import List
 
-from agentmat.core.llm_provider import LLMProvider
-from agentmat.core.schemas import MaterialCandidate, RankedMaterial
+from pydantic import BaseModel
 
-# 동적으로 List[MaterialCandidate]를 리턴받기 위한 Wrapper 스키마
-CandidateListResponse = create_model(
-    'CandidateListResponse',
-    candidates=(List[MaterialCandidate], ...)
-)
+from shalom.core.llm_provider import LLMProvider
+from shalom.core.schemas import MaterialCandidate, RankedMaterial
+
+
+class CandidateListResponse(BaseModel):
+    """Wrapper schema for a list of MaterialCandidate objects."""
+
+    candidates: List[MaterialCandidate]
+
 
 class CoarseSelector:
+    """Step 1 of the Design Layer: Coarse Selector.
+
+    Initially screens 3 to 5 promising candidates from a vast chemical space
+    that meet the target objective.
     """
-    Design Layer의 1단계: 대략적 선별자(Coarse Selector)
-    방대한 화학 공간에서 타겟 목표에 부합하는 3~5개의 유망 후보군을 1차 선별합니다.
-    """
+
     def __init__(self, llm_provider: LLMProvider):
         self.llm = llm_provider
-        self.system_prompt = """
-        당신은 "Coarse Selector"입니다. 세계 최고 수준의 전산재료과학자로서 일합니다.
-        주어진 자연어 목표(Target Objective)를 달성하기 위해 가장 유망한 3~5개의 소재 후보를 선별하세요.
+        self.system_prompt = """[v1.0.0]
+        You are the "Coarse Selector", working as a world-class computational materials scientist.
+        Select the 3 to 5 most promising material candidates to achieve the given
+        natural language Target Objective.
 
-        [선별 지침]
-        1. 주기율표의 경향성, 전기음성도, d-band 중심 이론 등 확립된 물리적/화학적 직관을 사용하세요.
-        2. 무작위가 아닌, 명확한 과학적 근거(reasoning)가 있어야 합니다.
-        3. 후보군은 너무 뻔한 하나의 소재에 국한되지 않고, 약간의 다양성(합금, 도핑 등)을 포함하는 것이 좋습니다.
-        4. 반드시 JSON 포맷의 Candidates 리스트 형태로 응답해야 합니다.
+        [Selection Guidelines]
+        1. Use established physical/chemical intuition such as periodic table trends,
+           electronegativity, and d-band center theory.
+        2. Each selection must have clear scientific reasoning — no random picks.
+        3. Candidates should include some diversity (alloys, doping, etc.)
+           rather than being limited to a single obvious material.
+        4. You MUST respond in JSON format as a Candidates list.
         """
 
     def select(self, target_objective: str, context: str = "") -> List[MaterialCandidate]:
+        """Generate and return a list of material candidates for a given objective.
+
+        Args:
+            target_objective: The target natural language objective.
+            context: Additional contextual information.
+
+        Returns:
+            A list of 3-5 selected candidate materials.
         """
-        주어진 목표에 대해 후보군 리스트를 생성하여 반환합니다.
-        """
-        user_prompt = f"Target Objective: {target_objective}\n\nAdditional Context:\n{context}\n\nPlease provide 3 to 5 candidate materials."
-        
+        user_prompt = (
+            f"Target Objective: {target_objective}\n\n"
+            f"Additional Context:\n{context}\n\n"
+            "Please provide 3 to 5 candidate materials."
+        )
+
         response = self.llm.generate_structured_output(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
-            response_model=CandidateListResponse
+            response_model=CandidateListResponse,
         )
         return response.candidates
 
 
 class FineSelector:
+    """Step 2 of the Design Layer: Fine Selector.
+
+    Ranks the candidates provided by the Coarse Selector based on expected
+    properties and selects the optimal material.
     """
-    Design Layer의 2단계: 정밀 선별자(Fine Selector)
-    Coarse Selector가 넘겨준 후보군 내부에서 예상 속성을 기준으로 순위를 매기고 최적의 소재를 선택합니다.
-    """
+
     def __init__(self, llm_provider: LLMProvider):
         self.llm = llm_provider
-        self.system_prompt = """
-        당신은 "Fine Selector"입니다.
-        이제 거친 선별을 통과한 소수의 소재 후보군(Candidates)이 주어집니다.
-        당신의 임무는 주어진 목표(Target Objective)에 가장 부합하는 소재가 무엇인지 정밀하게 평가(점수 0.0 ~ 1.0)하고,
-        이 중 단 1개의 '최종 승자(Winner)'를 선택하는 것입니다.
+        self.system_prompt = """[v1.0.0]
+        You are the "Fine Selector".
+        You are given a small pool of material candidates that passed the coarse screening.
+        Your task is to precisely evaluate each candidate against the Target Objective
+        on a scale of 0.0 to 1.0, and select exactly ONE "Winner".
 
-        [평가 지침]
-        1. 각 후보의 'reasoning'과 'expected_properties'를 심층 분석하세요.
-        2. 시뮬레이션(DFT) 비용 대비 성공 확률도 고려하세요 (너무 복잡하거나 큰 셀은 감점 요소가 될 수 있음).
-        3. 가장 높은 점수(Score)를 받은 후보가 다음 시뮬레이션 단계로 넘어갑니다.
+        [Evaluation Guidelines]
+        1. Deeply analyze each candidate's 'reasoning' and 'expected_properties'.
+        2. Consider the simulation (DFT) cost vs. success probability
+           (overly complex or large cells are penalized).
+        3. The candidate with the highest score advances to the Simulation Layer.
         """
 
-    def rank_and_select(self, target_objective: str, candidates: List[MaterialCandidate]) -> RankedMaterial:
+    def rank_and_select(
+        self, target_objective: str, candidates: List[MaterialCandidate]
+    ) -> RankedMaterial:
+        """Rank the candidates and return the top-scoring material.
+
+        Args:
+            target_objective: The target natural language objective.
+            candidates: A list of candidate materials.
+
+        Returns:
+            The final selected material with score and justification.
         """
-        후보군들의 순위를 매기고 1등(최상위) 후보를 반환합니다.
-        """
-        # 후보군 정보를 JSON 문자열로 변환하여 프롬프트에 주입
         candidates_json = json.dumps([c.model_dump() for c in candidates], indent=2)
-        
+
         user_prompt = (
             f"Target Objective: {target_objective}\n\n"
             f"Candidates Pool:\n{candidates_json}\n\n"
@@ -76,9 +103,8 @@ class FineSelector:
             "Return ONLY the best matching material as the RankedMaterial."
         )
 
-        best_candidate = self.llm.generate_structured_output(
+        return self.llm.generate_structured_output(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
-            response_model=RankedMaterial
+            response_model=RankedMaterial,
         )
-        return best_candidate

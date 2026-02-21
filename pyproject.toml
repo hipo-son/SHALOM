@@ -12,18 +12,76 @@ license = {text = "MIT"}
 authors = [
     {name = "SHALOM Contributors"}
 ]
+keywords = ["materials-science", "llm", "multi-agent", "dft", "ase", "autonomous-discovery"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry"
+]
 dependencies = [
     "ase>=3.22.1",
-    "pymatgen>=2023.10.11",
     "numpy>=1.24.0",
     "pydantic>=2.4.0",
     "openai>=1.0.0",
-    "anthropic>=0.5.0"
+    "anthropic>=0.25.0"
 ]
 
+[project.urls]
+Homepage = "https://github.com/hipo-son/SHALOM"
+Repository = "https://github.com/hipo-son/SHALOM"
+Documentation = "https://shalom.readthedocs.io"
+
 [project.optional-dependencies]
+pymatgen = [
+    "pymatgen>=2023.10.11"
+]
 dev = [
     "pytest>=7.0",
-    "flake8",
-    "black"
+    "pytest-cov",
+    "pytest-mock",
+    "ruff",
+    "black",
+    "mypy"
 ]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx-autodoc-typehints",
+    "myst-parser",
+    "nbsphinx",
+    "sphinx-copybutton"
+]
+all = [
+    "shalom[pymatgen,dev,docs]"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+strict_optional = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "--cov=shalom --cov-report=xml --cov-fail-under=85 -v"
+testpaths = ["tests"]
+markers = [
+    "integration: mark test as requiring external API calls (deselect with '-m \"not integration\"')",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shalom*"]
