@@ -16,15 +16,25 @@
 
 ---
 
-## 🔬 Overview
+## Overview
 
-**SHALOM** is a premier autonomous multi-agent framework tailored for computational materials science and reasoning-driven workflow orchestration. Powered by Large Language Models (LLMs), it executes closed-loop materials discovery by simulating human-expert workflows—from hypothesizing novel compositions (Design) and building 3D configurations (Simulation), to verifying structural integrity via VASP (Review). 
+**SHALOM** is a general-purpose hierarchical agent orchestration framework for computational materials science. Rather than being a single-purpose tool, SHALOM provides the **infrastructure** — agent lifecycle management, structured LLM communication, sandboxed code execution, HPC integration, and closed-loop feedback — needed to compose autonomous multi-agent workflows for any materials science task.
 
-SHALOM embraces absolute **reproducibility** with deterministic prompt tracing, high-performance containerization (HPC/SLURM), and secure sandboxed pipeline executions.
+The framework is **domain-aware but task-agnostic**: agents can be assembled into arbitrary hierarchies to tackle material screening, structure optimization, property prediction, or any workflow expressible as a sequence of LLM-driven decisions and computational validations.
 
-## 🏗️ Architecture
+### Why a Framework?
 
-The framework is constructed around a tri-layer hierarchy implementing a closed-loop self-correction cycle:
+Existing LLM-agent systems are either too general (lacking domain primitives for crystallography, DFT, and HPC) or too narrow (hard-coded for a single workflow). SHALOM bridges this gap by offering:
+
+- **Hierarchical agent composition** — Nest agents in configurable layers (planning, execution, evaluation, auditing) that communicate via typed Pydantic schemas.
+- **Secure sandboxed execution** — Run LLM-generated Python/ASE code safely with import restrictions, timeouts, and resource limits.
+- **Pluggable LLM backends** — Swap between OpenAI, Anthropic, or custom providers with a single parameter change.
+- **HPC-native design** — First-class Slurm/MCP integration for submitting and monitoring jobs on supercomputers.
+- **Deterministic reproducibility** — Seed-locked prompts and structured outputs ensure every run is traceable and repeatable.
+
+### Proof of Concept: Autonomous Material Discovery
+
+To validate the framework, SHALOM ships with a complete **material discovery pipeline** as its first use case. This pipeline demonstrates the full agent lifecycle through three cooperating layers:
 
 ```text
 +-------------------------------------------------------------+
@@ -46,31 +56,30 @@ The framework is constructed around a tri-layer hierarchy implementing a closed-
 +-------------------------------------------------------------+
 ```
 
-## 🚀 Installation
+This pipeline is one instantiation of the SHALOM framework. The same core components — `LLMProvider`, `SafeExecutor`, Pydantic schemas, and the agent base classes — can be reused to build entirely different workflows (e.g., defect screening, catalyst optimization, phase-diagram exploration).
 
-SHALOM is available on PyPI and can be installed via pip. We recommend using a Conda environment for HPC deployments.
+## Installation
 
 ```bash
-# Basic Installation
-pip install shalom
-
-# Full Installation (includes pymatgen and HPC toolkits)
-pip install shalom[all]
+pip install shalom            # core dependencies
+pip install shalom[all]       # includes pymatgen, HPC toolkits, docs
+pip install -e ".[dev]"       # development (tests, linting, type-checking)
 ```
 
-### HPC & Slurm
-For clusters where containerization is preferred, pull the SHALOM Docker image:
+For HPC clusters with containerized deployments:
 ```bash
 docker pull ghcr.io/hipo-son/shalom:latest
 ```
 
-## ⚡ Quick Start
+## Quick Start
+
+The example below runs the built-in material discovery pipeline — the first proof-of-concept use case:
 
 ```python
 from shalom.core.llm_provider import LLMProvider
 from shalom.agents.design_layer import CoarseSelector, FineSelector
 
-# 1. Provide an API Key and Initialize
+# 1. Initialize an LLM backend
 llm = LLMProvider(provider_type="openai", model_name="gpt-4o")
 objective = "Find a stable 2D transition metal dichalcogenide with bandgap > 1.0eV"
 
@@ -85,15 +94,15 @@ winner = fine.rank_and_select(objective, candidates)
 print(f"Top Material: {winner.candidate.material_name} (Score: {winner.score})")
 ```
 
-For advanced usage integrating the `SimulationLayer` and `ReviewLayer`, see the [Documentation](https://shalom.readthedocs.io/en/latest/).
+For the full pipeline (Simulation + Review layers) and guidance on building custom agent hierarchies, see the [Documentation](https://shalom.readthedocs.io/en/latest/).
 
-## 📖 Documentation
+## Documentation
 Read the full API reference and tutorials on [ReadTheDocs](https://shalom.readthedocs.io).
 
-## 🤝 Contributing
+## Contributing
 We welcome contributions! Please review our [Contribution Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## 📝 Citation
+## Citation
 If you use SHALOM in your research, please cite our paper:
 ```bibtex
 @misc{shalom2026,
@@ -106,5 +115,5 @@ If you use SHALOM in your research, please cite our paper:
 }
 ```
 
-## 📄 License
+## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

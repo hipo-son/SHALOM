@@ -1,13 +1,61 @@
 Architecture
 ============
 
-The SHALOM framework relies on a closed-loop autonomous feedback mechanism to execute robust material discoveries.
-At its core, the simulated materials (as ASE `Atoms` objects) undergo geometric verification and VASP simulation testing.
+SHALOM is a **general-purpose hierarchical agent orchestration framework**. This page describes both the framework-level architecture and the material discovery pipeline that serves as the first proof-of-concept use case.
 
-Closed-Loop Feedback Loop
--------------------------
+Framework Architecture
+----------------------
 
-The following Mermaid diagram visualizes the autonomous self-correction cycle spanning across the three major agents:
+The framework provides four foundational layers that can be composed into arbitrary agent hierarchies:
+
+.. code-block:: text
+
+    +---------------------------------------------------------+
+    |              SHALOM Framework Architecture               |
+    +---------------------------------------------------------+
+    |                                                         |
+    |  +---------------------------------------------------+  |
+    |  |  Agent Framework                                  |  |
+    |  |  - Hierarchical agent composition                 |  |
+    |  |  - Typed Pydantic schema communication            |  |
+    |  |  - Role-based agents (Planner, Executor,          |  |
+    |  |    Evaluator, Critic)                              |  |
+    |  +---------------------------------------------------+  |
+    |                          |                              |
+    |  +---------------------------------------------------+  |
+    |  |  Tool System                                      |  |
+    |  |  - ASE structure builder                          |  |
+    |  |  - POSCAR/OUTCAR parsers                          |  |
+    |  |  - Structure validators (FormFiller)              |  |
+    |  +---------------------------------------------------+  |
+    |                          |                              |
+    |  +---------------------------------------------------+  |
+    |  |  Backend Layer                                    |  |
+    |  |  - SafeExecutor (sandboxed code execution)        |  |
+    |  |  - Slurm/MCP job submission                       |  |
+    |  |  - Cross-platform timeout enforcement             |  |
+    |  +---------------------------------------------------+  |
+    |                          |                              |
+    |  +---------------------------------------------------+  |
+    |  |  Provider Interface                               |  |
+    |  |  - LLMProvider (OpenAI, Anthropic)                |  |
+    |  |  - Structured output via Pydantic models          |  |
+    |  |  - Seed-locked deterministic prompts              |  |
+    |  +---------------------------------------------------+  |
+    |                                                         |
+    +---------------------------------------------------------+
+
+Key design principles:
+
+* **Composability** — Agents are assembled into hierarchies. A parent agent delegates subtasks to children and aggregates their results.
+* **Type safety** — All inter-agent communication uses Pydantic models. No free-form string passing between agents.
+* **Pluggability** — LLM backends, HPC schedulers, and tool implementations can be swapped without changing agent logic.
+* **Reproducibility** — Seed-locked prompts and structured outputs make every run traceable and repeatable.
+
+Use Case: Material Discovery Pipeline
+--------------------------------------
+
+The built-in material discovery pipeline demonstrates the framework by instantiating a three-layer closed-loop agent hierarchy:
 
 .. code-block:: mermaid
 
@@ -40,27 +88,48 @@ The following Mermaid diagram visualizes the autonomous self-correction cycle sp
         RM --> SL_GG
         SL_GG -- Code Generation --> ASE
         ASE -- exec() via SafeExecutor --> ATOMS
-        
+
         %% Simulation Validations
         ATOMS --> SL_FF
         SL_FF -- Validation Check --> SL_GG : Structure Invalid (Self-Correction)
         SL_FF -- Valid --> POSCAR
-        
+
         %% HPC
         POSCAR --> VASP
         VASP --> OUTCAR
-        
+
         %% Review & Feedback Loop
         OUTCAR --> RL
         RL -- Parsing --> RES
-        
+
         %% Closed-loop backward arrow
         RES -- Fail --> FB
         FB --> DL_CS : Inject Reason as Guidance
-        
+
         RES -- Success --> END((Success!))
 
+Layer Descriptions
+^^^^^^^^^^^^^^^^^^
+
+1. **Design Layer** — Triage-ranking architecture. The Coarse Selector screens 3–5 candidates; the Fine Selector ranks and picks the winner.
+2. **Simulation Layer** — Self-correcting geometry pipeline. The Geometry Generator produces ASE code, the Form Filler validates physical soundness, and the Geometry Reviewer orchestrates retries.
+3. **Review Layer** — Evaluates VASP output (energy, forces, convergence) and generates feedback for the next iteration.
+
 Verification Checkpoints
-------------------------
-* **Geometry Generator & Form Filler**: Deterministic checking to ensure that Python syntax behaves normally, and Atoms do not overlap.
-* **ReviewLayer Evaluation**: Evaluates physical property achievement parsing computational logs. Extracts parameters to generate the feedback loop.
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Geometry Generator & Form Filler**: Deterministic checking ensures Python syntax correctness and that atoms do not overlap.
+* **Review Layer Evaluation**: Parses computational logs to extract physical property metrics and generate the feedback loop.
+
+Extending SHALOM
+-----------------
+
+To build a new workflow (e.g., defect screening, catalyst optimization):
+
+1. Define Pydantic schemas for your domain-specific data.
+2. Implement agents that wrap ``LLMProvider.generate_structured_output()`` calls.
+3. Compose agents into a hierarchy with parent agents delegating to children.
+4. Use ``SafeExecutor`` for any LLM-generated code that needs sandboxed execution.
+5. Connect to HPC via the MCP tool interface if DFT calculations are required.
+
+The material discovery pipeline in ``shalom/agents/`` serves as a reference implementation.
