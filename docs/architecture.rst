@@ -25,12 +25,19 @@ The framework provides four foundational layers that can be composed into arbitr
     |  +---------------------------------------------------+  |
     |  |  Tool System                                      |  |
     |  |  - ASE structure builder                          |  |
-    |  |  - POSCAR/OUTCAR parsers                          |  |
+    |  |  - DFT I/O parsers (VASP, Quantum ESPRESSO)      |  |
     |  |  - Structure validators (FormFiller)              |  |
     |  +---------------------------------------------------+  |
     |                          |                              |
     |  +---------------------------------------------------+  |
-    |  |  Backend Layer                                    |  |
+    |  |  DFT Backend Layer                                |  |
+    |  |  - Quantum ESPRESSO (open-source, local)          |  |
+    |  |  - VASP (licensed, HPC/Slurm)                     |  |
+    |  |  - Unified solver abstraction                     |  |
+    |  +---------------------------------------------------+  |
+    |                          |                              |
+    |  +---------------------------------------------------+  |
+    |  |  Execution & HPC Layer                            |  |
     |  |  - SafeExecutor (sandboxed code execution)        |  |
     |  |  - Slurm/MCP job submission                       |  |
     |  |  - Cross-platform timeout enforcement             |  |
@@ -49,8 +56,32 @@ Key design principles:
 
 * **Composability** — Agents are assembled into hierarchies. A parent agent delegates subtasks to children and aggregates their results.
 * **Type safety** — All inter-agent communication uses Pydantic models. No free-form string passing between agents.
-* **Pluggability** — LLM backends, HPC schedulers, and tool implementations can be swapped without changing agent logic.
+* **Pluggability** — LLM backends, DFT solvers (Quantum ESPRESSO / VASP), HPC schedulers, and tool implementations can be swapped without changing agent logic.
 * **Reproducibility** — Seed-locked prompts and structured outputs make every run traceable and repeatable.
+
+DFT Backend Strategy
+^^^^^^^^^^^^^^^^^^^^
+
+SHALOM supports two first-class DFT backends to serve both individual researchers and HPC-equipped teams:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 15 30 35
+
+   * - Backend
+     - License
+     - Typical Environment
+     - I/O Formats
+   * - **Quantum ESPRESSO**
+     - Open-source (GPL)
+     - Personal workstations, small clusters
+     - ``pw.x`` input / XML output
+   * - **VASP**
+     - Commercial license
+     - HPC clusters with Slurm
+     - POSCAR, INCAR, KPOINTS / OUTCAR
+
+A unified DFT abstraction layer ensures agents operate on a common schema (structure in, energy/forces/convergence out) regardless of the underlying solver. This lets researchers prototype locally with Quantum ESPRESSO and then scale to VASP on institutional HPC without changing any agent logic.
 
 Use Case: Material Discovery Pipeline
 --------------------------------------
@@ -71,10 +102,10 @@ The built-in material discovery pipeline demonstrates the framework by instantia
         ASE["ASE Python Code"]
         ATOMS[("ASE Atoms Object")]
         SL_FF["Form Filler\n(Simulation Layer)"]
-        POSCAR[("POSCAR File")]
+        INPUT[("DFT Input Files\n(POSCAR / pw.x input)")]
 
-        VASP["VASP Simulation\n(HPC/Local)"]
-        OUTCAR[("OUTCAR File")]
+        DFT["DFT Solver\n(QE or VASP)"]
+        OUTPUT[("DFT Output\n(XML / OUTCAR)")]
 
         RL["Review Agent\n(Review Layer)"]
         RES["ReviewResult\n(Success & Metrics)"]
@@ -92,14 +123,14 @@ The built-in material discovery pipeline demonstrates the framework by instantia
         %% Simulation Validations
         ATOMS --> SL_FF
         SL_FF -- Validation Check --> SL_GG : Structure Invalid (Self-Correction)
-        SL_FF -- Valid --> POSCAR
+        SL_FF -- Valid --> INPUT
 
-        %% HPC
-        POSCAR --> VASP
-        VASP --> OUTCAR
+        %% DFT Execution
+        INPUT --> DFT
+        DFT --> OUTPUT
 
         %% Review & Feedback Loop
-        OUTCAR --> RL
+        OUTPUT --> RL
         RL -- Parsing --> RES
 
         %% Closed-loop backward arrow
@@ -113,7 +144,7 @@ Layer Descriptions
 
 1. **Design Layer** — Triage-ranking architecture. The Coarse Selector screens 3–5 candidates; the Fine Selector ranks and picks the winner.
 2. **Simulation Layer** — Self-correcting geometry pipeline. The Geometry Generator produces ASE code, the Form Filler validates physical soundness, and the Geometry Reviewer orchestrates retries.
-3. **Review Layer** — Evaluates VASP output (energy, forces, convergence) and generates feedback for the next iteration.
+3. **Review Layer** — Evaluates DFT output (energy, forces, convergence) from either Quantum ESPRESSO or VASP and generates feedback for the next iteration.
 
 Verification Checkpoints
 ^^^^^^^^^^^^^^^^^^^^^^^^^

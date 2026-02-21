@@ -29,6 +29,7 @@ Existing LLM-agent systems are either too general (lacking domain primitives for
 - **Hierarchical agent composition** — Nest agents in configurable layers (planning, execution, evaluation, auditing) that communicate via typed Pydantic schemas.
 - **Secure sandboxed execution** — Run LLM-generated Python/ASE code safely with import restrictions, timeouts, and resource limits.
 - **Pluggable LLM backends** — Swap between OpenAI, Anthropic, or custom providers with a single parameter change.
+- **Dual DFT backend support** — Quantum ESPRESSO (open-source, personal workstations) and VASP (licensed, HPC clusters) as first-class DFT solvers, with a unified abstraction layer.
 - **HPC-native design** — First-class Slurm/MCP integration for submitting and monitoring jobs on supercomputers.
 - **Deterministic reproducibility** — Seed-locked prompts and structured outputs ensure every run is traceable and repeatable.
 
@@ -45,18 +46,27 @@ To validate the framework, SHALOM ships with a complete **material discovery pip
 +------------------------------v------------------------------+
 |                   2. SIMULATION LAYER                       |
 |  (Geometry Generator) -> SafeExecutor -> (Form Filler)      |
-|           ^                                 | POSCAR        |
+|           ^                                 | Input Files   |
 |           | (Self-Correction Loop)          v               |
 +-----------|-------------------------------------------------+
-            |                                 | HPC Execution
-            | Feedback                        v OUTCAR
+            |                                 | DFT Execution
+            | Feedback                        v (QE or VASP)
 +-----------|-------------------------------------------------+
 |           |         3. REVIEW LAYER                         |
-|  (Review Agent) <- Evaluate VASP Output (Energy, Forces)    |
+|  (Review Agent) <- Evaluate DFT Output (Energy, Forces)     |
 +-------------------------------------------------------------+
 ```
 
 This pipeline is one instantiation of the SHALOM framework. The same core components — `LLMProvider`, `SafeExecutor`, Pydantic schemas, and the agent base classes — can be reused to build entirely different workflows (e.g., defect screening, catalyst optimization, phase-diagram exploration).
+
+### Supported DFT Backends
+
+| Backend | License | Typical Environment | I/O Formats |
+|---------|---------|---------------------|-------------|
+| **Quantum ESPRESSO** | Open-source (GPL) | Personal workstations, small clusters | `pw.x` input / XML output |
+| **VASP** | Commercial license | HPC clusters with Slurm | POSCAR, INCAR, KPOINTS / OUTCAR |
+
+SHALOM abstracts DFT-specific details behind a unified interface so that agents operate on the same schema regardless of the solver. Individual researchers can prototype with Quantum ESPRESSO locally, then scale to VASP on institutional HPC resources without changing agent logic.
 
 ## Installation
 

@@ -50,12 +50,23 @@ The `SafeExecutor` provides a secure environment for running LLM-generated Pytho
 - Cross-platform timeout enforcement (SIGALRM on POSIX, ThreadPoolExecutor on Windows).
 - Explicit allowlists for injected variables (e.g., ASE's `bulk`, `surface`).
 
-### 2.4 HPC Integration (MCP)
+### 2.4 Dual DFT Backend
+
+SHALOM treats the DFT solver as a swappable backend behind a unified abstraction:
+
+| Backend | License | Typical Environment | I/O Formats |
+|---------|---------|---------------------|-------------|
+| **Quantum ESPRESSO** | Open-source (GPL) | Personal workstations, small clusters | `pw.x` input / XML output |
+| **VASP** | Commercial license | HPC clusters with Slurm | POSCAR, INCAR, KPOINTS / OUTCAR |
+
+Individual researchers typically use **Quantum ESPRESSO** for local prototyping and validation; groups with institutional HPC resources use **VASP** for production-scale screening. Agents operate on a common schema (structure → energy/forces/convergence) so switching backends requires no changes to agent logic.
+
+### 2.5 HPC Integration (MCP)
 
 The MCP-based integration module provides controlled HPC access:
 
-- **VASP-Slurm MCP Server**: Predefined tools (`submit_slurm_job`, `check_job_status`, `read_vasp_outcar`, etc.) ensure the LLM can only access HPC through safe, auditable interfaces.
-- **Self-Correction Algorithm**: When SCF fails, the review agent parses logs, adjusts parameters, and resubmits.
+- **DFT-Slurm MCP Server**: Predefined tools (`submit_slurm_job`, `check_job_status`, `read_dft_output`, etc.) ensure the LLM can only access HPC through safe, auditable interfaces. Separate tool implementations handle VASP and Quantum ESPRESSO specifics.
+- **Self-Correction Algorithm**: When SCF fails, the review agent parses logs, adjusts parameters (INCAR for VASP, input namelist for QE), and resubmits.
 
 ## 3. Proof-of-Concept: Material Discovery Pipeline
 
@@ -70,7 +81,7 @@ To prevent random exploration and reduce computational cost, a triage-ranking ar
 
 ### 3.2 Simulation Layer — Pre-Validation and Automation
 
-A three-step self-correction loop validates the physical soundness of POSCAR files before submitting jobs to HPC resources:
+A three-step self-correction loop validates the physical soundness of DFT input files (POSCAR for VASP, `pw.x` input for QE) before submitting jobs:
 
 - **Geometry Generator**: Writes ASE-based Python scripts from natural language requirements to produce initial structures.
 - **Form Filler**: Analyzes the generated structure, evaluating layer count, vacuum thickness, atomic overlap, etc., using a standardized form.
@@ -78,7 +89,7 @@ A three-step self-correction loop validates the physical soundness of POSCAR fil
 
 ### 3.3 Review Layer — Result Evaluation
 
-- Parses VASP OUTCAR files to extract convergence status, total energy, forces, and band structure.
+- Parses DFT output files (VASP OUTCAR or QE XML) to extract convergence status, total energy, forces, and band structure.
 - Determines whether the target objective was achieved.
 - On failure, generates structured feedback that is injected back into the Design Layer, closing the loop.
 
@@ -86,7 +97,7 @@ A three-step self-correction loop validates the physical soundness of POSCAR fil
 
 - **Phase 1: Core Library & MCP Environment Setup** — Python library structure, ASE-based Geometry Generator prompts, and Form Filler setup. *(Current)*
 - **Phase 2: Triage-Ranking Agent Loop** — Coarse/Fine Selector prompt pipeline construction.
-- **Phase 3: HPC VASP Integration & Self-Correction** — Slurm integration, end-to-end testing with bulk materials.
+- **Phase 3: DFT Integration & Self-Correction** — Quantum ESPRESSO local runner, VASP-Slurm HPC integration, end-to-end testing with bulk materials.
 - **Phase 4: Advanced Use Cases & Open-Source Release** — Extension to 2D/TMD systems, new workflow templates (defect screening, catalyst design), search performance metrics tooling.
 
 ## 5. Software Architecture
@@ -96,6 +107,7 @@ Library-centric design implemented in Python for reproducibility and HPC integra
 | Layer | Components |
 |-------|------------|
 | **Agent Framework** | Base agent classes, hierarchical composition, schema-driven communication |
-| **Tool System** | ASE builder, POSCAR/OUTCAR parsers, structure validators |
-| **Backend Layer** | Slurm job submission, MCP server, SafeExecutor sandbox |
+| **Tool System** | ASE builder, DFT I/O parsers (VASP POSCAR/OUTCAR, QE pw.x/XML), structure validators |
+| **DFT Backend** | Quantum ESPRESSO (local), VASP (HPC), unified solver abstraction |
+| **Execution Layer** | Slurm job submission, MCP server, SafeExecutor sandbox |
 | **Provider Interface** | LLMProvider (OpenAI, Anthropic), structured output enforcement |
