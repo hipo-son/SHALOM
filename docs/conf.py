@@ -7,8 +7,8 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'SHALOM'
-copyright = '2026, SHALOM Contributors'
-author = 'SHALOM Contributors'
+copyright = '2026, Shinwon Son'
+author = 'Shinwon Son'
 release = '0.1.0'
 
 # -- General configuration ---------------------------------------------------

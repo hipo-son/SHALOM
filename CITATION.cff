@@ -3,9 +3,8 @@ title: 'SHALOM: System of Hierarchical Agents for Logical Orchestration of Mater
 message: 'If you use this software, please cite it as below.'
 type: software
 authors:
-  - given-names: User
-    family-names: Name
-    affiliation: Organization
+  - given-names: Shinwon
+    family-names: Son
 repository-code: 'https://github.com/hipo-son/SHALOM'
 url: 'https://github.com/hipo-son/SHALOM'
 abstract: >-

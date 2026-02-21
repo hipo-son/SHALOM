@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "SHALOM Contributors"}
+    {name = "Shinwon Son", email = "hiposon214@gmail.com"}
 ]
 keywords = ["materials-science", "llm", "multi-agent", "dft", "ase", "autonomous-discovery"]
 classifiers = [

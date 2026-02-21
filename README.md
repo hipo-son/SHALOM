@@ -116,7 +116,7 @@ We welcome contributions! Please review our [Contribution Guidelines](CONTRIBUTI
 If you use SHALOM in your research, please cite our paper:
 ```bibtex
 @misc{shalom2026,
-  author = {User Name and SHALOM Contributors},
+  author = {Shinwon Son},
   title = {SHALOM: System of Hierarchical Agents for Logical Orchestration of Materials},
   year = {2026},
   publisher = {GitHub},
