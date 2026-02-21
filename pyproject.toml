@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentmat"
+name = "shalom"
 version = "0.1.0"
 description = "Multi-Agent Autonomous Materials Discovery Framework"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "AgentMat Contributors"}
+    {name = "SHALOM Contributors"}
 ]
 dependencies = [
     "ase>=3.22.1",
