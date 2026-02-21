@@ -66,6 +66,9 @@ venv.bak/
 *.swp
 *.swo
 
+# Sphinx documentation
+docs/_build/
+
 # Project specific
 logs/
 data/
