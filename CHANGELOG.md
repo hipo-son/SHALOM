@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Token-aware error log compression** (`shalom/backends/_compression.py`)
+  - `compress_error_log()`: keyword-preserving + tail extraction with token budget enforcement
+  - `truncate_to_tokens()`, `truncate_list()`, `estimate_tokens()` utilities
+  - Loads VASP error keywords from `error_patterns.yaml` (single source of truth)
+- **QE error_log support** — `qe.py` now attaches compressed error log for unconverged runs
+- **Agent Guidelines** (`AGENT_GUIDELINES.md`) with QE-specific domain knowledge (Rydberg units, SSSP, magnetism, 2D)
+- 44 new tests (643 total, 95.6% coverage): compression utilities, CLI cmd_run/main, QE error_log, review physics checks
 - **Configuration externalization system** (`_config_loader.py`, `_config_schemas.py`, `_defaults.py`)
   - `load_prompt(name)` loads LLM system prompts from `shalom/prompts/*.md`
   - `load_config(name)` loads physics/VASP settings from `shalom/config/*.yaml`
@@ -26,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hubbard U functional dependency tag (`functional: "PBE"`)
 
 ### Changed
+- `vasp.py` error log uses `compress_error_log()` (replaces raw `lines[-100:]` slice)
+- `review_layer.py` caps `correction_history` at 20 entries, token-budget-aware error log insertion (80K default)
+- `base.py` `DFTResult.error_log` documented as compressed (not for `scan_for_errors()`)
+- Ionic step history (`energies`, `forces_history`, `magmoms`) capped at 50 entries in VASP/QE backends
 - Agent system prompts externalized from Python strings to `shalom/prompts/*.md`:
   - `design_layer.py`: CoarseSelector, FineSelector prompts
   - `evaluators.py`: 6 specialist evaluator prompts + confidence rule + weights/thresholds
@@ -35,7 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `vasp_config.py`: POTCAR mapping, ENMAX values, MAGMOM defaults, Hubbard U, metallic elements, INCAR presets
   - `error_recovery.py`: error patterns, correction strategies
 - **Net code reduction: -404 lines hardcoded data, +53 lines loader calls** (7 modified files)
-- All 321 existing tests pass unchanged (zero behavioral change)
+- All existing tests pass unchanged (zero behavioral change)
+
+### Fixed
+- `llm_provider.py`: removed duplicate `raise ValueError` (dead code on line 113)
 
 ### Previous [Unreleased] changes
 - GitHub Actions CI/CD workflows for testing, linting, and PyPI release

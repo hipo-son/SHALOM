@@ -59,7 +59,7 @@ Thank you for your interest in contributing to SHALOM! We welcome contributions 
    pytest
    ruff check shalom/ tests/
    black --check shalom/ tests/
-   mypy shalom/
+   mypy shalom/ --ignore-missing-imports
    ```
 4. Open a Pull Request referencing any related issues.
 5. Wait for CI workflow checks (GitHub Actions) to pass and for team review.

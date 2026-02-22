@@ -9,6 +9,7 @@ shalom/
 ├── agents/           # LLM agent layers (Design, Simulation, Review)
 ├── backends/         # DFT backends (VASP, QE) + error recovery
 │   ├── _physics.py   # Shared physics constants (AccuracyLevel, MAGMOM, detect_2d, etc.)
+│   ├── _compression.py # Token-aware error log compression (compress_error_log, truncate_to_tokens)
 │   ├── vasp.py       # VASP backend (write_input, parse_output)
 │   ├── vasp_config.py # VASP config (VASPInputConfig, get_preset)
 │   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out)

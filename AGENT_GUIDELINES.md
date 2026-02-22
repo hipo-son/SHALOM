@@ -39,8 +39,8 @@ When generating computational setups (VASP, QE, LAMMPS), agents must prioritize 
 *   **ecutrho:** Per-element from SSSP metadata (not blanket 8×ecutwfc).
 
 ### Error Handling & Self-Correction (The Review Layer)
-When analyzing a failed run, follow the **Smart Truncation Strategy**:
-1.  Do not read the entire output file. Focus on the tail (last 100 lines) and specific error keywords (e.g., `BRMIX`, `EDDDAV`, `ZPOTRF`).
+When analyzing a failed run, the framework applies **automatic context compression** via `compress_error_log()` in `shalom/backends/_compression.py`:
+1.  Error keywords (loaded from `error_patterns.yaml`) are preserved with ±3 lines of context, plus the tail of the output. The result is truncated to a token budget before LLM evaluation.
 2.  If electronic steps fail to converge (e.g., hitting `NELM` without reaching `EDIFF`):
     *   Retry with modified mixing parameters (`AMIX`, `BMIX`).
     *   Change the algorithm (`ALGO = Fast` $\to$ `Normal` $\to$ `VeryFast`).

@@ -72,7 +72,7 @@ SHALOM abstracts DFT-specific details behind a unified interface so that agents 
 
 ```bash
 pip install shalom            # core dependencies
-pip install shalom[all]       # includes pymatgen, HPC toolkits, docs
+pip install shalom[all]       # includes pymatgen, mp-api, dev tools, docs, demo
 pip install -e ".[dev]"       # development (tests, linting, type-checking)
 ```
 
@@ -105,6 +105,17 @@ print(f"Top Material: {winner.candidate.material_name} (Score: {winner.score})")
 ```
 
 For the full pipeline (Simulation + Review layers) and guidance on building custom agent hierarchies, see the [Documentation](https://shalom.readthedocs.io/en/latest/).
+
+## CLI Usage
+
+Generate DFT input files directly from Materials Project IDs or local structure files:
+
+```bash
+python -m shalom run mp-19717                              # VASP vc-relax (default)
+python -m shalom run Fe2O3 --backend qe --calc scf         # QE SCF
+python -m shalom run --structure POSCAR --backend vasp      # Local file
+python -m shalom run mp-19717 --set ENCUT=600               # Override parameters
+```
 
 ## Quick Demo
 
