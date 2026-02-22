@@ -10,6 +10,7 @@ Output parsing: regex-based on pw.x stdout (not XML — simpler, sufficient for
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -17,11 +18,14 @@ from typing import Any, Dict, List, Optional
 
 from ase import Atoms
 
+from shalom.backends._compression import compress_error_log, truncate_list
 from shalom.backends.base import DFTResult
 from shalom.backends.qe_config import (
     QEInputConfig,
     get_qe_preset,
 )
+
+logger = logging.getLogger(__name__)
 
 # Unit conversions
 RY_TO_EV = 13.6057
@@ -220,7 +224,26 @@ class QEBackend:
                 "Expected pw.out, pwscf.out, or espresso.out."
             )
 
-        return self._parse_pw_output(out_path)
+        result = self._parse_pw_output(out_path)
+
+        # Smart Context Compression: attach error log for unconverged QE runs
+        if not result.is_converged:
+            try:
+                with open(out_path, "r", encoding="utf-8") as f:
+                    full_text = f.read()
+                result.error_log = compress_error_log(
+                    full_text,
+                    important_patterns=[],  # No QE error recovery system yet
+                    tail_lines=50,
+                )
+            except Exception:
+                logger.debug("Error log extraction failed for %s", out_path)
+
+        # Cap ionic history lists
+        result.ionic_energies = truncate_list(result.ionic_energies, 50)
+        result.ionic_forces_max = truncate_list(result.ionic_forces_max, 50)
+
+        return result
 
     def _parse_pw_output(self, filepath: str) -> DFTResult:
         """Parse pw.x stdout using regex patterns."""

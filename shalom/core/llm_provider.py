@@ -77,6 +77,8 @@ class LLMProvider:
     ) -> T:
         """Send a prompt to the LLM and receive structured JSON conforming to ``response_model``.
 
+        Automatically injects domain knowledge from `AGENT_GUIDELINES.md` into the system prompt.
+
         Args:
             system_prompt: System-level instruction for the LLM.
             user_prompt: User-level prompt describing the task.
@@ -90,10 +92,23 @@ class LLMProvider:
             Anthropic API does not support the ``seed`` parameter; it is
             silently ignored for reproducibility intent only.
         """
+        # Inject central domain guidelines into the system prompt
+        guidelines_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "AGENT_GUIDELINES.md"
+        )
+        try:
+            with open(guidelines_path, "r", encoding="utf-8") as f:
+                guidelines = f.read()
+            injected_system_prompt = f"{guidelines}\n\n=== TASK SPECIFIC INSTRUCTIONS ===\n{system_prompt}"
+        except FileNotFoundError:
+            logger.warning("AGENT_GUIDELINES.md not found. Proceeding with raw system prompt.")
+            injected_system_prompt = system_prompt
+
         if self.provider_type == "openai":
-            return self._call_openai_structured(system_prompt, user_prompt, response_model, seed)
+            return self._call_openai_structured(injected_system_prompt, user_prompt, response_model, seed)
         elif self.provider_type == "anthropic":
-            return self._call_anthropic_structured(system_prompt, user_prompt, response_model, seed)
+            return self._call_anthropic_structured(injected_system_prompt, user_prompt, response_model, seed)
         raise ValueError(f"Provider {self.provider_type} lacks structured output handling.")
 
     def _call_openai_structured(

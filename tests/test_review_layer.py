@@ -195,3 +195,71 @@ class TestEvaluateEnrichedPrompt:
         assert "Entropy" not in prompt
         assert "Error Correction History" not in prompt
         assert "Physics Validation Warnings" not in prompt
+
+    def test_error_log_in_prompt(self, mock_llm):
+        """error_log is included in evaluation prompt when present."""
+        dft = DFTResult(
+            energy=-10.0,
+            error_log="ZBRENT: serious warning\nSome tail content\n",
+        )
+        prompt = self._call_evaluate(mock_llm, dft)
+        assert "Error Log" in prompt
+        assert "ZBRENT" in prompt
+
+    def test_error_log_absent_when_none(self, mock_llm):
+        """error_log section is absent when error_log is None."""
+        dft = DFTResult(energy=-10.0, is_converged=True)
+        prompt = self._call_evaluate(mock_llm, dft)
+        assert "Error Log" not in prompt
+
+    def test_correction_history_capped_at_20(self, mock_llm):
+        """correction_history is capped to last 20 entries."""
+        history = [
+            {"error_type": f"ERR_{i}", "action": f"fix_{i}"}
+            for i in range(30)
+        ]
+        dft = DFTResult(energy=-10.0, correction_history=history)
+        prompt = self._call_evaluate(mock_llm, dft)
+        # ERR_0 through ERR_9 should be dropped (first 10 of 30)
+        assert "ERR_0:" not in prompt
+        assert "ERR_9:" not in prompt
+        # ERR_10 through ERR_29 should be present (last 20)
+        assert "ERR_10" in prompt
+        assert "ERR_29" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Physics validation checks
+# ---------------------------------------------------------------------------
+
+
+class TestPhysicsChecks:
+    """Tests for _run_physics_checks static method."""
+
+    def test_entropy_warning(self):
+        """High entropy triggers warning."""
+        dft = DFTResult(energy=-10.0, entropy_per_atom=0.005)
+        warnings = ReviewAgent._run_physics_checks(dft)
+        assert any("Entropy" in w for w in warnings)
+        assert any("SIGMA" in w for w in warnings)
+
+    def test_no_entropy_warning_below_threshold(self):
+        """Low entropy does NOT trigger warning."""
+        dft = DFTResult(energy=-10.0, entropy_per_atom=0.0005)
+        warnings = ReviewAgent._run_physics_checks(dft)
+        assert not any("Entropy" in w for w in warnings)
+
+    def test_brmix_warning(self):
+        """BRMIX in correction_history triggers warning."""
+        dft = DFTResult(
+            energy=-10.0,
+            correction_history=[{"error_type": "BRMIX", "action": "AMIX=0.1"}],
+        )
+        warnings = ReviewAgent._run_physics_checks(dft)
+        assert any("BRMIX" in w for w in warnings)
+
+    def test_no_warnings_clean_result(self):
+        """Clean result produces no warnings."""
+        dft = DFTResult(energy=-10.0, forces_max=0.01, is_converged=True)
+        warnings = ReviewAgent._run_physics_checks(dft)
+        assert warnings == []

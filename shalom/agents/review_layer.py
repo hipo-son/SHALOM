@@ -1,11 +1,18 @@
+import logging
 import os
 import warnings
 from typing import Any, Dict, List, Optional
 
 from shalom._config_loader import load_prompt
+from shalom.backends._compression import estimate_tokens, truncate_to_tokens
 from shalom.backends.base import DFTBackend, DFTResult
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import ReviewResult
+
+logger = logging.getLogger(__name__)
+
+# Conservative input token limit for unknown models.
+_DEFAULT_INPUT_TOKEN_LIMIT = 80_000
 
 
 class ReviewAgent:
@@ -128,6 +135,9 @@ class ReviewAgent:
         """
         physics_warnings = self._run_physics_checks(dft_result)
 
+        # Cap correction_history to avoid unbounded prompt growth
+        capped_history = dft_result.correction_history[-20:] if dft_result.correction_history else []
+
         # Build enriched prompt with all available data
         lines = [
             f"Target Objective: {target_objective}",
@@ -144,10 +154,10 @@ class ReviewAgent:
         if dft_result.entropy_per_atom is not None:
             lines.append(f"- Entropy T*S/atom: {dft_result.entropy_per_atom:.6f} eV")
 
-        if dft_result.correction_history:
+        if capped_history:
             lines.append("")
             lines.append("Error Correction History:")
-            for entry in dft_result.correction_history:
+            for entry in capped_history:
                 lines.append(f"  - {entry.get('error_type', 'unknown')}: {entry.get('action', '')}")
 
         if physics_warnings:
@@ -159,7 +169,35 @@ class ReviewAgent:
         lines.append("")
         lines.append("Please analyze these results and output the ReviewResult structure.")
 
-        user_prompt = "\n".join(lines)
+        base_prompt = "\n".join(lines)
+
+        # Token-budget-aware error log insertion
+        if dft_result.error_log:
+            system_tokens = estimate_tokens(self.system_prompt)
+            base_tokens = estimate_tokens(base_prompt)
+            available = _DEFAULT_INPUT_TOKEN_LIMIT - system_tokens - base_tokens - 1000
+
+            error_text = dft_result.error_log
+            if available > 0 and estimate_tokens(error_text) > available:
+                logger.warning(
+                    "Error log (%d est. tokens) exceeds budget (%d). Truncating.",
+                    estimate_tokens(error_text), available,
+                )
+                error_text = truncate_to_tokens(error_text, max(500, available))
+
+            error_block = (
+                "\nTruncated Error Log (Context Compression applied):\n"
+                "```text\n"
+                f"{error_text}\n"
+                "```\n"
+            )
+            # Insert before the final instruction line
+            user_prompt = base_prompt.replace(
+                "\nPlease analyze these results",
+                error_block + "\nPlease analyze these results",
+            )
+        else:
+            user_prompt = base_prompt
 
         return self.llm.generate_structured_output(
             system_prompt=self.system_prompt,

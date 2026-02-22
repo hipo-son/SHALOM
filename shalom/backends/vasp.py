@@ -7,6 +7,7 @@ extraction and optional pymatgen acceleration.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -15,11 +16,14 @@ from typing import Any, Dict, List, Optional
 from ase import Atoms
 from ase.io import write
 
+from shalom.backends._compression import compress_error_log, truncate_list
 from shalom.backends.base import DFTResult
 from shalom.backends.vasp_config import (
     VASPInputConfig,
     get_potcar_variant,
 )
+
+logger = logging.getLogger(__name__)
 
 # Optional pymatgen — module-level import for thread safety.
 try:
@@ -219,7 +223,8 @@ class VASPBackend:
         """Parse VASP OUTCAR and return a unified DFTResult.
 
         Uses pymatgen if available for comprehensive parsing, otherwise
-        falls back to regex-based OUTCAR parsing.
+        falls back to regex-based OUTCAR parsing. Also performs smart context
+        compression by extracting the tail of the OUTCAR if the run failed.
 
         Args:
             directory: Directory containing the OUTCAR file.
@@ -235,8 +240,24 @@ class VASPBackend:
             raise FileNotFoundError(f"OUTCAR file not found: {outcar_path}")
 
         if _PYMATGEN_AVAILABLE:
-            return self._parse_with_pymatgen(directory)
-        return self._parse_regex(outcar_path)
+            result = self._parse_with_pymatgen(directory)
+        else:
+            result = self._parse_regex(outcar_path)
+
+        # Smart Context Compression: keyword-aware + tail truncation
+        if not result.is_converged:
+            try:
+                with open(outcar_path, "r", encoding="utf-8") as f:
+                    full_text = f.read()
+                result.error_log = compress_error_log(full_text)
+            except Exception:
+                logger.debug("Error log extraction failed for %s", outcar_path)
+
+        # Cap ionic history lists (prevent unbounded growth in long relaxations)
+        result.ionic_energies = truncate_list(result.ionic_energies, 50)
+        result.ionic_forces_max = truncate_list(result.ionic_forces_max, 50)
+
+        return result
 
     def _parse_with_pymatgen(self, directory: str) -> DFTResult:
         """Parse using pymatgen Vasprun/Outcar for comprehensive data extraction."""

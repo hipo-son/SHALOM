@@ -21,6 +21,35 @@ Thank you for your interest in contributing to SHALOM! We welcome contributions 
 - **Docstrings**: We use the *Google Style* for docstrings (in English) across all classes and methods.
 - **Tests**: All new features and bug fixes must include tests. High test coverage (>85%) is expected. We use `pytest`.
 
+## Adding New Components
+
+### New Prompt
+1. Create `shalom/prompts/your_name.md` with the prompt text.
+2. Add the **identical** text to `shalom/_defaults.py` in the `PROMPTS` dict.
+3. Use `load_prompt("your_name")` in agent code.
+
+### New Config (YAML)
+1. Create `shalom/config/your_name.yaml`.
+2. Add the **identical** data to `shalom/_defaults.py` in the `CONFIGS` dict.
+3. (Optional) Add a Pydantic validation schema in `shalom/_config_schemas.py` if the config is safety-critical.
+4. Use `load_config("your_name")` in consuming code.
+
+### New DFT Backend
+1. Create a new module in `shalom/backends/` (e.g., `lammps.py`).
+2. Implement the `DFTBackend` protocol defined in `shalom/backends/base.py`:
+   - `name: str` — backend identifier
+   - `write_input(atoms, directory, **params) -> str`
+   - `parse_output(directory) -> DFTResult`
+3. Add an `elif` branch in `shalom/backends/__init__.py` `get_backend()`.
+4. Add tests in `tests/test_<backend_name>.py`.
+
+### New Evaluator (Specialist Perspective)
+1. Create prompt: `shalom/prompts/eval_new.md` + add to `_defaults.py` PROMPTS dict.
+2. Add `load_prompt("eval_new")` as a module-level variable in `evaluators.py`.
+3. Add the variable to `_DEFAULT_PROMPTS` dict in `evaluators.py`.
+4. Add weight + veto_threshold in `config/evaluator_weights.yaml` + `_defaults.py`.
+5. Add to `create_default_evaluators()` factory in `evaluators.py`.
+
 ## Pull Request Workflow
 
 1. Create a descriptive branch (e.g., `feature/add-new-agent`, `fix/import-bug`).

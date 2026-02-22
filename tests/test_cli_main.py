@@ -1,5 +1,7 @@
 """Tests for shalom.__main__ CLI module."""
 
+import pytest
+
 from shalom.__main__ import build_parser, _parse_set_values
 
 
@@ -149,3 +151,190 @@ class TestParseSetValues:
         """'KEY=a=b' → value is 'a=b'."""
         result = _parse_set_values(["PATH=a=b"])
         assert result["PATH"] == "a=b"
+
+
+# ---------------------------------------------------------------------------
+# cmd_run tests
+# ---------------------------------------------------------------------------
+
+
+class TestCmdRun:
+    def _make_args(self, **overrides):
+        """Build a minimal argparse.Namespace for cmd_run."""
+        import argparse
+        defaults = dict(
+            material=None, structure=None, backend="vasp", calc=None,
+            accuracy="standard", set_values=None, output=None,
+            pseudo_dir=None, no_validate=False, force=False,
+            quiet=True, verbose=False, command="run",
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_no_material_no_structure(self, capsys):
+        """Neither material nor structure → returns 1."""
+        from shalom.__main__ import cmd_run
+        args = self._make_args(quiet=False)
+        rc = cmd_run(args)
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.out or "Provide" in captured.out
+
+    def test_mp_not_installed(self):
+        """Material given but mp-api not available → returns 1."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_run
+        args = self._make_args(material="mp-19717", quiet=True)
+        with patch("shalom.mp_client.is_mp_available", return_value=False):
+            rc = cmd_run(args)
+        assert rc == 1
+
+    def test_vasp_success(self, tmp_path):
+        """Successful VASP run with local structure file."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_run
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.backend_name = "vasp"
+        mock_result.structure_info = None
+        mock_result.auto_detected = {"ENCUT": 520}
+        mock_result.output_dir = str(tmp_path)
+        mock_result.files_generated = ["POSCAR", "INCAR"]
+
+        args = self._make_args(structure="POSCAR", quiet=False)
+        with patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig"):
+            rc = cmd_run(args)
+        assert rc == 0
+
+    def test_qe_success(self, tmp_path):
+        """Successful QE run prints QE-specific instructions."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_run
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.backend_name = "qe"
+        mock_result.structure_info = None
+        mock_result.auto_detected = {"ecutwfc": 60}
+        mock_result.output_dir = str(tmp_path)
+        mock_result.files_generated = ["pw.in"]
+
+        args = self._make_args(structure="POSCAR", backend="qe", quiet=False)
+        with patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig"):
+            rc = cmd_run(args)
+        assert rc == 0
+
+    def test_failure_returns_1(self, capsys):
+        """Failed run returns 1 and prints error."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_run
+
+        mock_result = MagicMock()
+        mock_result.success = False
+        mock_result.error = "Something went wrong"
+
+        args = self._make_args(structure="POSCAR", quiet=False)
+        with patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig"):
+            rc = cmd_run(args)
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "Something went wrong" in captured.out
+
+    def test_set_values_passed(self, tmp_path):
+        """--set KEY=VALUE is parsed and passed to DirectRunConfig."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_run
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.backend_name = "vasp"
+        mock_result.structure_info = None
+        mock_result.auto_detected = {}
+        mock_result.output_dir = str(tmp_path)
+        mock_result.files_generated = []
+
+        mock_config_cls = MagicMock()
+
+        args = self._make_args(
+            structure="POSCAR", set_values=["ENCUT=600"], quiet=True
+        )
+        with patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig", mock_config_cls):
+            rc = cmd_run(args)
+        assert rc == 0
+        # Verify user_settings was passed with ENCUT=600
+        config_call = mock_config_cls.call_args
+        assert config_call.kwargs.get("user_settings") == {"ENCUT": 600}
+
+    def test_mp_info_printed(self, tmp_path, capsys):
+        """MP structure info is printed when available."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_run
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.backend_name = "vasp"
+        mock_result.structure_info = {
+            "mp_id": "mp-19717",
+            "formula": "Cu",
+            "energy_above_hull": 0.0,
+            "space_group": "Fm-3m",
+        }
+        mock_result.auto_detected = {}
+        mock_result.output_dir = str(tmp_path)
+        mock_result.files_generated = ["POSCAR"]
+
+        args = self._make_args(structure="POSCAR", quiet=False)
+        with patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig"):
+            rc = cmd_run(args)
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "mp-19717" in captured.out
+        assert "Fm-3m" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# main() tests
+# ---------------------------------------------------------------------------
+
+
+class TestMain:
+    def test_no_command_prints_help(self, capsys):
+        """No subcommand → prints help and exits 0."""
+        import sys
+        from unittest.mock import patch
+        from shalom.__main__ import main
+        with patch.object(sys, "argv", ["shalom"]), \
+             pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+
+    def test_verbose_sets_debug(self):
+        """--verbose flag sets logging to DEBUG."""
+        import sys
+        import logging
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import main
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.backend_name = "vasp"
+        mock_result.structure_info = None
+        mock_result.auto_detected = {}
+        mock_result.output_dir = "/tmp"
+        mock_result.files_generated = []
+
+        with patch.object(sys, "argv", ["shalom", "run", "--structure", "POSCAR", "-v", "-q"]), \
+             patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig"), \
+             patch("logging.basicConfig") as mock_basic, \
+             pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_basic.assert_called_once()
+        assert mock_basic.call_args.kwargs["level"] == logging.DEBUG

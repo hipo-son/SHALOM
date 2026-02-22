@@ -132,6 +132,54 @@ class TestVASPBackend:
         assert result.is_converged is False
         assert result.energy == -10.123456
 
+    def test_error_log_attached_unconverged(self, tmp_path):
+        """Unconverged OUTCAR gets compressed error_log attached."""
+        outcar = tmp_path / "OUTCAR"
+        outcar.write_text(
+            " free  energy   TOTEN  =       -10.123456 eV\n"
+            " ZBRENT: serious warning\n"
+            " Some other output without timing section\n"
+        )
+        backend = VASPBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.is_converged is False
+        assert result.error_log is not None
+        assert "ZBRENT" in result.error_log
+
+    def test_error_log_none_when_converged(self, tmp_path):
+        """Converged OUTCAR does NOT get error_log."""
+        outcar = tmp_path / "OUTCAR"
+        outcar.write_text(
+            " free  energy   TOTEN  =       -10.0 eV\n"
+            " General timing and accounting informations for this job:\n"
+        )
+        backend = VASPBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.is_converged is True
+        assert result.error_log is None
+
+    def test_ionic_history_capped(self, tmp_path):
+        """Ionic energy/force history lists are capped at 50 entries."""
+        lines = []
+        for i in range(60):
+            e = -30.0 - i * 0.01
+            lines.append(f" free  energy   TOTEN  =       {e:.6f} eV\n")
+            lines.append("\n")
+            lines.append(" TOTAL-FORCE (eV/Angst)\n")
+            lines.append(" ---------------------------\n")
+            lines.append(f"      0.000  0.000  0.000    0.0{i:02d}0  0.0000  0.0000\n")
+            lines.append(" ---------------------------\n")
+        lines.append(" General timing and accounting informations for this job:\n")
+        outcar = tmp_path / "OUTCAR"
+        outcar.write_text("".join(lines))
+
+        backend = VASPBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.ionic_energies is not None
+        assert len(result.ionic_energies) <= 50
+        assert result.ionic_forces_max is not None
+        assert len(result.ionic_forces_max) <= 50
+
 
 # ---------------------------------------------------------------------------
 # QEBackend tests

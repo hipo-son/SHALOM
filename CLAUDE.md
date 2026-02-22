@@ -49,7 +49,7 @@ shalom/
 4. Use `load_config("new_name")` in consuming code
 
 ### Testing
-- `pytest tests/ -x` — run all tests (557 total)
+- `pytest tests/ -x` — run all tests (643 total)
 - `pytest tests/ --cov=shalom --cov-fail-under=85` — with coverage
 - All existing tests must pass unchanged when refactoring
 - Mock LLM calls with `unittest.mock` (no real API calls in tests)

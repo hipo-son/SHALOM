@@ -383,3 +383,46 @@ class TestFormatQEValue:
     def test_dict_raises(self):
         with pytest.raises(TypeError, match="Unsupported type"):
             _format_qe_value({"key": "val"})
+
+
+# ---------------------------------------------------------------------------
+# Error log and compression tests
+# ---------------------------------------------------------------------------
+
+
+class TestQEErrorLog:
+    def test_error_log_attached_unconverged(self, tmp_path):
+        """Unconverged QE output gets error_log attached."""
+        (tmp_path / "pw.out").write_text(
+            "!    total energy              =     -10.00000000 Ry\n"
+            "     SCF iteration did not converge\n"
+        )
+        backend = QEBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.is_converged is False
+        assert result.error_log is not None
+        assert "SCF iteration" in result.error_log
+
+    def test_error_log_none_when_converged(self, tmp_path):
+        """Converged QE output does NOT get error_log."""
+        (tmp_path / "pw.out").write_text(
+            "!    total energy              =     -10.00000000 Ry\n"
+            "     convergence has been achieved in   5 iterations\n"
+            "     JOB DONE.\n"
+        )
+        backend = QEBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.is_converged is True
+        assert result.error_log is None
+
+    def test_ionic_history_capped(self, tmp_path):
+        """Ionic history lists are capped at 50 entries."""
+        lines = []
+        for i in range(60):
+            lines.append(f"!    total energy              =     {-10.0 - i * 0.01:.8f} Ry\n")
+        lines.append("     JOB DONE.\n")
+        (tmp_path / "pw.out").write_text("".join(lines))
+        backend = QEBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.ionic_energies is not None
+        assert len(result.ionic_energies) <= 50
