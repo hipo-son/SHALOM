@@ -11,7 +11,6 @@ Output parsing: regex-based on pw.x stdout (not XML — simpler, sufficient for
 from __future__ import annotations
 
 import logging
-import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -19,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from ase import Atoms
 
 from shalom.backends._compression import compress_error_log, truncate_list
-from shalom.backends.base import DFTResult
+from shalom.backends.base import DFTResult, compute_forces_max
 from shalom.backends.qe_config import (
     QEInputConfig,
     get_qe_preset,
@@ -296,26 +295,23 @@ class QEBackend:
             last_block = force_blocks[-1].group(1)
             current_forces = []
             for line in last_block.strip().split("\n"):
-                m = re.match(
+                force_match = re.match(
                     r"\s*atom\s+\d+\s+type\s+\d+\s+force\s*=\s+"
                     r"([-+\d.eE]+)\s+([-+\d.eE]+)\s+([-+\d.eE]+)",
                     line,
                 )
-                if m:
+                if force_match:
                     try:
-                        fx = float(m.group(1)) * RY_PER_BOHR_TO_EV_PER_ANG
-                        fy = float(m.group(2)) * RY_PER_BOHR_TO_EV_PER_ANG
-                        fz = float(m.group(3)) * RY_PER_BOHR_TO_EV_PER_ANG
+                        fx = float(force_match.group(1)) * RY_PER_BOHR_TO_EV_PER_ANG
+                        fy = float(force_match.group(2)) * RY_PER_BOHR_TO_EV_PER_ANG
+                        fz = float(force_match.group(3)) * RY_PER_BOHR_TO_EV_PER_ANG
                         current_forces.append([fx, fy, fz])
                     except ValueError:
                         continue
             if current_forces:
                 all_forces = current_forces
                 # Update forces_max from per-atom if available
-                step_fmax = max(
-                    math.sqrt(f[0]**2 + f[1]**2 + f[2]**2)
-                    for f in current_forces
-                )
+                step_fmax = compute_forces_max(current_forces)
                 forces_max = step_fmax
 
         # Magnetization: "total magnetization       =     x.xx Bohr mag/cell"
@@ -324,7 +320,10 @@ class QEBackend:
             text,
         )
         if mag_match:
-            magnetization = float(mag_match[-1])
+            try:
+                magnetization = float(mag_match[-1])
+            except (ValueError, IndexError):
+                magnetization = None
 
         raw: Dict[str, Any] = {
             "energy": energy,

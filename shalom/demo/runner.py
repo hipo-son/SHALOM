@@ -30,7 +30,6 @@ class DemoRunner:
         self.verbose = verbose
         self.tracker = CostTracker()
         self.display = DemoConsole(quiet=quiet, no_color=no_color)
-        self._step_times: dict = {}
         self._t0 = 0.0
 
         if dry_run:

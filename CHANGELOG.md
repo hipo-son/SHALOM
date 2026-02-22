@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Flexible Pipeline** (`pipeline.py`)
+  - `PipelineStep` enum for step-selective execution (`design`, `simulation`, `review`)
+  - `synthesize_ranked_material()` with ASE formula parsing + physics-aware defaults (magnetic, GGA+U)
+  - `PipelineConfig` fields: `steps`, `material_name`, `input_structure_path`, `input_ranked_material`
+  - `PipelineResult` fields: `elapsed_seconds`, `config_snapshot`
+  - `COMPLETED_DESIGN` pipeline status for design-only runs
+  - `pipeline_config.json` saved alongside `pipeline_state.json` for reproducibility
+  - 33 new tests (676 total, 95.7% coverage)
+- **`compute_forces_max()`** shared helper in `backends/base.py` (deduplicated from VASP/QE)
 - **Token-aware error log compression** (`shalom/backends/_compression.py`)
   - `compress_error_log()`: keyword-preserving + tail extraction with token budget enforcement
   - `truncate_to_tokens()`, `truncate_list()`, `estimate_tokens()` utilities
@@ -49,6 +58,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All existing tests pass unchanged (zero behavioral change)
 
 ### Fixed
+- `design_layer.py`: guard against empty candidates list (IndexError on veto fallback)
+- `evaluators.py`: safe fallback when LLM hallucinates unknown material name (StopIteration → None check)
+- `_physics.py`: `compute_kpoints_grid` guards against empty Atoms / zero-volume cell (LinAlgError)
+- `qe.py`: magnetization float parsing with try/except for QE overflow format
+- `_compression.py`: log WARNING on config load failure instead of silent fallback
+- `vasp.py`: log WARNING on pymatgen vasprun.xml parse failure instead of silent `pass`
+- `direct_run.py`: `potcar_preset` type narrowed to `Literal`, `ase_read` union result handled
+- `review_layer.py`: renamed `warnings` local variable to avoid shadowing stdlib `warnings`
+- `evaluators.py`: moved `import json` from method body to module-level
 - `llm_provider.py`: removed duplicate `raise ValueError` (dead code on line 113)
 
 ### Previous [Unreleased] changes

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from ase import Atoms
 from ase.io import read as ase_read
@@ -56,7 +56,7 @@ class DirectRunConfig:
     output_dir: Optional[str] = None
     user_settings: Optional[Dict[str, Any]] = None
     functional: str = "PBE"
-    potcar_preset: str = "vasp_recommended"
+    potcar_preset: Literal["vasp_recommended", "mp_default"] = "vasp_recommended"
     pseudo_dir: Optional[str] = None
     validate_structure: bool = True
     force_overwrite: bool = False
@@ -103,7 +103,7 @@ def _auto_output_dir(
 def _create_vasp_config(
     atoms: Atoms, calc_type: str, accuracy: str,
     user_settings: Optional[Dict[str, Any]],
-    potcar_preset: str, functional: str,
+    potcar_preset: Literal["vasp_recommended", "mp_default"], functional: str,
 ) -> Any:
     """Create VASP config with structure-aware hints."""
     from shalom.backends.vasp_config import (
@@ -183,7 +183,8 @@ def direct_run(
     if config.structure_file:
         # Local file
         try:
-            atoms = ase_read(config.structure_file)
+            result = ase_read(config.structure_file)
+            atoms = result[0] if isinstance(result, list) else result
             formula = atoms.get_chemical_formula(mode="reduce")
             structure_info = {"source": "file", "path": config.structure_file}
         except Exception as e:

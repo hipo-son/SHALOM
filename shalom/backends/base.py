@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ase import Atoms
+
+
+def compute_forces_max(forces: List[List[float]]) -> float:
+    """Compute maximum per-atom force magnitude from an Nx3 forces list.
+
+    Args:
+        forces: List of [fx, fy, fz] per atom (eV/Angstrom).
+
+    Returns:
+        Maximum force magnitude across all atoms.
+    """
+    return max(math.sqrt(f[0] ** 2 + f[1] ** 2 + f[2] ** 2) for f in forces)
 
 
 @dataclass

@@ -215,18 +215,18 @@ class ReviewAgent:
         Returns:
             List of warning strings (empty if all checks pass).
         """
-        warnings: List[str] = []
+        physics_warnings: List[str] = []
 
         # Force convergence check
         if dft_result.forces_max is not None and dft_result.forces_max > 0.02:
-            warnings.append(
+            physics_warnings.append(
                 f"Max force ({dft_result.forces_max:.4f} eV/A) exceeds 0.02 eV/A threshold."
             )
 
         # Entropy check (SIGMA over-smearing)
         if dft_result.entropy_per_atom is not None:
             if abs(dft_result.entropy_per_atom) > 0.001:  # 1 meV/atom
-                warnings.append(
+                physics_warnings.append(
                     f"Entropy T*S/atom ({dft_result.entropy_per_atom:.6f} eV) exceeds 1 meV/atom. "
                     "Consider reducing SIGMA."
                 )
@@ -238,9 +238,9 @@ class ReviewAgent:
                 if h.get("error_type") == "BRMIX"
             )
             if brmix_count > 0:
-                warnings.append(
+                physics_warnings.append(
                     f"BRMIX error corrected {brmix_count} time(s). "
                     "Indicates charge density sloshing — verify geometry."
                 )
 
-        return warnings
+        return physics_warnings

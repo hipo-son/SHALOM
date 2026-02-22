@@ -142,6 +142,8 @@ def compute_kpoints_grid(
     Returns:
         [Nx, Ny, Nz] grid.
     """
+    if len(atoms) == 0 or abs(atoms.cell.volume) < 1e-10:
+        return [1, 1, 1]
     reciprocal = atoms.cell.reciprocal() * 2 * math.pi
     grid = []
     for i in range(3):

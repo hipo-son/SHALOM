@@ -37,8 +37,8 @@ def _load_vasp_patterns() -> List[str]:
         from shalom._config_loader import load_config
         patterns_cfg = load_config("error_patterns")
         return [p["pattern"] for p in patterns_cfg]  # type: ignore[index]
-    except Exception:
-        # Fallback: minimal set if config loading fails
+    except Exception as e:
+        logger.warning("Failed to load error_patterns config: %s. Using minimal fallback.", e)
         return [
             "ZBRENT", "BRMIX", "EDDDAV", "NELM",
             "WARNING", "ERROR", "VERY BAD NEWS",

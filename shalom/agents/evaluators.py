@@ -4,6 +4,7 @@ Provides parallel, multi-perspective evaluation with veto filtering,
 confidence-weighted scoring, and rate-limit-safe API calls.
 """
 
+import json
 import logging
 import threading
 import time
@@ -85,8 +86,6 @@ class SpecialistEvaluator:
         Returns:
             EvaluationResponse with scores for each candidate.
         """
-        import json
-
         candidates_json = json.dumps(
             [c.model_dump() for c in candidates], indent=2
         )
@@ -286,8 +285,16 @@ def aggregate_scores(
     candidate_totals.sort(key=lambda x: x[1], reverse=True)
     best_name, best_score, best_justification = candidate_totals[0]
 
-    # Find the original MaterialCandidate
-    best_candidate = next(c for c in candidates if c.material_name == best_name)
+    # Find the original MaterialCandidate (guard against LLM hallucinating a name)
+    best_candidate = next(
+        (c for c in candidates if c.material_name == best_name), None
+    )
+    if best_candidate is None:
+        logger.warning(
+            "LLM returned unknown material '%s'; falling back to top candidate.",
+            best_name,
+        )
+        best_candidate = candidates[0]
 
     return (
         RankedMaterial(

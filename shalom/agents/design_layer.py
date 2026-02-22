@@ -186,6 +186,11 @@ class MultiAgentFineSelector:
             # All candidates vetoed
             if coarse_selector is None or retry == max_design_retries:
                 # Fallback: pick the original first candidate with a warning
+                if not current_candidates:
+                    raise ValueError(
+                        "All candidates exhausted after veto retries — "
+                        "no candidates available for fallback."
+                    )
                 logger.warning(
                     "All candidates vetoed after %d retries. Returning fallback.",
                     retry + 1,
@@ -225,6 +230,8 @@ class MultiAgentFineSelector:
             )
 
         # Should not reach here, but safety fallback
+        if not candidates:  # pragma: no cover
+            raise ValueError("No candidates provided to rank_and_select.")
         return RankedMaterial(  # pragma: no cover
             candidate=candidates[0],
             score=0.0,

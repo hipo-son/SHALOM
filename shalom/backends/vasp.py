@@ -8,7 +8,6 @@ extraction and optional pymatgen acceleration.
 from __future__ import annotations
 
 import logging
-import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -17,7 +16,7 @@ from ase import Atoms
 from ase.io import write
 
 from shalom.backends._compression import compress_error_log, truncate_list
-from shalom.backends.base import DFTResult
+from shalom.backends.base import DFTResult, compute_forces_max
 from shalom.backends.vasp_config import (
     VASPInputConfig,
     get_potcar_variant,
@@ -279,8 +278,8 @@ class VASPBackend:
                 energy = vr.final_energy
                 is_converged = vr.converged
                 bandgap = vr.get_band_structure().get_band_gap().get("energy", None) if hasattr(vr, "get_band_structure") else None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("pymatgen vasprun.xml parsing failed: %s. Falling back to regex.", e)
 
         # OUTCAR for forces and magnetization
         if energy is None and outcar.final_energy is not None:
@@ -357,10 +356,7 @@ class VASPBackend:
                     i += 1
                 if current_forces:
                     all_forces = current_forces
-                    step_fmax = max(
-                        math.sqrt(f[0]**2 + f[1]**2 + f[2]**2)
-                        for f in current_forces
-                    )
+                    step_fmax = compute_forces_max(current_forces)
                     forces_max = step_fmax
                     ionic_forces_max.append(step_fmax)
                 continue
