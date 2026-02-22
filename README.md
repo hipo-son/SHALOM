@@ -133,6 +133,15 @@ python -m shalom.demo --list                        # list all scenarios
 
 The demo runs the full pipeline (Design → Simulation) with real-time cost tracking, multi-agent evaluation matrix display, and JSON report generation. Use `--dry-run` for zero-cost offline testing.
 
+## Roadmap
+
+| Version | Target | Key Features |
+|---------|--------|-------------|
+| **v1.0** | arXiv preprint | VASP + QE static DFT, 3-layer agent pipeline, error recovery, CLI, token-aware compression |
+| **v2.0** | Journal submission | Dynamic Recipe Generator, LAMMPS/AIMD integration, multi-scale autonomous workflows |
+
+See the [Master Design Document](docs/master_design_document.md) for detailed milestones.
+
 ## Documentation
 Read the full API reference and tutorials on [ReadTheDocs](https://shalom.readthedocs.io).
 

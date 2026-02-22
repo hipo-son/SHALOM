@@ -55,7 +55,7 @@ shalom/
 │   ├── review_agent.md
 │   └── eval_*.md      # 6 specialist evaluator prompts + confidence rule
 │
-├── config/            # Physics/VASP settings (.yaml, with literature refs)
+├── config/            # Physics/DFT settings (.yaml, with literature refs)
 │   ├── potcar_mapping.yaml       # PBE_54 POTCAR variants
 │   ├── enmax_values.yaml         # Per-element ENMAX (eV)
 │   ├── magnetic_elements.yaml    # Default MAGMOM values
@@ -64,7 +64,9 @@ shalom/
 │   ├── incar_presets.yaml        # INCAR presets by calc_type × accuracy
 │   ├── error_patterns.yaml       # VASP error detection patterns
 │   ├── correction_strategies.yaml # Progressive error correction
-│   └── evaluator_weights.yaml    # Multi-agent scoring weights
+│   ├── evaluator_weights.yaml    # Multi-agent scoring weights
+│   ├── sssp_metadata.yaml        # SSSP Efficiency v1.3.0 pseudopotential metadata
+│   └── qe_presets.yaml           # QE pw.x presets (scf/relax/vc-relax/bands/nscf)
 │
 ├── _config_loader.py  # load_prompt(), load_config() with caching
 ├── _config_schemas.py # Pydantic validation for critical configs
@@ -134,22 +136,43 @@ A three-step self-correction loop validates the physical soundness of DFT input 
 - Determines whether the target objective was achieved.
 - On failure, generates structured feedback that is injected back into the Design Layer, closing the loop.
 
-## 4. Development Milestones
+## 4. Release Strategy & Development Milestones
 
-- **Phase 1: Core Library & VASP Automation** — Python library structure, full agent pipeline (Design → Simulation → Review), VASP input generation with structure-aware auto-detection, error recovery engine, 321 tests at 97% coverage. *(Complete)*
-- **Phase 2: Configuration Externalization** — Prompt/config externalization to `.md`/`.yaml`, loader with caching + validation + fallback, Pydantic schema checking, 346 tests at 97% coverage. *(Complete)*
-- **Phase 3: DFT Integration & Self-Correction** — Quantum ESPRESSO local runner, VASP-Slurm HPC integration, end-to-end testing with bulk materials.
-- **Phase 4: Advanced Use Cases & Open-Source Release** — Extension to 2D/TMD systems, new workflow templates (defect screening, catalyst design), search performance metrics tooling.
+### v1.0 — Static DFT Foundation (arXiv preprint target)
+
+Positioning: "A robust, sandbox-secured, Pydantic-schema-driven foundation for autonomous DFT workflows with dual-backend support."
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **Phase 1: Core Library & VASP Automation** | Agent pipeline (Design → Simulation → Review), VASP input generation with structure-aware auto-detection, error recovery engine | Complete |
+| **Phase 2: Configuration Externalization** | Prompt/config externalization to `.md`/`.yaml`, loader with caching + validation + fallback, Pydantic schema validation | Complete |
+| **Phase 3: QE Backend & Token Compression** | Quantum ESPRESSO backend (write/parse), SSSP metadata, Materials Project client, CLI, token-aware context compression (`compress_error_log`), 643 tests at 95.6% coverage | Complete |
+| **Phase 4: DFT Execution & Self-Correction** | Local QE runner (`subprocess`), `--execute` CLI flag, execution → ReviewAgent auto-loop, error recovery retry (max 3) | In Progress |
+| **Phase 5: VASP-Slurm HPC Integration** | Slurm job submission/monitoring, VASP execution runner, end-to-end testing with bulk materials | Planned |
+
+### v2.0 — Multi-scale & Autonomous (journal submission target)
+
+Positioning: "Beyond static structure analysis — agents autonomously orchestrate multi-scale simulations (DFT + MD) and generate optimal execution recipes from natural language objectives."
+
+Target journals: Nature Computational Science, npj Computational Materials, Digital Discovery.
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **Phase 6: Dynamic Recipe Generator** | `WorkflowRecipe` Pydantic model, Recipe Recommender Agent that infers optimal execution DAG from user intent (e.g., "calculate Li-ion diffusion" → [VASP relax → VASP bandgap → LAMMPS NVT MD]) | Planned |
+| **Phase 7: LAMMPS & AIMD Integration** | LAMMPS backend (classical MD), AIMD workflow support, trajectory analysis agents | Planned |
+| **Phase 8: Advanced Use Cases** | 2D/TMD systems, defect screening, catalyst design, phase-diagram exploration | Planned |
+| **Phase 9: Performance & Metrics** | LLM API cost tracking, search performance benchmarks, reproducibility audit tooling | Planned |
 
 ## 5. Software Architecture
 
 Library-centric design implemented in Python for reproducibility and HPC integration:
 
-| Layer | Components |
-|-------|------------|
-| **Agent Framework** | Base agent classes, hierarchical composition, schema-driven communication |
-| **Configuration** | `_config_loader` (prompt/config loading with caching, deepcopy, Fail-Fast), `_config_schemas` (Pydantic validation), `_defaults` (fallback) |
-| **Tool System** | ASE builder, DFT I/O parsers (VASP POSCAR/OUTCAR, QE pw.x/XML), structure validators |
-| **DFT Backend** | Quantum ESPRESSO (local), VASP (HPC), unified solver abstraction, error recovery engine |
-| **Execution Layer** | Slurm job submission, MCP server, SafeExecutor sandbox |
-| **Provider Interface** | LLMProvider (OpenAI, Anthropic), structured output enforcement |
+| Layer | Components | Status |
+|-------|------------|--------|
+| **Agent Framework** | Base agent classes, hierarchical composition, schema-driven communication | Complete |
+| **Configuration** | `_config_loader` (prompt/config loading with caching, deepcopy, Fail-Fast), `_config_schemas` (Pydantic validation), `_defaults` (fallback) | Complete |
+| **Tool System** | ASE builder, DFT I/O parsers (VASP POSCAR/OUTCAR, QE pw.x/XML), structure validators | Complete |
+| **DFT Backend** | Quantum ESPRESSO (local), VASP (HPC), unified solver abstraction, error recovery engine, token-aware context compression | Complete |
+| **Execution Layer** | Local QE runner, Slurm job submission, MCP server, SafeExecutor sandbox | Partial (sandbox complete, runners planned) |
+| **Provider Interface** | LLMProvider (OpenAI, Anthropic), structured output enforcement | Complete |
+| **Recipe System** | Dynamic Recipe Generator — LLM infers optimal execution DAG (`WorkflowRecipe`) from natural language | Planned (v2.0) |
