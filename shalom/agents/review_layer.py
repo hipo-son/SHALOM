@@ -1,4 +1,5 @@
 import os
+import warnings
 from typing import Any, Dict, List, Optional
 
 from shalom._config_loader import load_prompt
@@ -26,7 +27,8 @@ class ReviewAgent:
     def parse_outcar(self, filepath: str) -> Dict[str, Any]:
         """Simple rule-based OUTCAR parser.
 
-        For production use, consider ``pymatgen.io.vasp.outputs.Outcar``.
+        .. deprecated::
+            Use ``review_with_backend()`` with a VASPBackend instead.
 
         Args:
             filepath: Path to the VASP OUTCAR file.
@@ -37,6 +39,11 @@ class ReviewAgent:
         Raises:
             FileNotFoundError: If the OUTCAR file does not exist.
         """
+        warnings.warn(
+            "parse_outcar() is deprecated; use review_with_backend() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"OUTCAR file not found: {filepath}")
 
@@ -85,8 +92,8 @@ class ReviewAgent:
     def review(self, target_objective: str, outcar_path: str) -> ReviewResult:
         """Read and evaluate a VASP OUTCAR file against the target objective.
 
-        Convenience method that parses the given OUTCAR file directly.
-        For other backends, use ``review_with_backend()`` with a directory.
+        .. deprecated::
+            Use ``review_with_backend()`` with a directory path instead.
 
         Args:
             target_objective: The original natural language objective.
@@ -95,6 +102,11 @@ class ReviewAgent:
         Returns:
             ReviewResult with success status, metrics, and feedback.
         """
+        warnings.warn(
+            "review() is deprecated; use review_with_backend() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         parsed = self.parse_outcar(outcar_path)
         dft_result = DFTResult(
             energy=parsed["energy"],

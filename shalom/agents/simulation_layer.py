@@ -127,11 +127,11 @@ class FormFiller:
                 slab_thickness = z_positions.max() - z_positions.min()
                 vacuum_thickness = cell[2][2] - slab_thickness
 
-                if 0 < vacuum_thickness < 12.0:
+                if 0 < vacuum_thickness < 8.0:
                     is_valid = False
                     feedback = (
                         f"Warning: Vacuum layer ({vacuum_thickness:.1f} A) is too thin. "
-                        "Periodic boundary interactions may occur (recommended 10-15 A)."
+                        "Periodic boundary interactions may occur (recommended >= 10 A)."
                     )
 
         return StructureReviewForm(

@@ -9,6 +9,7 @@ Inspired by VASPKIT's recipe system and VASP wiki official recommendations.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from enum import Enum
@@ -17,6 +18,8 @@ from typing import Any, Dict, List, Literal, Optional
 from ase import Atoms
 
 from shalom._config_loader import load_config
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -360,12 +363,13 @@ def detect_and_apply_structure_hints(
                     "LDAUPRINT": 1,
                     "elements_order": all_elements_ordered,
                 }
-                config.incar_settings["LDAU"] = True
-                config.incar_settings["LDAUTYPE"] = 2
-                config.incar_settings["LDAUL"] = " ".join(str(v) for v in ldaul)
-                config.incar_settings["LDAUU"] = " ".join(str(v) for v in ldauu)
-                config.incar_settings["LDAUJ"] = " ".join(str(v) for v in ldauj)
-                config.incar_settings["LDAUPRINT"] = 1
+                if config.functional != "PBE":
+                    logger.warning(
+                        "GGA+U enabled with functional='%s', but Hubbard U "
+                        "values are fitted for PBE only (Wang et al. PRB 73, "
+                        "195107). Results may be unreliable.",
+                        config.functional,
+                    )
 
     # 3. 2D structure detection
     if detect_2d(atoms):

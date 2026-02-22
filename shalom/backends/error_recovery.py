@@ -233,9 +233,7 @@ class ErrorRecoveryEngine:
 
         recent = forces_max_history[-window:]
         alternation_count = 0
-        for i in range(1, len(recent)):
-            if i == 1:
-                continue
+        for i in range(2, len(recent)):
             prev_delta = recent[i - 1] - recent[i - 2]
             curr_delta = recent[i] - recent[i - 1]
             if prev_delta * curr_delta < 0:  # Sign change

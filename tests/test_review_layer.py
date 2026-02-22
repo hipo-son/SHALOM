@@ -15,8 +15,9 @@ from shalom.core.schemas import ReviewResult
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 class TestParseOutcar:
-    """Tests for ReviewAgent.parse_outcar()."""
+    """Tests for ReviewAgent.parse_outcar() (deprecated)."""
 
     def test_parse_outcar_basic(self, mock_llm):
         agent = ReviewAgent(llm_provider=mock_llm)
@@ -49,8 +50,9 @@ class TestParseOutcar:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 class TestReviewBackwardCompat:
-    """Tests for ReviewAgent.review() with OUTCAR path."""
+    """Tests for ReviewAgent.review() with OUTCAR path (deprecated)."""
 
     def test_review_basic(self, mock_llm):
         agent = ReviewAgent(llm_provider=mock_llm)

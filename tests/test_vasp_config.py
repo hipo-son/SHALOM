@@ -301,8 +301,11 @@ class TestGGAPlusU:
     def test_feo_precise_enables_ldau(self, sample_tmo_feo):
         config = get_preset(CalculationType.RELAXATION, AccuracyLevel.PRECISE, sample_tmo_feo)
         assert config.ldau_settings is not None
-        assert config.incar_settings.get("LDAU") is True
-        assert config.incar_settings.get("LDAUTYPE") == 2
+        assert config.ldau_settings["LDAU"] is True
+        assert config.ldau_settings["LDAUTYPE"] == 2
+        # LDAU params live only in ldau_settings, not duplicated in incar_settings
+        assert "LDAUL" not in config.incar_settings
+        assert "LDAUU" not in config.incar_settings
 
     def test_feo_standard_no_auto_ldau(self, sample_tmo_feo):
         config = get_preset(CalculationType.RELAXATION, AccuracyLevel.STANDARD, sample_tmo_feo)
@@ -335,6 +338,20 @@ class TestGGAPlusU:
         assert HUBBARD_U_VALUES["Mn"][1] == 3.9
         assert HUBBARD_U_VALUES["V"][1] == 3.25
         assert HUBBARD_U_VALUES["Cr"][1] == 3.7
+
+    def test_non_pbe_functional_warns(self, sample_tmo_feo, caplog):
+        """Non-PBE functional with GGA+U logs a warning."""
+        import logging
+
+        config = VASPInputConfig(
+            calc_type=CalculationType.RELAXATION,
+            accuracy=AccuracyLevel.PRECISE,
+            incar_settings={},
+            functional="r2SCAN",
+        )
+        with caplog.at_level(logging.WARNING, logger="shalom.backends.vasp_config"):
+            detect_and_apply_structure_hints(sample_tmo_feo, config)
+        assert "PBE only" in caplog.text
 
 
 # ---------------------------------------------------------------------------

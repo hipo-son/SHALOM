@@ -219,8 +219,9 @@ class TestReviewWithBackend:
         assert result.is_successful is True
         assert mock_llm.generate_structured_output.called
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_review_backward_compatible(self, mock_llm):
-        """Existing review() method still works with OUTCAR path."""
+        """Existing review() method still works with OUTCAR path (deprecated)."""
         agent = ReviewAgent(llm_provider=mock_llm)
 
         mock_result = ReviewResult(
