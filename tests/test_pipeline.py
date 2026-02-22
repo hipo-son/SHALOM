@@ -10,10 +10,11 @@ from shalom.core.schemas import (
     MaterialCandidate,
     PipelineResult,
     PipelineStatus,
+    PipelineStep,
     RankedMaterial,
     ReviewResult,
 )
-from shalom.pipeline import Pipeline, PipelineConfig
+from shalom.pipeline import Pipeline, PipelineConfig, synthesize_ranked_material
 
 
 # ---------------------------------------------------------------------------
@@ -554,3 +555,399 @@ class TestStatePersistence:
         loaded = PipelineResult.model_validate_json(state_file.read_text())
         assert loaded.status == PipelineStatus.AWAITING_DFT
         assert loaded.objective == "test"
+
+
+# ---------------------------------------------------------------------------
+# synthesize_ranked_material
+# ---------------------------------------------------------------------------
+
+
+class TestSynthesizeRankedMaterial:
+    def test_simple_element(self):
+        rm = synthesize_ranked_material("Si")
+        assert rm.candidate.material_name == "Si"
+        assert rm.candidate.elements == ["Si"]
+        assert rm.score == 1.0
+        assert rm.candidate.expected_properties.get("magnetic") is None
+
+    def test_binary_compound(self):
+        rm = synthesize_ranked_material("MoS2")
+        assert "Mo" in rm.candidate.elements
+        assert "S" in rm.candidate.elements
+        assert len(rm.candidate.elements) == 2
+
+    def test_magnetic_detection(self):
+        rm = synthesize_ranked_material("Fe")
+        assert rm.candidate.expected_properties["magnetic"] is True
+
+    def test_hubbard_u_detection(self):
+        """Fe2O3 has magnetic TM (Fe) + anion (O) → needs_hubbard_u."""
+        rm = synthesize_ranked_material("Fe2O3")
+        assert rm.candidate.expected_properties["magnetic"] is True
+        assert rm.candidate.expected_properties["needs_hubbard_u"] is True
+
+    def test_non_magnetic_no_hubbard(self):
+        """Si has no magnetic elements → no hubbard_u."""
+        rm = synthesize_ranked_material("Si")
+        assert "magnetic" not in rm.candidate.expected_properties
+        assert "needs_hubbard_u" not in rm.candidate.expected_properties
+
+    def test_complex_formula(self):
+        rm = synthesize_ranked_material("LiFePO4")
+        elements = rm.candidate.elements
+        assert "Li" in elements
+        assert "Fe" in elements
+        assert "P" in elements
+        assert "O" in elements
+
+
+# ---------------------------------------------------------------------------
+# PipelineStep enum
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineStepEnum:
+    def test_values(self):
+        assert PipelineStep.DESIGN.value == "design"
+        assert PipelineStep.SIMULATION.value == "simulation"
+        assert PipelineStep.REVIEW.value == "review"
+
+    def test_completed_design_status(self):
+        assert PipelineStatus.COMPLETED_DESIGN.value == "completed_design"
+
+    def test_completed_design_serialization(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED_DESIGN, objective="test"
+        )
+        json_str = result.model_dump_json()
+        assert "completed_design" in json_str
+        loaded = PipelineResult.model_validate_json(json_str)
+        assert loaded.status == PipelineStatus.COMPLETED_DESIGN
+
+
+# ---------------------------------------------------------------------------
+# PipelineConfig steps field
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineConfigSteps:
+    def test_default_steps_none(self):
+        config = PipelineConfig()
+        assert config.steps is None
+
+    def test_explicit_steps(self):
+        config = PipelineConfig(steps=["design", "simulation"])
+        assert config.steps == ["design", "simulation"]
+
+    def test_material_name_field(self):
+        config = PipelineConfig(material_name="MoS2")
+        assert config.material_name == "MoS2"
+
+    def test_input_structure_path_field(self):
+        config = PipelineConfig(input_structure_path="/tmp/POSCAR")
+        assert config.input_structure_path == "/tmp/POSCAR"
+
+    def test_input_ranked_material_field(self):
+        rm_dict = {
+            "candidate": {
+                "material_name": "Si",
+                "elements": ["Si"],
+                "reasoning": "test",
+            },
+            "score": 0.9,
+            "ranking_justification": "test",
+        }
+        config = PipelineConfig(input_ranked_material=rm_dict)
+        assert config.input_ranked_material is not None
+
+
+# ---------------------------------------------------------------------------
+# Pipeline step validation
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineStepValidation:
+    def test_invalid_step_name_raises(self, mock_llm):
+        config = PipelineConfig(steps=["design", "invalid_step"])
+        with pytest.raises(ValueError, match="Invalid step name"):
+            Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+    def test_empty_steps_raises(self, mock_llm):
+        config = PipelineConfig(steps=[])
+        with pytest.raises(ValueError, match="must not be empty"):
+            Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+    def test_simulation_without_material_raises(self, mock_llm):
+        config = PipelineConfig(steps=["simulation"])
+        with pytest.raises(ValueError, match="material_name or input_ranked_material"):
+            Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+    def test_review_without_structure_raises(self, mock_llm):
+        config = PipelineConfig(steps=["review"])
+        with pytest.raises(ValueError, match="input_structure_path"):
+            Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline skip design
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineSkipDesign:
+    def test_simulation_only_with_material_name(self, mock_llm, tmp_path):
+        config = PipelineConfig(
+            steps=["simulation"],
+            material_name="MoS2",
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.AWAITING_DFT
+        assert result.ranked_material is not None
+        assert result.ranked_material.candidate.material_name == "MoS2"
+        assert "design_skipped" in result.steps_completed
+        assert "structure_generation" in result.steps_completed
+        assert result.candidates is None  # design was skipped
+
+    def test_simulation_with_ranked_material_injection(self, mock_llm, tmp_path):
+        rm_dict = {
+            "candidate": {
+                "material_name": "Si",
+                "elements": ["Si"],
+                "reasoning": "Direct injection test",
+                "expected_properties": {"bandgap": "1.1 eV"},
+            },
+            "score": 0.95,
+            "ranking_justification": "Injected",
+        }
+        config = PipelineConfig(
+            steps=["simulation"],
+            input_ranked_material=rm_dict,
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.AWAITING_DFT
+        assert result.ranked_material.candidate.material_name == "Si"
+        assert result.ranked_material.score == 0.95
+
+    def test_simulation_and_review_skip_design(self, mock_llm):
+        config = PipelineConfig(
+            steps=["simulation", "review"],
+            material_name="Si",
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop, patch(
+            "shalom.agents.review_layer.ReviewAgent.review_with_backend"
+        ) as mock_review:
+            mock_loop.return_value = (True, MagicMock(), "/tmp/POSCAR")
+            mock_review.return_value = ReviewResult(
+                is_successful=True, energy=-34.5, forces_max=0.01,
+                feedback_for_design="OK",
+            )
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED
+        assert "design_skipped" in result.steps_completed
+        assert "review" in result.steps_completed
+
+
+# ---------------------------------------------------------------------------
+# Pipeline skip simulation
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineSkipSimulation:
+    def test_design_only(self, mock_llm, sample_candidates, sample_ranked):
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(steps=["design"], save_state=False)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED_DESIGN
+        assert result.candidates is not None
+        assert result.ranked_material is not None
+        assert "coarse_selection" in result.steps_completed
+        assert "fine_selection" in result.steps_completed
+
+    def test_review_only(self, mock_llm):
+        config = PipelineConfig(
+            steps=["review"],
+            input_structure_path="/tmp/dft_output",
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.review_layer.ReviewAgent.review_with_backend"
+        ) as mock_review:
+            mock_review.return_value = ReviewResult(
+                is_successful=True, energy=-34.5, forces_max=0.01,
+                feedback_for_design="Converged.",
+            )
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED
+        assert result.structure_path == "/tmp/dft_output"
+        assert "simulation_skipped" in result.steps_completed
+        assert "review" in result.steps_completed
+        assert result.structure_generated is False
+
+    def test_design_and_review_skip_simulation(
+        self, mock_llm, sample_candidates, sample_ranked
+    ):
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            steps=["design", "review"],
+            input_structure_path="/tmp/dft_output",
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.review_layer.ReviewAgent.review_with_backend"
+        ) as mock_review:
+            mock_review.return_value = ReviewResult(
+                is_successful=True, energy=-34.5, forces_max=0.01,
+                feedback_for_design="OK",
+            )
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED
+        assert "coarse_selection" in result.steps_completed
+        assert "simulation_skipped" in result.steps_completed
+        assert "review" in result.steps_completed
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineBackwardCompat:
+    def test_default_derives_design_simulation(self, mock_llm):
+        """Default config (skip_review=True) → ['design', 'simulation']."""
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm)
+        assert pipeline._effective_steps == ["design", "simulation"]
+
+    def test_skip_review_false_derives_all(self, mock_llm):
+        config = PipelineConfig(skip_review=False)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        assert pipeline._effective_steps == ["design", "simulation", "review"]
+
+    def test_explicit_steps_override_skip_review(self, mock_llm):
+        """Explicit steps take priority over skip_review."""
+        config = PipelineConfig(steps=["design"], skip_review=False)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        assert pipeline._effective_steps == ["design"]
+
+
+# ---------------------------------------------------------------------------
+# Config serialization & timing
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineConfigSerialization:
+    def test_config_saved_alongside_state(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(output_dir=str(tmp_path), save_state=True)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            pipeline.run()
+
+        config_file = tmp_path / "pipeline_config.json"
+        assert config_file.exists()
+
+        loaded = PipelineConfig.model_validate_json(config_file.read_text())
+        assert loaded.backend_name == "vasp"
+        assert loaded.output_dir == str(tmp_path)
+
+    def test_config_snapshot_in_result(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            output_dir=str(tmp_path), save_state=False, calc_type="static"
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        assert result.config_snapshot is not None
+        assert result.config_snapshot["calc_type"] == "static"
+        assert result.config_snapshot["backend_name"] == "vasp"
+
+    def test_config_snapshot_serialization_roundtrip(self):
+        result = PipelineResult(
+            status=PipelineStatus.AWAITING_DFT,
+            objective="test",
+            config_snapshot={"backend_name": "qe", "calc_type": "scf"},
+        )
+        json_str = result.model_dump_json()
+        loaded = PipelineResult.model_validate_json(json_str)
+        assert loaded.config_snapshot["backend_name"] == "qe"
+
+
+class TestPipelineTiming:
+    def test_elapsed_seconds_populated(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(output_dir=str(tmp_path), save_state=False)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        assert result.elapsed_seconds is not None
+        assert result.elapsed_seconds >= 0.0
+
+    def test_elapsed_seconds_on_failure(self, mock_llm):
+        mock_llm.generate_structured_output.side_effect = RuntimeError("fail")
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm)
+        result = pipeline.run()
+
+        assert result.status == PipelineStatus.FAILED_DESIGN
+        assert result.elapsed_seconds is not None
+        assert result.elapsed_seconds >= 0.0
+
+    def test_elapsed_seconds_serialization(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED,
+            objective="test",
+            elapsed_seconds=12.345,
+        )
+        json_str = result.model_dump_json()
+        loaded = PipelineResult.model_validate_json(json_str)
+        assert abs(loaded.elapsed_seconds - 12.345) < 0.001

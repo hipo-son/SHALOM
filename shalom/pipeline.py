@@ -11,6 +11,7 @@ Usage::
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, cast
 
@@ -23,14 +24,62 @@ from shalom.backends import get_backend
 from shalom.backends._physics import AccuracyLevel
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import (
+    MaterialCandidate,
     PipelineResult,
     PipelineStatus,
+    PipelineStep,
+    RankedMaterial,
 )
 
 logger = logging.getLogger(__name__)
 
+# Valid step names for validation
+_VALID_STEPS = frozenset(s.value for s in PipelineStep)
+
 # Type alias
 StepCallback = Callable[[str, dict], None]
+
+
+def synthesize_ranked_material(material_name: str) -> RankedMaterial:
+    """Create a RankedMaterial from a formula string with physics-aware defaults.
+
+    Uses ``_physics.py`` lookups for magnetic element detection and GGA+U necessity,
+    and ASE's ``string2symbols`` for robust formula parsing (not raw regex).
+
+    Args:
+        material_name: Chemical formula (e.g., ``"Fe2O3"``, ``"MoS2"``, ``"Si"``).
+
+    Returns:
+        A ``RankedMaterial`` with auto-populated ``expected_properties``.
+    """
+    from ase.symbols import string2symbols
+
+    from shalom.backends._physics import ANION_ELEMENTS, MAGNETIC_ELEMENTS
+
+    elements = list(dict.fromkeys(string2symbols(material_name)))
+    element_set = set(elements)
+
+    has_magnetic = bool(element_set & set(MAGNETIC_ELEMENTS))
+    has_anion = bool(element_set & ANION_ELEMENTS)
+    needs_hubbard_u = has_magnetic and has_anion
+
+    expected_properties: Dict[str, Any] = {}
+    if has_magnetic:
+        expected_properties["magnetic"] = True
+    if needs_hubbard_u:
+        expected_properties["needs_hubbard_u"] = True
+
+    candidate = MaterialCandidate(
+        material_name=material_name,
+        elements=elements,
+        reasoning=f"User-specified material: {material_name}",
+        expected_properties=expected_properties,
+    )
+    return RankedMaterial(
+        candidate=candidate,
+        score=1.0,
+        ranking_justification="User-specified (Design layer skipped)",
+    )
 
 
 class PipelineConfig(BaseModel):
@@ -101,6 +150,30 @@ class PipelineConfig(BaseModel):
         description="QE namelist overrides (e.g., {'system.ecutwfc': 80}).",
     )
 
+    # --- Flexible pipeline step configuration ---
+    steps: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Explicit list of pipeline steps to run: 'design', 'simulation', 'review'. "
+            "None derives steps from skip_review for backward compatibility."
+        ),
+    )
+    material_name: Optional[str] = Field(
+        default=None,
+        description="Material formula when skipping Design (e.g., 'MoS2', 'Fe2O3').",
+    )
+    input_structure_path: Optional[str] = Field(
+        default=None,
+        description="Path to existing structure/DFT output when skipping Simulation.",
+    )
+    input_ranked_material: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Serialized RankedMaterial dict for direct injection (preserves full physics context). "
+            "Takes priority over material_name."
+        ),
+    )
+
 
 class Pipeline:
     """End-to-end orchestrator connecting Design -> Simulation -> Review.
@@ -128,11 +201,55 @@ class Pipeline:
         if backend is not None:
             self.config = self.config.model_copy(update={"backend_name": backend})
 
+        # Resolve effective steps
+        self._effective_steps = self._resolve_effective_steps()
+        self._validate_step_requirements()
+
         self.llm = llm_provider or LLMProvider(
             provider_type=self.config.provider_type,
             model_name=self.config.model_name,
         )
         self.backend = get_backend(self.config.backend_name)
+
+    def _resolve_effective_steps(self) -> List[str]:
+        """Derive effective steps from config.steps or skip_review (backward compat)."""
+        if self.config.steps is not None:
+            steps = list(self.config.steps)
+            if not steps:
+                raise ValueError("steps list must not be empty when explicitly provided.")
+            invalid = set(steps) - _VALID_STEPS
+            if invalid:
+                raise ValueError(
+                    f"Invalid step name(s): {invalid}. Valid: {sorted(_VALID_STEPS)}"
+                )
+            return steps
+
+        # Backward compatibility: derive from skip_review
+        if self.config.skip_review:
+            return ["design", "simulation"]
+        return ["design", "simulation", "review"]
+
+    def _validate_step_requirements(self) -> None:
+        """Validate that required inputs are provided for the selected steps."""
+        steps = self._effective_steps
+
+        if "design" not in steps:
+            has_material = (
+                self.config.material_name is not None
+                or self.config.input_ranked_material is not None
+            )
+            if "simulation" in steps and not has_material:
+                raise ValueError(
+                    "material_name or input_ranked_material is required "
+                    "when skipping 'design' with 'simulation' enabled."
+                )
+
+        if "simulation" not in steps and "review" in steps:
+            if self.config.input_structure_path is None:
+                raise ValueError(
+                    "input_structure_path is required when skipping 'simulation' "
+                    "with 'review' enabled."
+                )
 
     def run(self) -> PipelineResult:
         """Execute the full pipeline with optional closed-loop retry.
@@ -140,10 +257,19 @@ class Pipeline:
         Returns:
             PipelineResult containing all intermediate outputs and final status.
         """
+        start_time = time.monotonic()
         previous_feedback = ""
+        config_snapshot = self.config.model_dump()
 
         for iteration in range(1, self.config.max_outer_loops + 1):
             result = self._run_single_iteration(iteration, previous_feedback)
+
+            # Attach timing and config snapshot
+            elapsed = time.monotonic() - start_time
+            result = result.model_copy(update={
+                "elapsed_seconds": elapsed,
+                "config_snapshot": config_snapshot,
+            })
 
             # If not a review failure or if we can't retry, return as-is
             if result.status != PipelineStatus.FAILED_REVIEW:
@@ -165,122 +291,180 @@ class Pipeline:
     def _run_single_iteration(
         self, iteration: int, previous_feedback: str
     ) -> PipelineResult:
-        """Run one full Design -> Simulation -> Review iteration."""
+        """Run one iteration with step-aware execution.
+
+        Steps are determined by ``self._effective_steps`` (resolved from config).
+        """
+        steps = self._effective_steps
         steps_completed: List[str] = []
+        candidates = None
+        ranked_material = None
+        structure_path: Optional[str] = None
 
         # ------------------------------------------------------------------
-        # Step 1: Coarse Selection
+        # Step 1: Design (Coarse + Fine Selection)
         # ------------------------------------------------------------------
-        logger.info("[Iter %d] Step 1: Coarse Selection...", iteration)
-        try:
-            coarse_selector = CoarseSelector(llm_provider=self.llm)
-            candidates = coarse_selector.select(self.objective, context=previous_feedback)
-        except Exception as e:
-            logger.error("Coarse selection failed: %s", e)
-            return PipelineResult(
-                status=PipelineStatus.FAILED_DESIGN,
-                objective=self.objective,
-                iteration=iteration,
-                error_message=f"Coarse selection failed: {e}",
-                steps_completed=steps_completed,
-            )
-
-        steps_completed.append("coarse_selection")
-        self._notify("coarse_selection", {"candidates": candidates})
-        logger.info("Coarse selection: %d candidates.", len(candidates))
-
-        # ------------------------------------------------------------------
-        # Step 2: Fine Selection (simple or multi-agent)
-        # ------------------------------------------------------------------
-        logger.info("[Iter %d] Step 2: Fine Selection (mode=%s)...", iteration, self.config.selector_mode)
-        try:
-            fine_selector = get_fine_selector(
-                self.llm,
-                mode=self.config.selector_mode,
-                strict_veto=self.config.strict_veto,
-                api_max_retries=self.config.api_max_retries,
-            )
-            if self.config.selector_mode == "multi_agent" and isinstance(fine_selector, MultiAgentFineSelector):
-                ranked_material = cast(MultiAgentFineSelector, fine_selector).rank_and_select(
-                    self.objective,
-                    candidates,
-                    coarse_selector=coarse_selector,
-                    max_design_retries=self.config.max_design_retries,
+        if "design" in steps:
+            logger.info("[Iter %d] Step 1: Coarse Selection...", iteration)
+            try:
+                coarse_selector = CoarseSelector(llm_provider=self.llm)
+                candidates = coarse_selector.select(self.objective, context=previous_feedback)
+            except Exception as e:
+                logger.error("Coarse selection failed: %s", e)
+                return PipelineResult(
+                    status=PipelineStatus.FAILED_DESIGN,
+                    objective=self.objective,
+                    iteration=iteration,
+                    error_message=f"Coarse selection failed: {e}",
+                    steps_completed=steps_completed,
                 )
-            else:
-                ranked_material = fine_selector.rank_and_select(self.objective, candidates)
-        except Exception as e:
-            logger.error("Fine selection failed: %s", e)
-            return PipelineResult(
-                status=PipelineStatus.FAILED_DESIGN,
-                objective=self.objective,
-                iteration=iteration,
-                candidates=candidates,
-                error_message=f"Fine selection failed: {e}",
-                steps_completed=steps_completed,
-            )
 
-        steps_completed.append("fine_selection")
-        self._notify("fine_selection", {"ranked_material": ranked_material})
-        logger.info(
-            "Fine selection: %s (score=%.2f).",
-            ranked_material.candidate.material_name,
-            ranked_material.score,
-        )
+            steps_completed.append("coarse_selection")
+            self._notify("coarse_selection", {"candidates": candidates})
+            logger.info("Coarse selection: %d candidates.", len(candidates))
 
-        # ------------------------------------------------------------------
-        # Step 3: Structure Generation
-        # ------------------------------------------------------------------
-        logger.info("[Iter %d] Step 3: Structure Generation...", iteration)
-        try:
-            # Create backend-specific DFT config (structure-aware auto-detection
-            # deferred until atoms are available inside GeometryReviewer).
-            dft_config = self._create_dft_config()
-
-            generator = GeometryGenerator(llm_provider=self.llm)
-            reviewer = GeometryReviewer(
-                generator=generator,
-                max_retries=self.config.max_retries,
-                backend=self.backend,
-                dft_config=dft_config,
-            )
-            success, atoms, path_or_error = reviewer.run_creation_loop(
-                self.objective, ranked_material
-            )
-        except Exception as e:
-            logger.error("Structure generation failed: %s", e)
-            return PipelineResult(
-                status=PipelineStatus.FAILED_SIMULATION,
-                objective=self.objective,
-                iteration=iteration,
-                candidates=candidates,
-                ranked_material=ranked_material,
-                error_message=f"Structure generation failed: {e}",
-                steps_completed=steps_completed,
-            )
-
-        if not success:
-            logger.error("Structure generation exhausted retries: %s", path_or_error)
-            return PipelineResult(
-                status=PipelineStatus.FAILED_SIMULATION,
-                objective=self.objective,
-                iteration=iteration,
-                candidates=candidates,
-                ranked_material=ranked_material,
-                error_message=path_or_error,
-                steps_completed=steps_completed,
-            )
-
-        steps_completed.append("structure_generation")
-        self._notify("structure_generation", {"path": path_or_error})
-        logger.info("Structure generated: %s", path_or_error)
-
-        # ------------------------------------------------------------------
-        # Step 4: Review (conditional)
-        # ------------------------------------------------------------------
-        if self.config.skip_review:
             logger.info(
-                "Input files at '%s'. Awaiting DFT execution.", path_or_error
+                "[Iter %d] Step 2: Fine Selection (mode=%s)...",
+                iteration, self.config.selector_mode,
+            )
+            try:
+                fine_selector = get_fine_selector(
+                    self.llm,
+                    mode=self.config.selector_mode,
+                    strict_veto=self.config.strict_veto,
+                    api_max_retries=self.config.api_max_retries,
+                )
+                if self.config.selector_mode == "multi_agent" and isinstance(
+                    fine_selector, MultiAgentFineSelector
+                ):
+                    ranked_material = cast(
+                        MultiAgentFineSelector, fine_selector
+                    ).rank_and_select(
+                        self.objective,
+                        candidates,
+                        coarse_selector=coarse_selector,
+                        max_design_retries=self.config.max_design_retries,
+                    )
+                else:
+                    ranked_material = fine_selector.rank_and_select(
+                        self.objective, candidates
+                    )
+            except Exception as e:
+                logger.error("Fine selection failed: %s", e)
+                return PipelineResult(
+                    status=PipelineStatus.FAILED_DESIGN,
+                    objective=self.objective,
+                    iteration=iteration,
+                    candidates=candidates,
+                    error_message=f"Fine selection failed: {e}",
+                    steps_completed=steps_completed,
+                )
+
+            steps_completed.append("fine_selection")
+            self._notify("fine_selection", {"ranked_material": ranked_material})
+            logger.info(
+                "Fine selection: %s (score=%.2f).",
+                ranked_material.candidate.material_name,
+                ranked_material.score,
+            )
+        else:
+            # Design skipped — resolve ranked_material from config
+            if self.config.input_ranked_material is not None:
+                ranked_material = RankedMaterial.model_validate(
+                    self.config.input_ranked_material
+                )
+                logger.info(
+                    "Design skipped: using injected RankedMaterial (%s).",
+                    ranked_material.candidate.material_name,
+                )
+            elif self.config.material_name is not None:
+                ranked_material = synthesize_ranked_material(self.config.material_name)
+                logger.info(
+                    "Design skipped: synthesized RankedMaterial for '%s'.",
+                    self.config.material_name,
+                )
+            steps_completed.append("design_skipped")
+
+        # Design-only exit
+        if "simulation" not in steps and "review" not in steps:
+            logger.info("Design-only mode: returning COMPLETED_DESIGN.")
+            return PipelineResult(
+                status=PipelineStatus.COMPLETED_DESIGN,
+                objective=self.objective,
+                iteration=iteration,
+                candidates=candidates,
+                ranked_material=ranked_material,
+                steps_completed=steps_completed,
+            )
+
+        # ------------------------------------------------------------------
+        # Step 2: Simulation (Structure Generation)
+        # ------------------------------------------------------------------
+        if "simulation" in steps:
+            logger.info("[Iter %d] Structure Generation...", iteration)
+            if ranked_material is None:
+                return PipelineResult(
+                    status=PipelineStatus.FAILED_SIMULATION,
+                    objective=self.objective,
+                    iteration=iteration,
+                    error_message="No ranked_material available for structure generation.",
+                    steps_completed=steps_completed,
+                )
+            try:
+                dft_config = self._create_dft_config()
+
+                generator = GeometryGenerator(llm_provider=self.llm)
+                reviewer = GeometryReviewer(
+                    generator=generator,
+                    max_retries=self.config.max_retries,
+                    backend=self.backend,
+                    dft_config=dft_config,
+                )
+                success, atoms, path_or_error = reviewer.run_creation_loop(
+                    self.objective, ranked_material
+                )
+            except Exception as e:
+                logger.error("Structure generation failed: %s", e)
+                return PipelineResult(
+                    status=PipelineStatus.FAILED_SIMULATION,
+                    objective=self.objective,
+                    iteration=iteration,
+                    candidates=candidates,
+                    ranked_material=ranked_material,
+                    error_message=f"Structure generation failed: {e}",
+                    steps_completed=steps_completed,
+                )
+
+            if not success:
+                logger.error(
+                    "Structure generation exhausted retries: %s", path_or_error
+                )
+                return PipelineResult(
+                    status=PipelineStatus.FAILED_SIMULATION,
+                    objective=self.objective,
+                    iteration=iteration,
+                    candidates=candidates,
+                    ranked_material=ranked_material,
+                    error_message=path_or_error,
+                    steps_completed=steps_completed,
+                )
+
+            structure_path = path_or_error
+            steps_completed.append("structure_generation")
+            self._notify("structure_generation", {"path": structure_path})
+            logger.info("Structure generated: %s", structure_path)
+        else:
+            # Simulation skipped — use provided structure path
+            structure_path = self.config.input_structure_path
+            steps_completed.append("simulation_skipped")
+            logger.info("Simulation skipped: using '%s'.", structure_path)
+
+        # ------------------------------------------------------------------
+        # Step 3: Review
+        # ------------------------------------------------------------------
+        if "review" not in steps:
+            logger.info(
+                "Input files at '%s'. Awaiting DFT execution.", structure_path
             )
             steps_completed.append("awaiting_dft")
             result = PipelineResult(
@@ -289,18 +473,18 @@ class Pipeline:
                 iteration=iteration,
                 candidates=candidates,
                 ranked_material=ranked_material,
-                structure_generated=True,
-                structure_path=path_or_error,
+                structure_generated="simulation" in steps,
+                structure_path=structure_path,
                 steps_completed=steps_completed,
             )
             self._save_state(result)
             return result
 
-        logger.info("[Iter %d] Step 4: Review...", iteration)
+        logger.info("[Iter %d] Review...", iteration)
         try:
             review_agent = ReviewAgent(llm_provider=self.llm)
             review_result = review_agent.review_with_backend(
-                self.objective, path_or_error, self.backend
+                self.objective, structure_path or "", self.backend
             )
         except Exception as e:
             logger.error("Review failed: %s", e)
@@ -310,8 +494,8 @@ class Pipeline:
                 iteration=iteration,
                 candidates=candidates,
                 ranked_material=ranked_material,
-                structure_generated=True,
-                structure_path=path_or_error,
+                structure_generated="simulation" in steps,
+                structure_path=structure_path,
                 error_message=f"Review failed: {e}",
                 steps_completed=steps_completed,
             )
@@ -332,8 +516,8 @@ class Pipeline:
             iteration=iteration,
             candidates=candidates,
             ranked_material=ranked_material,
-            structure_generated=True,
-            structure_path=path_or_error,
+            structure_generated="simulation" in steps,
+            structure_path=structure_path,
             review_result=review_result,
             steps_completed=steps_completed,
         )
@@ -429,7 +613,7 @@ class Pipeline:
                 logger.warning("Callback error on step '%s': %s", step_name, e)
 
     def _save_state(self, result: PipelineResult) -> None:
-        """Save pipeline state to JSON for later resume (if save_state is enabled)."""
+        """Save pipeline state and config to JSON for later resume."""
         if not self.config.save_state:
             return
         try:
@@ -437,6 +621,10 @@ class Pipeline:
             output_dir.mkdir(parents=True, exist_ok=True)
             state_path = output_dir / "pipeline_state.json"
             state_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+            config_path = output_dir / "pipeline_config.json"
+            config_path.write_text(
+                self.config.model_dump_json(indent=2), encoding="utf-8"
+            )
             logger.info("Pipeline state saved to '%s'.", state_path)
         except Exception as e:
             logger.warning("Failed to save pipeline state: %s", e)

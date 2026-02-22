@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -173,10 +173,19 @@ class EvaluationResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class PipelineStep(str, Enum):
+    """Available pipeline steps for flexible execution."""
+
+    DESIGN = "design"
+    SIMULATION = "simulation"
+    REVIEW = "review"
+
+
 class PipelineStatus(str, Enum):
     """Status of a pipeline execution."""
 
     COMPLETED = "completed"
+    COMPLETED_DESIGN = "completed_design"
     AWAITING_DFT = "awaiting_dft"
     FAILED_DESIGN = "failed_design"
     FAILED_SIMULATION = "failed_simulation"
@@ -226,6 +235,12 @@ class PipelineResult(BaseModel):
     steps_completed: List[str] = Field(
         default_factory=list,
         description="Ordered list of successfully completed pipeline steps.",
+    )
+    elapsed_seconds: Optional[float] = Field(
+        default=None, description="Wall-clock time in seconds for the pipeline run."
+    )
+    config_snapshot: Optional[Dict[str, Any]] = Field(
+        default=None, description="PipelineConfig snapshot for reproducibility."
     )
 
 
