@@ -1,10 +1,11 @@
 import logging
 import traceback
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from ase import Atoms
 from pydantic import BaseModel
 
+from shalom.backends.base import DFTBackend
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import StructureReviewForm, RankedMaterial
 from shalom.core.sandbox import SafeExecutor
@@ -156,11 +157,23 @@ class GeometryReviewer:
 
     Orchestrates the Generator -> exec -> FormFiller feedback loop,
     retrying up to ``max_retries`` times until a valid structure is produced.
+
+    When a ``backend`` is provided, uses ``backend.write_input()`` to save
+    structures in the backend's native format. Otherwise falls back to
+    ``ASEBuilder.save_poscar()`` for backward compatibility.
     """
 
-    def __init__(self, generator: GeometryGenerator, max_retries: int = 3):
+    def __init__(
+        self,
+        generator: GeometryGenerator,
+        max_retries: int = 3,
+        backend: Optional[DFTBackend] = None,
+        vasp_config: Optional[Any] = None,
+    ):
         self.generator = generator
         self.max_retries = max_retries
+        self.backend = backend
+        self.vasp_config = vasp_config
 
     def run_creation_loop(
         self, target_objective: str, ranked_material: RankedMaterial
@@ -197,10 +210,20 @@ class GeometryReviewer:
                 form_result = FormFiller.evaluate_atoms(atoms)
 
                 if form_result.is_valid:
-                    filename = f"POSCAR_{ranked_material.candidate.material_name.replace(' ', '_')}"
-                    filepath = ASEBuilder.save_poscar(
-                        atoms, filename=filename, directory="generated_structures"
-                    )
+                    output_dir = "generated_structures"
+                    mat_name = ranked_material.candidate.material_name.replace(" ", "_")
+
+                    if self.backend is not None:
+                        write_params = {"filename": f"POSCAR_{mat_name}"}
+                        if self.vasp_config is not None:
+                            write_params["config"] = self.vasp_config
+                        filepath = self.backend.write_input(
+                            atoms, output_dir, **write_params
+                        )
+                    else:
+                        filepath = ASEBuilder.save_poscar(
+                            atoms, filename=f"POSCAR_{mat_name}", directory=output_dir
+                        )
                     return True, atoms, filepath
                 else:
                     feedback = form_result.feedback

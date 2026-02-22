@@ -79,3 +79,19 @@ class TestSafeExecutor:
         """Passing None for local_vars creates empty dict."""
         result = SafeExecutor.execute("a = 42", local_vars=None)
         assert result["a"] == 42
+
+    def test_timeout_via_thread_pool(self):
+        """Long-running code triggers TimeoutException via ThreadPoolExecutor."""
+        import time
+
+        with pytest.raises(TimeoutException, match="timed out"):
+            SafeExecutor.execute(
+                "sleep(10)", local_vars={"sleep": time.sleep}, timeout_seconds=1,
+            )
+
+    def test_unsafe_exec_globals_scope(self, monkeypatch):
+        """SHALOM_ALLOW_UNSAFE_EXEC=1 allows access to full globals."""
+        monkeypatch.setenv("SHALOM_ALLOW_UNSAFE_EXEC", "1")
+        result = SafeExecutor.execute("import os; cwd = os.getcwd()")
+        assert "cwd" in result
+        assert isinstance(result["cwd"], str)

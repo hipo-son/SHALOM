@@ -1,6 +1,7 @@
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
+from shalom.backends.base import DFTBackend, DFTResult
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import ReviewResult
 
@@ -8,25 +9,33 @@ from shalom.core.schemas import ReviewResult
 class ReviewAgent:
     """Review Layer agent for evaluating simulation results.
 
-    Parses and analyzes simulation output (e.g. VASP OUTCAR) to determine
-    whether the target objective was achieved. On failure, generates specific
-    chemical/physical feedback for the Design Layer's next iteration.
+    Parses and analyzes DFT output (VASP OUTCAR, QE XML, etc.) to determine
+    whether the target objective was achieved. Performs quantitative physics
+    validation and generates specific feedback for the Design Layer.
+
+    Supports any backend implementing the ``DFTBackend`` protocol via
+    ``review_with_backend()``. The convenience method ``review()`` defaults
+    to VASP for backward compatibility.
     """
 
     def __init__(self, llm_provider: LLMProvider):
         self.llm = llm_provider
-        self.system_prompt = """[v1.0.0]
-        You are the "Review Agent".
-        You compare the parsed key data (energy, max forces, convergence status, etc.)
-        from VASP OUTCAR results against the user's original Target Objective.
+        self.system_prompt = """[v2.0.0]
+        You are the "Review Agent" — a computational materials science expert.
+        You evaluate DFT simulation results against the user's Target Objective.
 
         [Evaluation Guidelines]
-        1. Check whether the simulation steps converged normally.
-        2. Determine if the physical properties aligned with the target objective
-           (energy stability, etc.).
-        3. If the simulation failed or needs improvement, provide specific
-           chemical/physical feedback (feedback_for_design) so the Design Layer
-           can select better materials on the next iteration.
+        1. Check convergence: both electronic (SCF) and ionic loops.
+        2. Verify physical reasonableness: energy per atom, max force, bandgap.
+        3. Assess alignment with target objective properties.
+        4. If entropy T*S > 1 meV/atom, recommend reducing SIGMA.
+        5. If GGA+U was used, note that Wang et al. U values are empirical.
+           For strongly-correlated systems, recommend r2SCAN or linear-response U.
+        6. If ISIF=4 was used for 2D materials, note the volume-conservation
+           limitation for extreme in-plane deformations.
+        7. Review error correction history: flag if BRMIX occurred (charge sloshing).
+        8. In feedback_for_design, provide specific INCAR parameter suggestions
+           when possible (e.g., "increase ENCUT to 600", "try ALGO=Damped").
         """
 
     def parse_outcar(self, filepath: str) -> Dict[str, Any]:
@@ -62,11 +71,37 @@ class ReviewAgent:
         return {
             "energy": energy,
             "is_converged": is_converged,
-            "forces_max": 0.05,  # Placeholder — use a proper parser in production
+            "forces_max": None,
         }
+
+    def review_with_backend(
+        self,
+        target_objective: str,
+        directory: str,
+        backend: DFTBackend,
+        correction_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> ReviewResult:
+        """Evaluate DFT results using any backend implementing the DFTBackend protocol.
+
+        Args:
+            target_objective: The original natural language objective.
+            directory: Directory containing the DFT output files.
+            backend: A DFTBackend instance (e.g. VASPBackend, QEBackend).
+            correction_history: Error recovery actions applied during calculation.
+
+        Returns:
+            ReviewResult with success status, metrics, and feedback.
+        """
+        dft_result = backend.parse_output(directory)
+        if correction_history:
+            dft_result.correction_history = correction_history
+        return self._evaluate(target_objective, dft_result)
 
     def review(self, target_objective: str, outcar_path: str) -> ReviewResult:
         """Read and evaluate a VASP OUTCAR file against the target objective.
+
+        Convenience method that parses the given OUTCAR file directly.
+        For other backends, use ``review_with_backend()`` with a directory.
 
         Args:
             target_objective: The original natural language objective.
@@ -75,19 +110,102 @@ class ReviewAgent:
         Returns:
             ReviewResult with success status, metrics, and feedback.
         """
-        parsed_data = self.parse_outcar(outcar_path)
-
-        user_prompt = (
-            f"Target Objective: {target_objective}\n\n"
-            f"Parsed OUTCAR Data:\n"
-            f"- Converged: {parsed_data['is_converged']}\n"
-            f"- Final Energy: {parsed_data['energy']} eV\n"
-            f"- Max Force: {parsed_data['forces_max']} eV/A\n\n"
-            "Please analyze these results and output the ReviewResult structure."
+        parsed = self.parse_outcar(outcar_path)
+        dft_result = DFTResult(
+            energy=parsed["energy"],
+            forces_max=parsed["forces_max"],
+            is_converged=parsed["is_converged"],
+            raw=parsed,
         )
+        return self._evaluate(target_objective, dft_result)
+
+    def _evaluate(self, target_objective: str, dft_result: DFTResult) -> ReviewResult:
+        """Send parsed DFT results + physics checks to the LLM for evaluation.
+
+        Args:
+            target_objective: The original natural language objective.
+            dft_result: Unified DFT result from any backend.
+
+        Returns:
+            ReviewResult with success status, metrics, and feedback.
+        """
+        physics_warnings = self._run_physics_checks(dft_result)
+
+        # Build enriched prompt with all available data
+        lines = [
+            f"Target Objective: {target_objective}",
+            "",
+            "Parsed DFT Data:",
+            f"- Converged: {dft_result.is_converged}",
+            f"- Final Energy: {dft_result.energy} eV",
+            f"- Max Force: {dft_result.forces_max} eV/A",
+        ]
+        if dft_result.bandgap is not None:
+            lines.append(f"- Band Gap: {dft_result.bandgap} eV")
+        if dft_result.magnetization is not None:
+            lines.append(f"- Magnetization: {dft_result.magnetization} muB")
+        if dft_result.entropy_per_atom is not None:
+            lines.append(f"- Entropy T*S/atom: {dft_result.entropy_per_atom:.6f} eV")
+
+        if dft_result.correction_history:
+            lines.append("")
+            lines.append("Error Correction History:")
+            for entry in dft_result.correction_history:
+                lines.append(f"  - {entry.get('error_type', 'unknown')}: {entry.get('action', '')}")
+
+        if physics_warnings:
+            lines.append("")
+            lines.append("Physics Validation Warnings:")
+            for w in physics_warnings:
+                lines.append(f"  - {w}")
+
+        lines.append("")
+        lines.append("Please analyze these results and output the ReviewResult structure.")
+
+        user_prompt = "\n".join(lines)
 
         return self.llm.generate_structured_output(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
             response_model=ReviewResult,
         )
+
+    @staticmethod
+    def _run_physics_checks(dft_result: DFTResult) -> List[str]:
+        """Run quantitative physics validation checks.
+
+        Args:
+            dft_result: Parsed DFT result.
+
+        Returns:
+            List of warning strings (empty if all checks pass).
+        """
+        warnings: List[str] = []
+
+        # Force convergence check
+        if dft_result.forces_max is not None and dft_result.forces_max > 0.02:
+            warnings.append(
+                f"Max force ({dft_result.forces_max:.4f} eV/A) exceeds 0.02 eV/A threshold."
+            )
+
+        # Entropy check (SIGMA over-smearing)
+        if dft_result.entropy_per_atom is not None:
+            if abs(dft_result.entropy_per_atom) > 0.001:  # 1 meV/atom
+                warnings.append(
+                    f"Entropy T*S/atom ({dft_result.entropy_per_atom:.6f} eV) exceeds 1 meV/atom. "
+                    "Consider reducing SIGMA."
+                )
+
+        # BRMIX in correction history
+        if dft_result.correction_history:
+            brmix_count = sum(
+                1 for h in dft_result.correction_history
+                if h.get("error_type") == "BRMIX"
+            )
+            if brmix_count > 0:
+                warnings.append(
+                    f"BRMIX error corrected {brmix_count} time(s). "
+                    "Indicates charge density sloshing — verify geometry."
+                )
+
+        return warnings

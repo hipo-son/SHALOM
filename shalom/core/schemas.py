@@ -1,4 +1,6 @@
+from enum import Enum
 from typing import List, Dict, Any, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -51,7 +53,7 @@ class StructureReviewForm(BaseModel):
         description="Vacuum layer thickness for surface/2D materials (Angstrom).",
     )
     is_valid: bool = Field(
-        description="Whether this structure is physically valid for a VASP calculation."
+        description="Whether this structure is physically valid for a DFT calculation."
     )
     feedback: str = Field(
         description="Specific feedback on what to fix if the structure has issues."
@@ -70,7 +72,7 @@ class AgentMessage(BaseModel):
 
 
 class ReviewResult(BaseModel):
-    """Final evaluation and feedback schema from the Review Layer after analyzing OUTCAR."""
+    """Final evaluation and feedback schema from the Review Layer after analyzing DFT output."""
 
     is_successful: bool = Field(
         description="Whether the materials simulation successfully achieved the target objective."
@@ -84,4 +86,123 @@ class ReviewResult(BaseModel):
             "Feedback to be sent back to the Design Layer "
             "(e.g., failure reasons or suggestions for next targets)."
         )
+    )
+    bandgap: Optional[float] = Field(
+        default=None, description="Band gap in eV (None if metallic or not computed)."
+    )
+    magnetization: Optional[float] = Field(
+        default=None, description="Total magnetization in Bohr magneton."
+    )
+    entropy_per_atom: Optional[float] = Field(
+        default=None,
+        description="Electronic entropy T*S per atom in eV. Warns if > 1 meV/atom.",
+    )
+    suggested_incar_changes: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="INCAR parameter changes suggested by the reviewer for next iteration.",
+    )
+    correction_summary: Optional[str] = Field(
+        default=None,
+        description="Summary of error corrections applied during the calculation.",
+    )
+    physics_warnings: Optional[List[str]] = Field(
+        default=None,
+        description="List of physics validation warnings (e.g., ISIF=4 trap, +U limitation).",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-Agent Evaluation Schemas
+# ---------------------------------------------------------------------------
+
+
+class CandidateScore(BaseModel):
+    """Single candidate evaluation by a specialist evaluator."""
+
+    material_name: str = Field(
+        description="Name of the evaluated material."
+    )
+    score: float = Field(
+        ge=0.0, le=1.0, description="Score from this perspective."
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0, default=0.5,
+        description=(
+            "Evaluator confidence in this score. "
+            "0.0 = pure guess, 1.0 = literature/database-backed. "
+            "Must be <= 0.5 unless citing ICSD, Materials Project, or published references."
+        ),
+    )
+    justification: str = Field(
+        description="Reasoning for this score with specific physical/chemical evidence."
+    )
+
+
+class EvaluationResponse(BaseModel):
+    """A specialist evaluator's scores for all candidates."""
+
+    perspective: str = Field(description="Evaluation perspective name.")
+    scores: List[CandidateScore] = Field(
+        description="Scores for each candidate from this perspective."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Schemas
+# ---------------------------------------------------------------------------
+
+
+class PipelineStatus(str, Enum):
+    """Status of a pipeline execution."""
+
+    COMPLETED = "completed"
+    AWAITING_DFT = "awaiting_dft"
+    FAILED_DESIGN = "failed_design"
+    FAILED_SIMULATION = "failed_simulation"
+    FAILED_REVIEW = "failed_review"
+
+
+class PipelineResult(BaseModel):
+    """Complete result of an end-to-end pipeline run."""
+
+    status: PipelineStatus = Field(
+        description="Final status of the pipeline execution."
+    )
+    objective: str = Field(
+        description="The target objective that was provided."
+    )
+    iteration: int = Field(
+        default=1, description="Current iteration in the closed loop."
+    )
+
+    # Design Layer outputs
+    candidates: Optional[List[MaterialCandidate]] = Field(
+        default=None, description="Candidates from the Coarse Selector."
+    )
+    ranked_material: Optional[RankedMaterial] = Field(
+        default=None, description="Winner from the Fine Selector."
+    )
+
+    # Simulation Layer outputs
+    structure_generated: bool = Field(
+        default=False,
+        description="Whether a valid structure was successfully generated.",
+    )
+    structure_path: Optional[str] = Field(
+        default=None, description="Path to the generated DFT input file."
+    )
+
+    # Review Layer outputs
+    review_result: Optional[ReviewResult] = Field(
+        default=None,
+        description="Review of the DFT output, if DFT was executed.",
+    )
+
+    # Metadata
+    error_message: Optional[str] = Field(
+        default=None, description="Error details if the pipeline failed at any stage."
+    )
+    steps_completed: List[str] = Field(
+        default_factory=list,
+        description="Ordered list of successfully completed pipeline steps.",
     )

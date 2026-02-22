@@ -279,3 +279,133 @@ class TestGeometryReviewer:
 
         assert success is True
         assert call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# GeometryReviewer with backend + vasp_config (Phase 1 coverage)
+# ---------------------------------------------------------------------------
+
+
+class TestGeometryReviewerWithBackend:
+    """Tests for GeometryReviewer using backend.write_input with vasp_config."""
+
+    def _make_ranked_material(self):
+        candidate = MaterialCandidate(
+            material_name="Cu", elements=["Cu"], reasoning="test", expected_properties={}
+        )
+        return RankedMaterial(candidate=candidate, score=0.9, ranking_justification="test")
+
+    def test_backend_with_vasp_config(self, mock_llm, tmp_path):
+        """GeometryReviewer passes vasp_config to backend.write_input."""
+        generator = GeometryGenerator(llm_provider=mock_llm)
+
+        mock_backend = MagicMock()
+        mock_backend.write_input.return_value = str(tmp_path / "output")
+
+        mock_config = MagicMock()
+
+        reviewer = GeometryReviewer(
+            generator=generator, max_retries=3,
+            backend=mock_backend, vasp_config=mock_config,
+        )
+
+        mock_response = MagicMock()
+        mock_response.python_code = "atoms = bulk('Cu', 'fcc', a=3.6)"
+        mock_response.explanation = "Cu bulk"
+        mock_llm.generate_structured_output.return_value = mock_response
+
+        ranked = self._make_ranked_material()
+        success, atoms, path = reviewer.run_creation_loop("test", ranked)
+
+        assert success is True
+        # Verify backend.write_input was called with config in kwargs
+        mock_backend.write_input.assert_called_once()
+        call_kwargs = mock_backend.write_input.call_args
+        assert "config" in call_kwargs.kwargs or (
+            len(call_kwargs.args) >= 2 and call_kwargs.kwargs.get("config") is mock_config
+        )
+
+    def test_backend_without_vasp_config(self, mock_llm, tmp_path):
+        """GeometryReviewer with backend but no vasp_config omits config param."""
+        generator = GeometryGenerator(llm_provider=mock_llm)
+
+        mock_backend = MagicMock()
+        mock_backend.write_input.return_value = str(tmp_path / "output")
+
+        reviewer = GeometryReviewer(
+            generator=generator, max_retries=3,
+            backend=mock_backend, vasp_config=None,
+        )
+
+        mock_response = MagicMock()
+        mock_response.python_code = "atoms = bulk('Cu', 'fcc', a=3.6)"
+        mock_response.explanation = "Cu bulk"
+        mock_llm.generate_structured_output.return_value = mock_response
+
+        ranked = self._make_ranked_material()
+        success, atoms, path = reviewer.run_creation_loop("test", ranked)
+
+        assert success is True
+        call_kwargs = mock_backend.write_input.call_args
+        assert "config" not in (call_kwargs.kwargs or {})
+
+    def test_invalid_then_valid_structure(self, mock_llm, tmp_path):
+        """First attempt produces invalid structure, second succeeds — feedback path."""
+        generator = GeometryGenerator(llm_provider=mock_llm)
+
+        mock_backend = MagicMock()
+        mock_backend.write_input.return_value = str(tmp_path / "output")
+
+        reviewer = GeometryReviewer(
+            generator=generator, max_retries=3,
+            backend=mock_backend, vasp_config=None,
+        )
+
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_resp = MagicMock()
+            if call_count == 1:
+                # Overlapping atoms → FormFiller rejects
+                mock_resp.python_code = (
+                    "from ase import Atoms\n"
+                    "atoms = Atoms('Cu2', positions=[(0,0,0),(0.1,0.1,0.1)], cell=[10,10,10], pbc=True)"
+                )
+            else:
+                mock_resp.python_code = "atoms = bulk('Cu', 'fcc', a=3.6)"
+            mock_resp.explanation = "test"
+            return mock_resp
+
+        mock_llm.generate_structured_output.side_effect = side_effect
+
+        ranked = self._make_ranked_material()
+        success, atoms, path = reviewer.run_creation_loop("test", ranked)
+
+        assert success is True
+        assert call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# FormFiller thin vacuum coverage
+# ---------------------------------------------------------------------------
+
+
+class TestFormFillerThinVacuum:
+    """Tests for FormFiller vacuum warning path (z-cell > 10 and vacuum < 8)."""
+
+    def test_thin_vacuum_detected(self):
+        """Slab with z-cell > 10 and vacuum < 8 A triggers warning."""
+        # 4 atoms spanning z=2 to z=8 (thickness=6), cell z=12, vacuum=6
+        atoms = Atoms(
+            "Cu4",
+            positions=[(0, 0, 2), (0, 0, 4), (0, 0, 6), (0, 0, 8)],
+            cell=[5, 5, 12],
+            pbc=True,
+        )
+        form = FormFiller.evaluate_atoms(atoms)
+        assert form.is_valid is False
+        assert form.vacuum_thickness is not None
+        assert form.vacuum_thickness < 8.0
+        assert "too thin" in form.feedback

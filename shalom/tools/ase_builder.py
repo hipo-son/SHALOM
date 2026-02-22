@@ -51,24 +51,43 @@ class ASEBuilder:
         return slab
 
     @staticmethod
-    def save_poscar(atoms: Atoms, filename: str = "POSCAR", directory: str = ".") -> str:
-        """
-        Saves the generated structure in VASP POSCAR format.
+    def save_structure(
+        atoms: Atoms,
+        filename: str = "POSCAR",
+        directory: str = ".",
+        fmt: str = "vasp",
+    ) -> str:
+        """Save the generated structure in the specified format.
 
         Args:
-            atoms (Atoms): Structure to save.
-            filename (str): Name of the file (default: POSCAR).
-            directory (str): Directory to save in (default: current directory).
+            atoms: Structure to save.
+            filename: Name of the output file.
+            directory: Directory to save in (default: current directory).
+            fmt: ASE I/O format string (e.g. "vasp", "espresso-in").
 
         Returns:
-            str: Full path of the saved file.
+            Full path of the saved file.
         """
         os.makedirs(directory, exist_ok=True)
         filepath = os.path.join(directory, filename)
-
-        # Explicitly specify format to avoid VASP version issues
-        write(filepath, atoms, format="vasp")
+        write(filepath, atoms, format=fmt)
         return filepath
+
+    @staticmethod
+    def save_poscar(atoms: Atoms, filename: str = "POSCAR", directory: str = ".") -> str:
+        """Save the generated structure in VASP POSCAR format.
+
+        Convenience wrapper around ``save_structure(fmt="vasp")``.
+
+        Args:
+            atoms: Structure to save.
+            filename: Name of the file (default: POSCAR).
+            directory: Directory to save in (default: current directory).
+
+        Returns:
+            Full path of the saved file.
+        """
+        return ASEBuilder.save_structure(atoms, filename=filename, directory=directory, fmt="vasp")
 
     @staticmethod
     def analyze_structure(atoms: Atoms) -> Dict[str, Any]:
