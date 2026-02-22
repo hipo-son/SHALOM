@@ -138,30 +138,63 @@ A three-step self-correction loop validates the physical soundness of DFT input 
 
 ## 4. Release Strategy & Development Milestones
 
-### v1.0 — Static DFT Foundation (arXiv preprint target)
+### Publication Strategy
 
-Positioning: "A robust, sandbox-secured, Pydantic-schema-driven foundation for autonomous DFT workflows with dual-backend support."
+| Paper | Venue | Content | Role |
+|-------|-------|---------|------|
+| **#1 Tech Report** | arXiv only | SHALOM v1.0 architecture — Pydantic schemas, SafeExecutor, VASP/QE dual backend (6–8 pages) | Stake priority; zero review overhead; cited as foundation by subsequent papers |
+| **#2 Main Paper** | Nature Computational Science / npj Computational Materials / Digital Discovery | SHALOM v2.0 — autonomous multi-scale workflows, Dynamic Recipe Generator, self-correction AI with 100+ benchmark cases | Primary journal publication |
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **Phase 1: Core Library & VASP Automation** | Agent pipeline (Design → Simulation → Review), VASP input generation with structure-aware auto-detection, error recovery engine | Complete |
-| **Phase 2: Configuration Externalization** | Prompt/config externalization to `.md`/`.yaml`, loader with caching + validation + fallback, Pydantic schema validation | Complete |
-| **Phase 3: QE Backend & Token Compression** | Quantum ESPRESSO backend (write/parse), SSSP metadata, Materials Project client, CLI, token-aware context compression (`compress_error_log`), 643 tests at 95.6% coverage | Complete |
-| **Phase 4: DFT Execution & Self-Correction** | Local QE runner (`subprocess`), `--execute` CLI flag, execution → ReviewAgent auto-loop, error recovery retry (max 3) | In Progress |
-| **Phase 5: VASP-Slurm HPC Integration** | Slurm job submission/monitoring, VASP execution runner, end-to-end testing with bulk materials | Planned |
+**Why arXiv-only for #1:**
+- Eliminates 3–6 months of peer-review overhead — all effort redirected to the main paper.
+- Open-access maximizes developer adoption (no paywall). Precedent: Word2Vec, GAN, Transformer papers accumulated thousands of citations from arXiv alone.
+- Main paper (#2) references "#1 for technical details" and devotes 100% of page budget to novelty (autonomy, recipe generation, benchmark results).
 
-### v2.0 — Multi-scale & Autonomous (journal submission target)
+---
 
-Positioning: "Beyond static structure analysis — agents autonomously orchestrate multi-scale simulations (DFT + MD) and generate optimal execution recipes from natural language objectives."
+### Phase 1: Infrastructure & Priority Staking (current)
 
-Target journals: Nature Computational Science, npj Computational Materials, Digital Discovery.
+**Goal:** Establish global technical priority for "LLM-based sandboxed DFT framework with dual-backend support."
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **Phase 6: Dynamic Recipe Generator** | `WorkflowRecipe` Pydantic model, Recipe Recommender Agent that infers optimal execution DAG from user intent (e.g., "calculate Li-ion diffusion" → [VASP relax → VASP bandgap → LAMMPS NVT MD]) | Planned |
-| **Phase 7: LAMMPS & AIMD Integration** | LAMMPS backend (classical MD), AIMD workflow support, trajectory analysis agents | Planned |
-| **Phase 8: Advanced Use Cases** | 2D/TMD systems, defect screening, catalyst design, phase-diagram exploration | Planned |
-| **Phase 9: Performance & Metrics** | LLM API cost tracking, search performance benchmarks, reproducibility audit tooling | Planned |
+#### 1a. Complete v1.0 codebase
+
+| Milestone | Scope | Status |
+|-----------|-------|--------|
+| Core Library & VASP Automation | Agent pipeline (Design → Simulation → Review), VASP input generation, error recovery engine | Complete |
+| Configuration Externalization | Prompt/config to `.md`/`.yaml`, loader with caching + validation + fallback, Pydantic schemas | Complete |
+| QE Backend & Token Compression | QE backend (write/parse), SSSP metadata, MP client, CLI, `compress_error_log`, 643 tests at 95.6% coverage | Complete |
+| DFT Execution & Self-Correction | Local QE runner (`subprocess`), `--execute` CLI flag, execution → ReviewAgent auto-loop, error recovery retry (max 3) | In Progress |
+| VASP-Slurm HPC Integration | Slurm job submission/monitoring, VASP execution runner, end-to-end testing with bulk materials | Planned |
+
+#### 1b. arXiv submission + open-source release
+
+- Write 6–8 page tech report covering architecture, schema design, dual-backend abstraction, and benchmark.
+- `pip install shalom` on PyPI.
+- README links to arXiv preprint + short demo video.
+
+---
+
+### Phase 2: Multi-scale Engine & AI Brain Expansion (2–3 months)
+
+**Goal:** Evolve from "command executor" to "scientist-level autonomous agent" with multi-scale simulation capability.
+
+| Milestone | Scope | Status |
+|-----------|-------|--------|
+| LAMMPS & AIMD Integration | LAMMPS backend (classical MD), AIMD workflow support, trajectory analysis agents. "First unified pipeline spanning quantum (DFT) to classical (MD) scales." | Planned |
+| Review Layer Hardening | Self-correction algorithm tuning; collect 100+ convergence benchmark cases (broken initial structures → agent-driven optimization → converged result) | Planned |
+| Dynamic Recipe Generator | `WorkflowRecipe` Pydantic model, Recipe Recommender Agent that infers optimal execution DAG from user intent (e.g., "calculate Li-ion diffusion" → [VASP relax → VASP bandgap → LAMMPS NVT MD]) | Planned |
+
+---
+
+### Phase 3: Journal Submission & Advanced Use Cases
+
+**Goal:** Submit main paper (#2) to top-tier journal with compelling benchmark data.
+
+| Milestone | Scope | Status |
+|-----------|-------|--------|
+| Advanced Use Cases | 2D/TMD systems, defect screening, catalyst design, phase-diagram exploration | Planned |
+| Performance & Metrics | LLM API cost tracking, search performance benchmarks, reproducibility audit tooling | Planned |
+| Main Paper | Figures, benchmark tables (100+ cases), comparison with manual workflows (time-to-result), recipe generation demo | Planned |
 
 ## 5. Software Architecture
 

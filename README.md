@@ -135,12 +135,13 @@ The demo runs the full pipeline (Design → Simulation) with real-time cost trac
 
 ## Roadmap
 
-| Version | Target | Key Features |
-|---------|--------|-------------|
-| **v1.0** | arXiv preprint | VASP + QE static DFT, 3-layer agent pipeline, error recovery, CLI, token-aware compression |
-| **v2.0** | Journal submission | Dynamic Recipe Generator, LAMMPS/AIMD integration, multi-scale autonomous workflows |
+| Phase | Target | Key Features |
+|-------|--------|-------------|
+| **Phase 1** | arXiv preprint + PyPI | VASP + QE static DFT, 3-layer agent pipeline, error recovery, CLI, token-aware compression |
+| **Phase 2** | Engine expansion | LAMMPS/AIMD integration, Dynamic Recipe Generator, 100+ self-correction benchmarks |
+| **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) |
 
-See the [Master Design Document](docs/master_design_document.md) for detailed milestones.
+See the [Master Design Document](docs/master_design_document.md) for detailed milestones and publication strategy.
 
 ## Documentation
 Read the full API reference and tutorials on [ReadTheDocs](https://shalom.readthedocs.io).
