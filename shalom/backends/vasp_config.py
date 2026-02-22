@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from ase import Atoms
 
+from shalom._config_loader import load_config
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -111,54 +113,12 @@ class VASPInputConfig:
 
 
 # ---------------------------------------------------------------------------
-# POTCAR Variant Mappings
+# POTCAR Variant Mappings (loaded from config/potcar_mapping.yaml)
 # ---------------------------------------------------------------------------
 
-# VASP wiki official recommended pseudopotentials (PBE_54).
-# Differs from pymatgen/MP defaults for several elements.
-VASP_RECOMMENDED_POTCARS: Dict[str, str] = {
-    # Main group
-    "H": "H", "He": "He",
-    "Li": "Li_sv", "Be": "Be", "B": "B", "C": "C", "N": "N", "O": "O",
-    "F": "F", "Ne": "Ne",
-    "Na": "Na_pv", "Mg": "Mg", "Al": "Al", "Si": "Si", "P": "P", "S": "S",
-    "Cl": "Cl", "Ar": "Ar",
-    "K": "K_sv", "Ca": "Ca_sv",
-    # 3d transition metals
-    "Sc": "Sc_sv", "Ti": "Ti_sv", "V": "V_sv", "Cr": "Cr_pv",
-    "Mn": "Mn_pv", "Fe": "Fe", "Co": "Co", "Ni": "Ni",
-    "Cu": "Cu", "Zn": "Zn",
-    # p-block row 4
-    "Ga": "Ga_d", "Ge": "Ge_d", "As": "As", "Se": "Se", "Br": "Br", "Kr": "Kr",
-    # 4d transition metals
-    "Rb": "Rb_sv", "Sr": "Sr_sv",
-    "Y": "Y_sv", "Zr": "Zr_sv", "Nb": "Nb_sv", "Mo": "Mo_sv",
-    "Tc": "Tc_pv", "Ru": "Ru_pv", "Rh": "Rh_pv", "Pd": "Pd",
-    "Ag": "Ag", "Cd": "Cd",
-    # p-block row 5
-    "In": "In_d", "Sn": "Sn_d", "Sb": "Sb", "Te": "Te", "I": "I", "Xe": "Xe",
-    # 5d transition metals
-    "Cs": "Cs_sv", "Ba": "Ba_sv",
-    "Hf": "Hf_pv", "Ta": "Ta_pv", "W": "W_sv",
-    "Re": "Re", "Os": "Os", "Ir": "Ir", "Pt": "Pt",
-    "Au": "Au", "Hg": "Hg",
-    # p-block row 6
-    "Tl": "Tl_d", "Pb": "Pb_d", "Bi": "Bi_d",
-    # Lanthanides
-    "La": "La", "Ce": "Ce", "Pr": "Pr_3", "Nd": "Nd_3",
-    "Sm": "Sm_3", "Eu": "Eu_2", "Gd": "Gd_3",
-    "Tb": "Tb_3", "Dy": "Dy_3", "Ho": "Ho_3",
-    "Er": "Er_3", "Tm": "Tm_3", "Yb": "Yb_2", "Lu": "Lu_3",
-    # Actinides
-    "U": "U", "Np": "Np", "Pu": "Pu",
-}
-
-# MP default POTCAR variants (subset where they differ from VASP recommended).
-MP_DEFAULT_POTCARS: Dict[str, str] = {
-    "Fe": "Fe_pv", "Ti": "Ti_pv", "V": "V_pv",
-    "Mo": "Mo_pv", "W": "W_pv",
-    "Cr": "Cr_pv", "Mn": "Mn_pv",
-}
+_potcar_cfg = load_config("potcar_mapping")
+VASP_RECOMMENDED_POTCARS: Dict[str, str] = _potcar_cfg["vasp_recommended"]
+MP_DEFAULT_POTCARS: Dict[str, str] = _potcar_cfg.get("mp_default_overrides", {})
 
 
 def get_potcar_variant(element: str, preset: str = "vasp_recommended") -> str:
@@ -178,32 +138,10 @@ def get_potcar_variant(element: str, preset: str = "vasp_recommended") -> str:
 
 
 # ---------------------------------------------------------------------------
-# ENMAX Reference Values (PBE POTCAR)
+# ENMAX Reference Values (loaded from config/enmax_values.yaml)
 # ---------------------------------------------------------------------------
 
-# ENMAX values from VASP-recommended PBE_54 POTCARs (eV).
-# Used for dynamic ENCUT calculation.
-ENMAX_VALUES: Dict[str, float] = {
-    "H": 250.0, "He": 479.0,
-    "Li": 499.0, "Be": 309.0, "B": 318.7, "C": 400.0, "N": 400.0, "O": 400.0,
-    "F": 400.0, "Ne": 344.0,
-    "Na": 260.0, "Mg": 200.0, "Al": 240.3, "Si": 245.3, "P": 255.0, "S": 280.0,
-    "Cl": 262.0, "Ar": 266.0,
-    "K": 259.0, "Ca": 267.0,
-    "Sc": 223.0, "Ti": 495.0, "V": 476.0, "Cr": 227.0,
-    "Mn": 270.0, "Fe": 267.9, "Co": 268.0, "Ni": 270.0,
-    "Cu": 295.4, "Zn": 277.0,
-    "Ga": 135.0, "Ge": 174.0, "As": 209.0, "Se": 212.0, "Br": 213.0,
-    "Rb": 220.0, "Sr": 229.0,
-    "Y": 203.0, "Zr": 230.0, "Nb": 209.0, "Mo": 225.0,
-    "Ru": 213.0, "Rh": 229.0, "Pd": 251.0, "Ag": 250.0, "Cd": 274.0,
-    "In": 96.0, "Sn": 103.0, "Sb": 172.0, "Te": 175.0, "I": 176.0,
-    "Cs": 220.0, "Ba": 238.0,
-    "Hf": 220.0, "Ta": 224.0, "W": 224.0,
-    "Re": 226.0, "Os": 228.0, "Ir": 211.0, "Pt": 230.0,
-    "Au": 230.0,
-    "La": 219.0, "Ce": 273.0, "Gd": 256.0, "U": 253.0,
-}
+ENMAX_VALUES: Dict[str, float] = load_config("enmax_values")
 
 
 def compute_encut(
@@ -233,47 +171,23 @@ def compute_encut(
 
 
 # ---------------------------------------------------------------------------
-# Magnetic Elements & MAGMOM Defaults
+# Magnetic Elements & MAGMOM Defaults (loaded from config/magnetic_elements.yaml)
 # ---------------------------------------------------------------------------
 
-# Default initial MAGMOM values per element (high-spin initialization).
-DEFAULT_MAGMOM: Dict[str, float] = {
-    # 3d transition metals
-    "Ti": 1.0, "V": 3.0, "Cr": 4.0, "Mn": 5.0,
-    "Fe": 5.0, "Co": 3.0, "Ni": 2.0, "Cu": 1.0,
-    # 4d/5d (surface/nano structures may show magnetism)
-    "Ru": 2.0, "Rh": 1.0, "Os": 2.0, "Ir": 1.0,
-    # Lanthanides (4f electron count based)
-    "Ce": 1.0, "Pr": 2.0, "Nd": 3.0, "Sm": 5.0,
-    "Eu": 7.0, "Gd": 7.0, "Tb": 6.0, "Dy": 5.0,
-    "Ho": 4.0, "Er": 3.0, "Tm": 2.0, "Yb": 1.0,
-    # Actinides
-    "U": 2.0, "Np": 3.0, "Pu": 5.0,
-}
-
+_mag_cfg = load_config("magnetic_elements")
+DEFAULT_MAGMOM: Dict[str, float] = _mag_cfg["default_magmom"]
 MAGNETIC_ELEMENTS: frozenset = frozenset(DEFAULT_MAGMOM.keys())
 
 
 # ---------------------------------------------------------------------------
-# Hubbard U Values — Dudarev Scheme (LDAUTYPE=2)
+# Hubbard U Values — Dudarev Scheme (loaded from config/hubbard_u.yaml)
 # ---------------------------------------------------------------------------
 
-# Wang et al. PRB 73, 195107 (2006) — U_eff values.
-# Dudarev scheme: J is ignored, only U_eff = U - J matters.
-# Tuple: (L, U_eff, J) where L=2 for d-orbitals, L=3 for f-orbitals.
+_hub_cfg = load_config("hubbard_u")
 HUBBARD_U_VALUES: Dict[str, tuple] = {
-    "Fe": (2, 5.3, 0.0),
-    "Co": (2, 3.32, 0.0),
-    "Ni": (2, 6.2, 0.0),
-    "Mn": (2, 3.9, 0.0),
-    "V": (2, 3.25, 0.0),
-    "Cr": (2, 3.7, 0.0),
-    "Cu": (2, 4.0, 0.0),   # Cu^2+ in oxides; metallic Cu typically U=0
-    "Ti": (2, 0.0, 0.0),   # TiO2 etc. usually don't need U
+    k: (v["L"], v["U"], v["J"]) for k, v in _hub_cfg["values"].items()
 }
-
-# Anion elements that trigger GGA+U when combined with magnetic TM.
-ANION_ELEMENTS: frozenset = frozenset({"O", "S", "Se", "Te"})
+ANION_ELEMENTS: frozenset = frozenset(_hub_cfg["anion_elements"])
 
 
 # ---------------------------------------------------------------------------
@@ -300,17 +214,10 @@ def _get_lmaxmix(atomic_numbers: List[int]) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# Pure Metal Detection
+# Pure Metal Detection (loaded from config/metallic_elements.yaml)
 # ---------------------------------------------------------------------------
 
-_METALLIC_ELEMENTS: frozenset = frozenset({
-    "Li", "Be", "Na", "Mg", "Al", "K", "Ca",
-    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
-    "Ga", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
-    "In", "Sn", "Cs", "Ba", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au",
-    "La", "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu",
-    "U", "Np", "Pu",
-})
+_METALLIC_ELEMENTS: frozenset = frozenset(load_config("metallic_elements")["elements"])
 
 
 def _is_pure_metal(elements: List[str]) -> bool:
@@ -497,81 +404,11 @@ def detect_and_apply_structure_hints(
 # ---------------------------------------------------------------------------
 
 # Base INCAR presets by (calc_type, accuracy).
+# Loaded from config/incar_presets.yaml and converted to tuple keys.
+_preset_cfg = load_config("incar_presets")
 _PRESET_INCAR: Dict[tuple, Dict[str, Any]] = {
-    # STANDARD presets
-    (CalculationType.RELAXATION, AccuracyLevel.STANDARD): {
-        "ENCUT": 520, "EDIFF": 1e-5, "EDIFFG": -0.02,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 99, "IBRION": 2, "ISIF": 3,
-        "PREC": "Accurate", "LREAL": "Auto", "LORBIT": 11,
-        "NELM": 100,
-    },
-    (CalculationType.STATIC, AccuracyLevel.STANDARD): {
-        "ENCUT": 520, "EDIFF": 1e-5,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 0, "IBRION": -1,
-        "PREC": "Accurate", "LREAL": "Auto", "LORBIT": 11,
-        "NELM": 100,
-    },
-    (CalculationType.BAND_STRUCTURE, AccuracyLevel.STANDARD): {
-        "ENCUT": 520, "EDIFF": 1e-5,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 0, "IBRION": -1, "ICHARG": 11,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 100,
-    },
-    (CalculationType.DOS, AccuracyLevel.STANDARD): {
-        "ENCUT": 520, "EDIFF": 1e-5,
-        "ISMEAR": -5, "SIGMA": 0.05,
-        "NSW": 0, "IBRION": -1, "ICHARG": 11,
-        "NEDOS": 3001,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 100,
-    },
-    (CalculationType.ELASTIC, AccuracyLevel.STANDARD): {
-        "ENCUT": 520, "EDIFF": 1e-6, "EDIFFG": -0.01,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 1, "IBRION": 6, "ISIF": 3,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 100,
-    },
-    # PRECISE presets (overrides)
-    (CalculationType.RELAXATION, AccuracyLevel.PRECISE): {
-        "ENCUT": 520, "EDIFF": 1e-6, "EDIFFG": -0.01,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 99, "IBRION": 2, "ISIF": 3,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 200,
-    },
-    (CalculationType.STATIC, AccuracyLevel.PRECISE): {
-        "ENCUT": 520, "EDIFF": 1e-6,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 0, "IBRION": -1,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 200,
-    },
-    (CalculationType.BAND_STRUCTURE, AccuracyLevel.PRECISE): {
-        "ENCUT": 520, "EDIFF": 1e-6,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 0, "IBRION": -1, "ICHARG": 11,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 200,
-    },
-    (CalculationType.DOS, AccuracyLevel.PRECISE): {
-        "ENCUT": 520, "EDIFF": 1e-6,
-        "ISMEAR": -5, "SIGMA": 0.05,
-        "NSW": 0, "IBRION": -1, "ICHARG": 11,
-        "NEDOS": 5001,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 200,
-    },
-    (CalculationType.ELASTIC, AccuracyLevel.PRECISE): {
-        "ENCUT": 520, "EDIFF": 1e-7, "EDIFFG": -0.005,
-        "ISMEAR": 0, "SIGMA": 0.05,
-        "NSW": 1, "IBRION": 6, "ISIF": 3,
-        "PREC": "Accurate", "LREAL": False, "LORBIT": 11,
-        "NELM": 200,
-    },
+    (CalculationType(k.split(":")[0]), AccuracyLevel(k.split(":")[1])): v
+    for k, v in _preset_cfg.items()
 }
 
 

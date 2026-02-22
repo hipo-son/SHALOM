@@ -29,7 +29,8 @@ dependencies = [
     "numpy>=1.24.0",
     "pydantic>=2.4.0",
     "openai>=1.0.0",
-    "anthropic>=0.25.0"
+    "anthropic>=0.25.0",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
@@ -81,6 +82,9 @@ testpaths = ["tests"]
 markers = [
     "integration: mark test as requiring external API calls (deselect with '-m \"not integration\"')",
 ]
+
+[tool.setuptools.package-data]
+shalom = ["prompts/*.md", "config/*.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["."]

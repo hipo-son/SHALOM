@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 
+from shalom._config_loader import load_config, load_prompt
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import (
     CandidateScore,
@@ -21,104 +22,29 @@ from shalom.core.schemas import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Default weights and veto thresholds
+# Default weights and veto thresholds (loaded from config)
 # ---------------------------------------------------------------------------
 
-DEFAULT_WEIGHTS: Dict[str, float] = {
-    "stability": 0.20,
-    "target_property": 0.25,
-    "dft_feasibility": 0.15,
-    "synthesizability": 0.15,
-    "novelty": 0.15,
-    "environmental_cost": 0.10,
-}
-
-DEFAULT_VETO_THRESHOLDS: Dict[str, float] = {
-    "stability": 0.3,
-    "target_property": 0.2,
-    "dft_feasibility": 0.2,
-    "synthesizability": 0.2,
-    "novelty": 0.0,  # no veto for novelty
-    "environmental_cost": 0.2,
-}
+_eval_config = load_config("evaluator_weights")
+DEFAULT_WEIGHTS: Dict[str, float] = _eval_config["weights"]
+DEFAULT_VETO_THRESHOLDS: Dict[str, float] = _eval_config["veto_thresholds"]
 
 # ---------------------------------------------------------------------------
 # Confidence prompting rule (appended to every specialist prompt)
 # ---------------------------------------------------------------------------
 
-_CONFIDENCE_RULE = (
-    "\n\n[CONFIDENCE RULE] Set confidence > 0.5 ONLY if you can cite specific "
-    "evidence from crystallographic databases (ICSD, Materials Project, AFLOW) "
-    "or published literature. If your assessment is based on chemical intuition "
-    "without concrete references, confidence MUST be <= 0.5."
-)
+_CONFIDENCE_RULE = "\n\n" + load_prompt("eval_confidence_rule")
 
 # ---------------------------------------------------------------------------
-# Specialist system prompts
+# Specialist system prompts (loaded from .md files)
 # ---------------------------------------------------------------------------
 
-_STABILITY_PROMPT = """[v1.0.0] You are the "Stability Evaluator".
-Score each candidate material on thermodynamic and kinetic stability (0.0 to 1.0).
-
-[Evaluation Criteria]
-1. Evaluate using formation energy trends, convex hull distance, and known phase diagrams.
-2. Reference Hume-Rothery rules for alloys (atomic size, electronegativity, valence electron count).
-3. If evaluating as metastable (when explicitly noted), identify the required stabilization
-   mechanism (e.g., epitaxial substrate matching, high-pressure synthesis phase, kinetic
-   trapping via rapid quenching).
-4. Consider decomposition pathways and competing phases.""" + _CONFIDENCE_RULE
-
-_TARGET_PROPERTY_PROMPT = """[v1.0.0] You are the "Target Property Evaluator".
-Score each candidate on alignment with the target objective (0.0 to 1.0).
-
-[Evaluation Criteria]
-1. First, identify the dominant physical descriptors for the given target objective:
-   - Catalysis: d-band center, adsorption energy, surface reactivity
-   - Quantum materials: band topology, flat bands, spin-orbit coupling
-   - Battery cathodes: ion radius, diffusion activation barrier, voltage
-   - Thermoelectrics: Seebeck coefficient, lattice thermal conductivity, power factor
-2. Then score each candidate based on alignment with these descriptors.
-3. Use known structure-property relationships and electronegativity differences.""" + _CONFIDENCE_RULE
-
-_DFT_FEASIBILITY_PROMPT = """[v1.0.0] You are the "DFT Feasibility Evaluator".
-Score each candidate on computational cost and convergence difficulty (0.0 to 1.0).
-
-[Evaluation Criteria]
-1. Number of atoms in the primitive cell (fewer = cheaper).
-2. Magnetic ordering complexity (AFM, spin-frustrated systems are harder).
-3. Electron correlation: does it need DFT+U or hybrid functionals (HSE06)?
-4. Expected SCF convergence difficulty (metallic surfaces, charge sloshing).
-5. A simple bulk crystal scores high; a large supercell with defects scores low.""" + _CONFIDENCE_RULE
-
-_SYNTHESIZABILITY_PROMPT = """[v1.0.0] You are the "Synthesizability Evaluator".
-Score each candidate on experimental synthesis feasibility (0.0 to 1.0).
-
-[Evaluation Criteria]
-1. Competing phase analysis and synthesis energy barriers.
-2. Availability of known precursor reaction pathways.
-3. Goldschmidt tolerance factor for perovskites, Hume-Rothery rules for alloys.
-4. Do NOT penalize solely for lack of prior experimental reports — assess the
-   thermodynamic/kinetic pathway feasibility instead.
-5. Consider whether similar compositions or structural motifs have been synthesized.""" + _CONFIDENCE_RULE
-
-_NOVELTY_PROMPT = """[v1.0.0] You are the "Novelty Evaluator".
-Score each candidate on scientific novelty and originality (0.0 to 1.0).
-
-[Evaluation Criteria]
-1. Is this a trivial elemental substitution of a known material (low novelty)?
-2. Does it introduce genuinely new structural motifs, compositions, or design principles?
-3. Would this material generate interest in top-tier journals (Nature, Science)?
-4. Consider the gap between known materials and this candidate.""" + _CONFIDENCE_RULE
-
-_ENVIRONMENTAL_COST_PROMPT = """[v1.0.0] You are the "Environmental & Cost Evaluator".
-Score each candidate on element availability and environmental impact (0.0 to 1.0).
-
-[Evaluation Criteria]
-1. Penalize use of rare/expensive elements: Ir, Ru, Re, Os, Rh, Pd.
-2. Penalize toxic elements: Pb, Tl, Cd, Hg, As.
-3. Penalize conflict minerals where applicable.
-4. Prefer earth-abundant alternatives (Fe, Cu, Mn, Ni, Ti, Zn, Al).
-5. A material using only abundant, non-toxic elements scores ~1.0.""" + _CONFIDENCE_RULE
+_STABILITY_PROMPT = load_prompt("eval_stability") + _CONFIDENCE_RULE
+_TARGET_PROPERTY_PROMPT = load_prompt("eval_target_property") + _CONFIDENCE_RULE
+_DFT_FEASIBILITY_PROMPT = load_prompt("eval_dft_feasibility") + _CONFIDENCE_RULE
+_SYNTHESIZABILITY_PROMPT = load_prompt("eval_synthesizability") + _CONFIDENCE_RULE
+_NOVELTY_PROMPT = load_prompt("eval_novelty") + _CONFIDENCE_RULE
+_ENVIRONMENTAL_COST_PROMPT = load_prompt("eval_environmental_cost") + _CONFIDENCE_RULE
 
 _DEFAULT_PROMPTS: Dict[str, str] = {
     "stability": _STABILITY_PROMPT,

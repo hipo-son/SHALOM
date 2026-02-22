@@ -1,0 +1,65 @@
+# Progressive correction strategies for VASP errors
+# Each error type has an ordered list of escalating fixes.
+# The ErrorRecoveryEngine tries step 0 first, then step 1, etc.
+
+SCF_UNCONVERGED:
+  # Step 0: Increase NELM slightly
+  - {NELM: 200}
+  # Step 1: Metallization defense — switch smearing
+  - {ISMEAR: 1, SIGMA: 0.1}
+  # Step 2: Damped algorithm (more robust than Normal)
+  - {ALGO: "Damped", NELM: 200, TIME: 0.5}
+  # Step 3: Suppress charge sloshing
+  - {AMIX: 0.05, BMIX: 0.001, NELM: 300}
+  # Step 4: Last resort — very aggressive
+  - {ALGO: "All", NELM: 500, AMIX: 0.02}
+
+BRMIX:
+  # Root causes: (a) distorted geometry, (b) bandgap closing, (c) magnetic
+  # Step 0: Metallization defense
+  - {ISMEAR: 1, SIGMA: 0.1}
+  # Step 1: Stabilize charge mixing
+  - {AMIX: 0.1, BMIX: 0.01}
+  # Step 2: Damped
+  - {ALGO: "Damped", AMIX: 0.05, BMIX: 0.001}
+  # Step 3: Alternative mixing
+  - {IMIX: 1, AMIX: 0.02, BMIX: 0.001, AMIX_MAG: 0.1}
+  # Step 4: Last resort
+  - {ALGO: "All", AMIX: 0.02, BMIX: 0.001}
+
+ZBRENT:
+  # EDIFF tightening is NOT effective for line search failure.
+  # Go directly to POTIM reduction (root cause).
+  - {POTIM: 0.2}
+  # Step 1: Switch optimizer CG -> DIIS
+  - {IBRION: 1, POTIM: 0.3}
+  # Step 2: Damped MD
+  - {IBRION: 3, POTIM: 0.05, SMASS: 0.5}
+
+IONIC_SLOSHING:
+  # Force sign oscillation detected
+  - {POTIM: 0.2}
+  - {IBRION: 1}
+  - {IBRION: 3, POTIM: 0.05, SMASS: 0.5}
+
+EDDDAV:
+  - {ALGO: "Normal"}
+  - {ALGO: "Damped", TIME: 0.5}
+  - {ALGO: "All"}
+
+ZHEGV:
+  - {ALGO: "Exact"}
+  - {ALGO: "All", NELM: 200}
+
+EDDRMM:
+  - {ALGO: "Normal"}
+  - {ALGO: "Damped", TIME: 0.5}
+
+DENTET:
+  - {ISMEAR: 0, SIGMA: 0.05}
+
+PRICEL:
+  - {SYMPREC: 1.0e-8}
+
+POSMAP:
+  - {SYMPREC: 1.0e-6}

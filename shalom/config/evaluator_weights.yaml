@@ -1,0 +1,19 @@
+# Multi-agent evaluator weights and veto thresholds
+# Used by the MultiAgentFineSelector in the Design Layer
+
+weights:
+  stability: 0.20
+  target_property: 0.25
+  dft_feasibility: 0.15
+  synthesizability: 0.15
+  novelty: 0.15
+  environmental_cost: 0.10
+
+# Minimum score per perspective; below this threshold = veto
+veto_thresholds:
+  stability: 0.3
+  target_property: 0.2
+  dft_feasibility: 0.2
+  synthesizability: 0.2
+  novelty: 0.0
+  environmental_cost: 0.2

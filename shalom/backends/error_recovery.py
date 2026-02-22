@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from shalom._config_loader import load_config
+
 
 # ---------------------------------------------------------------------------
 # Error severity
@@ -48,93 +50,20 @@ class Correction:
 
 
 # ---------------------------------------------------------------------------
-# Error Pattern Registry
+# Error Pattern Registry (loaded from config/error_patterns.yaml)
 # ---------------------------------------------------------------------------
 
-# (pattern_substring, error_type, severity)
+_err_cfg: List[Dict[str, str]] = load_config("error_patterns")  # type: ignore[assignment]
 ERROR_PATTERNS: List[tuple] = [
-    ("ZBRENT: fatal internal in bracketing", "ZBRENT", ErrorSeverity.CORRECTABLE),
-    ("ZBRENT: fatal error in bracketing", "ZBRENT", ErrorSeverity.CORRECTABLE),
-    ("BRMIX: very serious problems", "BRMIX", ErrorSeverity.CORRECTABLE),
-    ("EDDDAV: sub-space matrix is not hermitian", "EDDDAV", ErrorSeverity.CORRECTABLE),
-    ("NELM reached", "SCF_UNCONVERGED", ErrorSeverity.CORRECTABLE),
-    ("WARNING: DENTET", "DENTET", ErrorSeverity.CORRECTABLE),
-    ("POSMAP internal error", "POSMAP", ErrorSeverity.CORRECTABLE),
-    ("VERY BAD NEWS! internal error in subroutine SGRCON", "SGRCON", ErrorSeverity.FATAL),
-    ("PRICEL: found a more primitive cell", "PRICEL", ErrorSeverity.CORRECTABLE),
-    ("Error EDDDAV: Call to ZHEGV failed", "ZHEGV", ErrorSeverity.CORRECTABLE),
-    ("EDDRMM: call to GR_CGGR failed", "EDDRMM", ErrorSeverity.CORRECTABLE),
+    (p["pattern"], p["type"], ErrorSeverity(p["severity"])) for p in _err_cfg
 ]
 
 
 # ---------------------------------------------------------------------------
-# Correction Strategies — Progressive Escalation
+# Correction Strategies (loaded from config/correction_strategies.yaml)
 # ---------------------------------------------------------------------------
 
-CORRECTION_STRATEGIES: Dict[str, List[Dict[str, Any]]] = {
-    "SCF_UNCONVERGED": [
-        # Step 1: Increase NELM slightly
-        {"NELM": 200},
-        # Step 2: Metallization defense — switch smearing
-        {"ISMEAR": 1, "SIGMA": 0.1},
-        # Step 3: Damped algorithm (more robust than Normal)
-        {"ALGO": "Damped", "NELM": 200, "TIME": 0.5},
-        # Step 4: Suppress charge sloshing
-        {"AMIX": 0.05, "BMIX": 0.001, "NELM": 300},
-        # Step 5: Last resort — very aggressive
-        {"ALGO": "All", "NELM": 500, "AMIX": 0.02},
-    ],
-    "BRMIX": [
-        # Root causes: (a) distorted geometry, (b) bandgap closing, (c) magnetic
-        # Step 1: Metallization defense
-        {"ISMEAR": 1, "SIGMA": 0.1},
-        # Step 2: Stabilize charge mixing
-        {"AMIX": 0.1, "BMIX": 0.01},
-        # Step 3: Damped
-        {"ALGO": "Damped", "AMIX": 0.05, "BMIX": 0.001},
-        # Step 4: Alternative mixing
-        {"IMIX": 1, "AMIX": 0.02, "BMIX": 0.001, "AMIX_MAG": 0.1},
-        # Step 5: Last resort
-        {"ALGO": "All", "AMIX": 0.02, "BMIX": 0.001},
-    ],
-    "ZBRENT": [
-        # EDIFF tightening is NOT effective for line search failure.
-        # Go directly to POTIM reduction (root cause).
-        {"POTIM": 0.2},
-        # Step 2: Switch optimizer CG → DIIS
-        {"IBRION": 1, "POTIM": 0.3},
-        # Step 3: Damped MD
-        {"IBRION": 3, "POTIM": 0.05, "SMASS": 0.5},
-    ],
-    "IONIC_SLOSHING": [
-        # Force sign oscillation detected
-        {"POTIM": 0.2},
-        {"IBRION": 1},
-        {"IBRION": 3, "POTIM": 0.05, "SMASS": 0.5},
-    ],
-    "EDDDAV": [
-        {"ALGO": "Normal"},
-        {"ALGO": "Damped", "TIME": 0.5},
-        {"ALGO": "All"},
-    ],
-    "ZHEGV": [
-        {"ALGO": "Exact"},
-        {"ALGO": "All", "NELM": 200},
-    ],
-    "EDDRMM": [
-        {"ALGO": "Normal"},
-        {"ALGO": "Damped", "TIME": 0.5},
-    ],
-    "DENTET": [
-        {"ISMEAR": 0, "SIGMA": 0.05},
-    ],
-    "PRICEL": [
-        {"SYMPREC": 1e-8},
-    ],
-    "POSMAP": [
-        {"SYMPREC": 1e-6},
-    ],
-}
+CORRECTION_STRATEGIES: Dict[str, List[Dict[str, Any]]] = load_config("correction_strategies")
 
 
 # ---------------------------------------------------------------------------

@@ -42,7 +42,48 @@ A unified `LLMProvider` class abstracts multiple LLM backends (OpenAI, Anthropic
 - Enforcing structured JSON output via Pydantic models on every call.
 - Deterministic replay through seed-locked prompts.
 
-### 2.3 Sandboxed Execution
+### 2.3 Externalized Configuration System
+
+All LLM system prompts and physics constants are externalized from Python source code:
+
+```text
+shalom/
+├── prompts/           # LLM system prompts (.md, version-tagged)
+│   ├── coarse_selector.md
+│   ├── fine_selector.md
+│   ├── geometry_generator.md
+│   ├── review_agent.md
+│   └── eval_*.md      # 6 specialist evaluator prompts + confidence rule
+│
+├── config/            # Physics/VASP settings (.yaml, with literature refs)
+│   ├── potcar_mapping.yaml       # PBE_54 POTCAR variants
+│   ├── enmax_values.yaml         # Per-element ENMAX (eV)
+│   ├── magnetic_elements.yaml    # Default MAGMOM values
+│   ├── hubbard_u.yaml            # Dudarev U values (PBE)
+│   ├── metallic_elements.yaml    # Pure metal detection set
+│   ├── incar_presets.yaml        # INCAR presets by calc_type × accuracy
+│   ├── error_patterns.yaml       # VASP error detection patterns
+│   ├── correction_strategies.yaml # Progressive error correction
+│   └── evaluator_weights.yaml    # Multi-agent scoring weights
+│
+├── _config_loader.py  # load_prompt(), load_config() with caching
+├── _config_schemas.py # Pydantic validation for critical configs
+└── _defaults.py       # Hardcoded fallback (works without external files)
+```
+
+**Design decisions:**
+
+| Decision | Rationale |
+|----------|-----------|
+| `.md` for prompts | Human-readable; domain experts can edit without touching Python; clean git diffs |
+| `.yaml` for configs | Structured data with inline comments for literature references |
+| `_defaults.py` fallback | Package works even without data files (e.g., incomplete wheel) |
+| `copy.deepcopy()` on config return | Prevents cache poisoning when callers mutate returned dicts |
+| Fail-Fast on YAML syntax errors | Corrupted config must never silently fall back (avoids wasted HPC hours) |
+| CRLF → LF normalization | Windows git may inject `\r\n`; prompts are always `\n`-normalized |
+| Pydantic schema validation | Critical configs (POTCAR mapping, Hubbard U) are checked at load time |
+
+### 2.4 Sandboxed Execution
 
 The `SafeExecutor` provides a secure environment for running LLM-generated Python code:
 
@@ -50,7 +91,7 @@ The `SafeExecutor` provides a secure environment for running LLM-generated Pytho
 - Cross-platform timeout enforcement (SIGALRM on POSIX, ThreadPoolExecutor on Windows).
 - Explicit allowlists for injected variables (e.g., ASE's `bulk`, `surface`).
 
-### 2.4 Dual DFT Backend
+### 2.5 Dual DFT Backend
 
 SHALOM treats the DFT solver as a swappable backend behind a unified abstraction:
 
@@ -61,7 +102,7 @@ SHALOM treats the DFT solver as a swappable backend behind a unified abstraction
 
 Individual researchers typically use **Quantum ESPRESSO** for local prototyping and validation; groups with institutional HPC resources use **VASP** for production-scale screening. Agents operate on a common schema (structure → energy/forces/convergence) so switching backends requires no changes to agent logic.
 
-### 2.5 HPC Integration (MCP)
+### 2.6 HPC Integration (MCP)
 
 The MCP-based integration module provides controlled HPC access:
 
@@ -95,8 +136,8 @@ A three-step self-correction loop validates the physical soundness of DFT input 
 
 ## 4. Development Milestones
 
-- **Phase 1: Core Library & MCP Environment Setup** — Python library structure, ASE-based Geometry Generator prompts, and Form Filler setup. *(Current)*
-- **Phase 2: Triage-Ranking Agent Loop** — Coarse/Fine Selector prompt pipeline construction.
+- **Phase 1: Core Library & VASP Automation** — Python library structure, full agent pipeline (Design → Simulation → Review), VASP input generation with structure-aware auto-detection, error recovery engine, 321 tests at 97% coverage. *(Complete)*
+- **Phase 2: Configuration Externalization** — Prompt/config externalization to `.md`/`.yaml`, loader with caching + validation + fallback, Pydantic schema checking, 346 tests at 97% coverage. *(Complete)*
 - **Phase 3: DFT Integration & Self-Correction** — Quantum ESPRESSO local runner, VASP-Slurm HPC integration, end-to-end testing with bulk materials.
 - **Phase 4: Advanced Use Cases & Open-Source Release** — Extension to 2D/TMD systems, new workflow templates (defect screening, catalyst design), search performance metrics tooling.
 
@@ -107,7 +148,8 @@ Library-centric design implemented in Python for reproducibility and HPC integra
 | Layer | Components |
 |-------|------------|
 | **Agent Framework** | Base agent classes, hierarchical composition, schema-driven communication |
+| **Configuration** | `_config_loader` (prompt/config loading with caching, deepcopy, Fail-Fast), `_config_schemas` (Pydantic validation), `_defaults` (fallback) |
 | **Tool System** | ASE builder, DFT I/O parsers (VASP POSCAR/OUTCAR, QE pw.x/XML), structure validators |
-| **DFT Backend** | Quantum ESPRESSO (local), VASP (HPC), unified solver abstraction |
+| **DFT Backend** | Quantum ESPRESSO (local), VASP (HPC), unified solver abstraction, error recovery engine |
 | **Execution Layer** | Slurm job submission, MCP server, SafeExecutor sandbox |
 | **Provider Interface** | LLMProvider (OpenAI, Anthropic), structured output enforcement |

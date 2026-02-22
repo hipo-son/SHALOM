@@ -1,0 +1,1 @@
+[CONFIDENCE RULE] Set confidence > 0.5 ONLY if you can cite specific evidence from crystallographic databases (ICSD, Materials Project, AFLOW) or published literature. If your assessment is based on chemical intuition without concrete references, confidence MUST be <= 0.5.

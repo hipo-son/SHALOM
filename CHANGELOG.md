@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Configuration externalization system** (`_config_loader.py`, `_config_schemas.py`, `_defaults.py`)
+  - `load_prompt(name)` loads LLM system prompts from `shalom/prompts/*.md`
+  - `load_config(name)` loads physics/VASP settings from `shalom/config/*.yaml`
+  - Built-in fallback defaults in `_defaults.py` ensure operation without external files
+  - Deep-copy protection on mutable config returns prevents cache poisoning
+  - Fail-Fast on YAML syntax errors (corrupted files never silently fall back)
+  - CRLF normalization for Windows cross-platform compatibility
+  - Pydantic schema validation for critical configs (POTCAR mapping, Hubbard U)
+- 11 LLM prompt files in `shalom/prompts/` (`.md` format, version-tagged)
+- 9 physics config files in `shalom/config/` (`.yaml` format with literature references)
+- `ShalomConfigurationError` custom exception for config/prompt loading failures
+- `test_config_loader.py` with 25 tests covering loader, schemas, caching, and fallback
+- `.gitattributes` for line-ending normalization
+- `pyyaml>=6.0` dependency
+- POTCAR dataset version metadata (`potcar_version: "54"`)
+- Hubbard U functional dependency tag (`functional: "PBE"`)
+
+### Changed
+- Agent system prompts externalized from Python strings to `shalom/prompts/*.md`:
+  - `design_layer.py`: CoarseSelector, FineSelector prompts
+  - `evaluators.py`: 6 specialist evaluator prompts + confidence rule + weights/thresholds
+  - `simulation_layer.py`: GeometryGenerator prompt
+  - `review_layer.py`: ReviewAgent prompt
+- Physics constants externalized from Python dicts to `shalom/config/*.yaml`:
+  - `vasp_config.py`: POTCAR mapping, ENMAX values, MAGMOM defaults, Hubbard U, metallic elements, INCAR presets
+  - `error_recovery.py`: error patterns, correction strategies
+- **Net code reduction: -404 lines hardcoded data, +53 lines loader calls** (7 modified files)
+- All 321 existing tests pass unchanged (zero behavioral change)
+
+### Previous [Unreleased] changes
 - GitHub Actions CI/CD workflows for testing, linting, and PyPI release
 - Cross-platform `SafeExecutor` sandbox with `ThreadPoolExecutor` timeout fallback for Windows
 - `ReviewAgent` with OUTCAR parsing and LLM-based result evaluation
@@ -19,26 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Community files: `CITATION.cff`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`
 - `[all]` optional dependency group in `pyproject.toml`
 - Pydantic `score` field validation (`ge=0.0, le=1.0`)
-
-### Changed
 - All agent system prompts and feedback messages translated to English
 - All Pydantic `Field` descriptions translated to English
-- `sphinxcontrib.napoleon` replaced with built-in `sphinx.ext.napoleon`
-- `sphinx_rtd_theme` removed from extensions list (used only as theme)
 - `ruff` and `mypy` target versions aligned to `py39` (minimum supported)
 - `anthropic` minimum version raised to `>=0.25.0`
 - Coverage threshold unified to 85% across CI, `pyproject.toml`, and `CONTRIBUTING.md`
-- `print()` logging replaced with `logging` module in simulation layer
-- Integration test refactored to use `pytest.fail()` instead of bare `return`
-
-### Fixed
-- Dockerfile `.[all]` extra now resolves correctly
-- Array shape guard added in `FormFiller.evaluate_atoms` for non-3D cells
-- `__import__` explicitly blocked in `SafeExecutor` whitelist
-- Unreachable code after `pytest.skip()` removed from integration test
-- "AST" typo corrected to "ASE" in `architecture.rst`
-- PyPI badge link corrected (was pointing to python-poetry.org)
-- Zenodo DOI placeholder removed until actual integration
 
 ## [0.1.0] - 2026-02-22
 

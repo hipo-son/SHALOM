@@ -1,0 +1,47 @@
+# VASP error patterns for automatic detection
+# Each entry: pattern (substring match), error type, severity
+# Reference: custodian error handlers + VASP forum reports
+
+- pattern: "ZBRENT: fatal internal in bracketing"
+  type: "ZBRENT"
+  severity: "correctable"
+
+- pattern: "ZBRENT: fatal error in bracketing"
+  type: "ZBRENT"
+  severity: "correctable"
+
+- pattern: "BRMIX: very serious problems"
+  type: "BRMIX"
+  severity: "correctable"
+
+- pattern: "EDDDAV: sub-space matrix is not hermitian"
+  type: "EDDDAV"
+  severity: "correctable"
+
+- pattern: "NELM reached"
+  type: "SCF_UNCONVERGED"
+  severity: "correctable"
+
+- pattern: "WARNING: DENTET"
+  type: "DENTET"
+  severity: "correctable"
+
+- pattern: "POSMAP internal error"
+  type: "POSMAP"
+  severity: "correctable"
+
+- pattern: "VERY BAD NEWS! internal error in subroutine SGRCON"
+  type: "SGRCON"
+  severity: "fatal"
+
+- pattern: "PRICEL: found a more primitive cell"
+  type: "PRICEL"
+  severity: "correctable"
+
+- pattern: "Error EDDDAV: Call to ZHEGV failed"
+  type: "ZHEGV"
+  severity: "correctable"
+
+- pattern: "EDDRMM: call to GR_CGGR failed"
+  type: "EDDRMM"
+  severity: "correctable"

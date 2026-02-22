@@ -10,6 +10,7 @@ from shalom.agents.evaluators import (
     evaluate_parallel,
     SpecialistEvaluator,
 )
+from shalom._config_loader import load_prompt
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import MaterialCandidate, RankedMaterial
 
@@ -31,19 +32,7 @@ class CoarseSelector:
 
     def __init__(self, llm_provider: LLMProvider):
         self.llm = llm_provider
-        self.system_prompt = """[v1.0.0]
-        You are the "Coarse Selector", working as a world-class computational materials scientist.
-        Select the 3 to 5 most promising material candidates to achieve the given
-        natural language Target Objective.
-
-        [Selection Guidelines]
-        1. Use established physical/chemical intuition such as periodic table trends,
-           electronegativity, and d-band center theory.
-        2. Each selection must have clear scientific reasoning — no random picks.
-        3. Candidates should include some diversity (alloys, doping, etc.)
-           rather than being limited to a single obvious material.
-        4. You MUST respond in JSON format as a Candidates list.
-        """
+        self.system_prompt = load_prompt("coarse_selector")
 
     def select(self, target_objective: str, context: str = "") -> List[MaterialCandidate]:
         """Generate and return a list of material candidates for a given objective.
@@ -78,18 +67,7 @@ class FineSelector:
 
     def __init__(self, llm_provider: LLMProvider):
         self.llm = llm_provider
-        self.system_prompt = """[v1.0.0]
-        You are the "Fine Selector".
-        You are given a small pool of material candidates that passed the coarse screening.
-        Your task is to precisely evaluate each candidate against the Target Objective
-        on a scale of 0.0 to 1.0, and select exactly ONE "Winner".
-
-        [Evaluation Guidelines]
-        1. Deeply analyze each candidate's 'reasoning' and 'expected_properties'.
-        2. Consider the simulation (DFT) cost vs. success probability
-           (overly complex or large cells are penalized).
-        3. The candidate with the highest score advances to the Simulation Layer.
-        """
+        self.system_prompt = load_prompt("fine_selector")
 
     def rank_and_select(
         self, target_objective: str, candidates: List[MaterialCandidate]

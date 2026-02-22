@@ -1,0 +1,141 @@
+# VASP INCAR presets by calculation type and accuracy level
+# Keys: "calc_type:accuracy" (converted to tuple keys in code)
+# Reference: VASP wiki, VASPKIT recipe system
+
+# ---------- STANDARD presets ----------
+
+relaxation:standard:
+  ENCUT: 520
+  EDIFF: 1.0e-5
+  EDIFFG: -0.02
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 99
+  IBRION: 2
+  ISIF: 3
+  PREC: "Accurate"
+  LREAL: "Auto"
+  LORBIT: 11
+  NELM: 100
+
+static:standard:
+  ENCUT: 520
+  EDIFF: 1.0e-5
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 0
+  IBRION: -1
+  PREC: "Accurate"
+  LREAL: "Auto"
+  LORBIT: 11
+  NELM: 100
+
+band_structure:standard:
+  ENCUT: 520
+  EDIFF: 1.0e-5
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 0
+  IBRION: -1
+  ICHARG: 11
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 100
+
+dos:standard:
+  ENCUT: 520
+  EDIFF: 1.0e-5
+  ISMEAR: -5
+  SIGMA: 0.05
+  NSW: 0
+  IBRION: -1
+  ICHARG: 11
+  NEDOS: 3001
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 100
+
+elastic:standard:
+  ENCUT: 520
+  EDIFF: 1.0e-6
+  EDIFFG: -0.01
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 1
+  IBRION: 6
+  ISIF: 3
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 100
+
+# ---------- PRECISE presets ----------
+
+relaxation:precise:
+  ENCUT: 520
+  EDIFF: 1.0e-6
+  EDIFFG: -0.01
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 99
+  IBRION: 2
+  ISIF: 3
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 200
+
+static:precise:
+  ENCUT: 520
+  EDIFF: 1.0e-6
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 0
+  IBRION: -1
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 200
+
+band_structure:precise:
+  ENCUT: 520
+  EDIFF: 1.0e-6
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 0
+  IBRION: -1
+  ICHARG: 11
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 200
+
+dos:precise:
+  ENCUT: 520
+  EDIFF: 1.0e-6
+  ISMEAR: -5
+  SIGMA: 0.05
+  NSW: 0
+  IBRION: -1
+  ICHARG: 11
+  NEDOS: 5001
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 200
+
+elastic:precise:
+  ENCUT: 520
+  EDIFF: 1.0e-7
+  EDIFFG: -0.005
+  ISMEAR: 0
+  SIGMA: 0.05
+  NSW: 1
+  IBRION: 6
+  ISIF: 3
+  PREC: "Accurate"
+  LREAL: false
+  LORBIT: 11
+  NELM: 200

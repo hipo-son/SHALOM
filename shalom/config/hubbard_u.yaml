@@ -1,0 +1,23 @@
+# Dudarev scheme (LDAUTYPE=2): U_eff = U - J, J is ignored by VASP
+# Reference: Wang et al. PRB 73, 195107 (2006)
+#
+# WARNING: These U values are empirical, fitted for PBE.
+#          For r2SCAN or HSE06, these values are INVALID.
+#          Use linear-response U or functionally re-fitted values.
+
+functional: "PBE"  # Issue F: explicit functional dependency
+
+values:
+  Fe: {L: 2, U: 5.3, J: 0.0}
+  Co: {L: 2, U: 3.32, J: 0.0}
+  Ni: {L: 2, U: 6.2, J: 0.0}
+  Mn: {L: 2, U: 3.9, J: 0.0}
+  V:  {L: 2, U: 3.25, J: 0.0}
+  Cr: {L: 2, U: 3.7, J: 0.0}
+  Cu: {L: 2, U: 4.0, J: 0.0}   # Cu^2+ in oxides; metallic Cu typically U=0
+  Ti: {L: 2, U: 0.0, J: 0.0}   # TiO2 etc. usually don't need U
+
+# Anion elements that trigger GGA+U when combined with magnetic TM.
+# NOTE: Future expansion should include halides (F, Cl, Br, I)
+# and pnictides (N) for broader GGA+U coverage.
+anion_elements: ["O", "S", "Se", "Te"]
