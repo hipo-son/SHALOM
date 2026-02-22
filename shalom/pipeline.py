@@ -20,11 +20,7 @@ from shalom.agents.design_layer import CoarseSelector, MultiAgentFineSelector, g
 from shalom.agents.review_layer import ReviewAgent
 from shalom.agents.simulation_layer import GeometryGenerator, GeometryReviewer
 from shalom.backends import get_backend
-from shalom.backends.vasp_config import (
-    AccuracyLevel,
-    CalculationType,
-    get_preset,
-)
+from shalom.backends._physics import AccuracyLevel
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import (
     PipelineResult,
@@ -87,15 +83,22 @@ class PipelineConfig(BaseModel):
     )
     calc_type: str = Field(
         default="relaxation",
-        description="VASP calculation type (relaxation, static, band_structure, dos, elastic).",
+        description=(
+            "Calculation type. VASP: relaxation/static/band_structure/dos/elastic. "
+            "QE: scf/relax/vc-relax/bands/nscf."
+        ),
     )
     accuracy: str = Field(
         default="standard",
-        description="VASP accuracy level (standard or precise).",
+        description="Accuracy level (standard or precise).",
     )
     vasp_user_incar: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="User INCAR overrides (highest priority, applied on top of presets).",
+        description="VASP INCAR overrides (highest priority, applied on top of presets).",
+    )
+    qe_user_settings: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="QE namelist overrides (e.g., {'system.ecutwfc': 80}).",
     )
 
 
@@ -230,21 +233,16 @@ class Pipeline:
         # ------------------------------------------------------------------
         logger.info("[Iter %d] Step 3: Structure Generation...", iteration)
         try:
-            # Create VASP configuration (structure-aware auto-detection deferred
-            # until atoms are available inside GeometryReviewer).
-            vasp_config = get_preset(
-                calc_type=CalculationType(self.config.calc_type),
-                accuracy=AccuracyLevel(self.config.accuracy),
-            )
-            if self.config.vasp_user_incar:
-                vasp_config.user_incar_settings.update(self.config.vasp_user_incar)
+            # Create backend-specific DFT config (structure-aware auto-detection
+            # deferred until atoms are available inside GeometryReviewer).
+            dft_config = self._create_dft_config()
 
             generator = GeometryGenerator(llm_provider=self.llm)
             reviewer = GeometryReviewer(
                 generator=generator,
                 max_retries=self.config.max_retries,
                 backend=self.backend,
-                vasp_config=vasp_config,
+                dft_config=dft_config,
             )
             success, atoms, path_or_error = reviewer.run_creation_loop(
                 self.objective, ranked_material
@@ -390,6 +388,37 @@ class Pipeline:
                 "steps_completed": result.steps_completed + ["review"],
             }
         )
+
+    def _create_dft_config(self) -> Any:
+        """Create backend-specific DFT configuration from pipeline settings."""
+        if self.config.backend_name.lower() == "vasp":
+            from shalom.backends.vasp_config import CalculationType, get_preset
+            vasp_config = get_preset(
+                calc_type=CalculationType(self.config.calc_type),
+                accuracy=AccuracyLevel(self.config.accuracy),
+            )
+            if self.config.vasp_user_incar:
+                vasp_config.user_incar_settings.update(self.config.vasp_user_incar)
+            return vasp_config
+        elif self.config.backend_name.lower() == "qe":
+            from shalom.backends.qe_config import (
+                get_qe_preset, VASP_TO_QE_CALC_MAP, QECalculationType,
+            )
+            qe_calc = VASP_TO_QE_CALC_MAP.get(
+                self.config.calc_type,
+                QECalculationType(self.config.calc_type)
+                if self.config.calc_type in {e.value for e in QECalculationType}
+                else QECalculationType.SCF,
+            )
+            qe_config = get_qe_preset(
+                calc_type=qe_calc,
+                accuracy=AccuracyLevel(self.config.accuracy),
+            )
+            if self.config.qe_user_settings:
+                qe_config.user_settings.update(self.config.qe_user_settings)
+            return qe_config
+        logger.warning("Unknown backend '%s', returning None config.", self.config.backend_name)
+        return None
 
     def _notify(self, step_name: str, step_data: dict) -> None:
         """Invoke all registered callbacks for the given step."""

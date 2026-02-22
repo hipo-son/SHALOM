@@ -161,12 +161,12 @@ class GeometryReviewer:
         generator: GeometryGenerator,
         max_retries: int = 3,
         backend: Optional[DFTBackend] = None,
-        vasp_config: Optional[Any] = None,
+        dft_config: Optional[Any] = None,
     ):
         self.generator = generator
         self.max_retries = max_retries
         self.backend = backend
-        self.vasp_config = vasp_config
+        self.dft_config = dft_config
 
     def run_creation_loop(
         self, target_objective: str, ranked_material: RankedMaterial
@@ -208,10 +208,9 @@ class GeometryReviewer:
 
                     if self.backend is not None:
                         write_params = {"filename": f"POSCAR_{mat_name}"}
-                        if self.vasp_config is not None:
-                            from shalom.backends.vasp_config import detect_and_apply_structure_hints
-                            effective_config = copy.deepcopy(self.vasp_config)
-                            detect_and_apply_structure_hints(atoms, effective_config)
+                        if self.dft_config is not None:
+                            effective_config = copy.deepcopy(self.dft_config)
+                            _apply_structure_hints(self.backend.name, atoms, effective_config)
                             write_params["config"] = effective_config
                         filepath = self.backend.write_input(
                             atoms, output_dir, **write_params
@@ -244,3 +243,14 @@ class GeometryReviewer:
             None,
             f"Max retries ({self.max_retries}) exceeded. Last error: {feedback}",
         )
+
+
+def _apply_structure_hints(backend_name: str, atoms: Atoms, config: Any) -> None:
+    """Apply structure-aware auto-detection hints based on backend type."""
+    name = backend_name.lower()
+    if name == "vasp":
+        from shalom.backends.vasp_config import detect_and_apply_structure_hints
+        detect_and_apply_structure_hints(atoms, config)
+    elif name == "qe":
+        from shalom.backends.qe_config import detect_and_apply_qe_hints
+        detect_and_apply_qe_hints(atoms, config)

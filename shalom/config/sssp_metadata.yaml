@@ -1,0 +1,83 @@
+# SSSP Efficiency v1.3.0 pseudopotential metadata (PBE)
+#
+# Reference:
+#   Prandini et al. npj Comput. Mater. 4, 72 (2018). DOI:10.1038/s41524-018-0127-2
+#   Bosoni et al. Nat. Rev. Phys. 6, 45 (2024). DOI:10.1038/s42254-023-00655-3
+#
+# Each element entry contains:
+#   pseudo:     UPF pseudopotential filename
+#   ecutwfc:    Recommended wavefunction cutoff (Ry)
+#   ecutrho:    Recommended charge density cutoff (Ry)
+#   z_valence:  Number of valence electrons in the pseudopotential
+
+library: "SSSP_efficiency_1.3.0"
+functional: "PBE"
+
+elements:
+  # Row 1
+  H:  { pseudo: "H.pbe-rrkjus_psl.1.0.0.UPF",          ecutwfc: 60,  ecutrho: 480,   z_valence: 1  }
+  He: { pseudo: "He.pbe-kjpaw_psl.1.0.0.UPF",           ecutwfc: 50,  ecutrho: 400,   z_valence: 2  }
+  # Row 2
+  Li: { pseudo: "li_pbe_v1.4.uspp.F.UPF",               ecutwfc: 40,  ecutrho: 320,   z_valence: 3  }
+  Be: { pseudo: "Be_ONCV_PBE-1.2.upf",                  ecutwfc: 50,  ecutrho: 200,   z_valence: 4  }
+  B:  { pseudo: "B.pbe-n-kjpaw_psl.1.0.0.UPF",          ecutwfc: 40,  ecutrho: 320,   z_valence: 3  }
+  C:  { pseudo: "C.pbe-n-kjpaw_psl.1.0.0.UPF",          ecutwfc: 45,  ecutrho: 360,   z_valence: 4  }
+  N:  { pseudo: "N.pbe-n-rrkjus_psl.1.0.0.UPF",         ecutwfc: 80,  ecutrho: 640,   z_valence: 5  }
+  O:  { pseudo: "O.pbe-n-kjpaw_psl.1.0.0.UPF",          ecutwfc: 50,  ecutrho: 400,   z_valence: 6  }
+  F:  { pseudo: "F.pbe-n-rrkjus_psl.1.0.0.UPF",         ecutwfc: 60,  ecutrho: 480,   z_valence: 7  }
+  Ne: { pseudo: "Ne.pbe-n-kjpaw_psl.1.0.0.UPF",         ecutwfc: 50,  ecutrho: 400,   z_valence: 8  }
+  # Row 3
+  Na: { pseudo: "Na_pbe_v1.5.uspp.F.UPF",               ecutwfc: 50,  ecutrho: 400,   z_valence: 9  }
+  Mg: { pseudo: "Mg.pbe-spnl-kjpaw_psl.1.0.0.UPF",     ecutwfc: 35,  ecutrho: 280,   z_valence: 10 }
+  Al: { pseudo: "Al.pbe-n-kjpaw_psl.1.0.0.UPF",         ecutwfc: 30,  ecutrho: 240,   z_valence: 3  }
+  Si: { pseudo: "Si.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 30,  ecutrho: 240,   z_valence: 4  }
+  P:  { pseudo: "P.pbe-n-rrkjus_psl.1.0.0.UPF",         ecutwfc: 30,  ecutrho: 240,   z_valence: 5  }
+  S:  { pseudo: "S.pbe-n-rrkjus_psl.1.0.0.UPF",         ecutwfc: 35,  ecutrho: 280,   z_valence: 6  }
+  Cl: { pseudo: "Cl.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 40,  ecutrho: 320,   z_valence: 7  }
+  Ar: { pseudo: "Ar.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 50,  ecutrho: 400,   z_valence: 8  }
+  # Row 4
+  K:  { pseudo: "K.pbe-spn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 50,  ecutrho: 400,   z_valence: 9  }
+  Ca: { pseudo: "Ca_pbe_v1.0.uspp.F.UPF",               ecutwfc: 30,  ecutrho: 240,   z_valence: 10 }
+  Sc: { pseudo: "Sc.pbe-spn-kjpaw_psl.1.0.0.UPF",       ecutwfc: 40,  ecutrho: 320,   z_valence: 11 }
+  Ti: { pseudo: "Ti.pbe-spn-kjpaw_psl.1.0.0.UPF",       ecutwfc: 35,  ecutrho: 280,   z_valence: 12 }
+  V:  { pseudo: "V.pbe-spnl-kjpaw_psl.1.0.0.UPF",       ecutwfc: 35,  ecutrho: 280,   z_valence: 13 }
+  Cr: { pseudo: "cr_pbe_v1.5.uspp.F.UPF",               ecutwfc: 40,  ecutrho: 320,   z_valence: 14 }
+  Mn: { pseudo: "Mn.pbe-spn-kjpaw_psl.0.3.1.UPF",       ecutwfc: 65,  ecutrho: 780,   z_valence: 15 }
+  Fe: { pseudo: "Fe.pbe-spn-kjpaw_psl.1.0.0.UPF",       ecutwfc: 90,  ecutrho: 1080,  z_valence: 16 }
+  Co: { pseudo: "Co.pbe-spn-kjpaw_psl.0.3.1.UPF",       ecutwfc: 50,  ecutrho: 600,   z_valence: 17 }
+  Ni: { pseudo: "Ni.pbe-spn-kjpaw_psl.0.3.1.UPF",       ecutwfc: 55,  ecutrho: 660,   z_valence: 18 }
+  Cu: { pseudo: "Cu.pbe-dn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 55,  ecutrho: 440,   z_valence: 11 }
+  Zn: { pseudo: "Zn.pbe-dn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 45,  ecutrho: 360,   z_valence: 12 }
+  # p-block row 4
+  Ga: { pseudo: "Ga.pbe-dn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 55,  ecutrho: 440,   z_valence: 13 }
+  Ge: { pseudo: "Ge.pbe-dn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 40,  ecutrho: 320,   z_valence: 14 }
+  As: { pseudo: "As.pbe-n-rrkjus_psl.0.2.UPF",          ecutwfc: 35,  ecutrho: 280,   z_valence: 5  }
+  Se: { pseudo: "Se.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 30,  ecutrho: 240,   z_valence: 6  }
+  Br: { pseudo: "Br.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 30,  ecutrho: 240,   z_valence: 7  }
+  Kr: { pseudo: "Kr.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 50,  ecutrho: 400,   z_valence: 8  }
+  # Row 5 (selected)
+  Rb: { pseudo: "Rb_ONCV_PBE-1.2.upf",                  ecutwfc: 40,  ecutrho: 160,   z_valence: 9  }
+  Sr: { pseudo: "Sr_pbe_v1.uspp.F.UPF",                 ecutwfc: 30,  ecutrho: 240,   z_valence: 10 }
+  Y:  { pseudo: "Y.pbe-spn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 35,  ecutrho: 280,   z_valence: 11 }
+  Zr: { pseudo: "Zr.pbe-spn-kjpaw_psl.1.0.0.UPF",       ecutwfc: 30,  ecutrho: 240,   z_valence: 12 }
+  Nb: { pseudo: "Nb.pbe-spn-kjpaw_psl.1.0.0.UPF",       ecutwfc: 40,  ecutrho: 320,   z_valence: 13 }
+  Mo: { pseudo: "Mo_ONCV_PBE-1.2.upf",                  ecutwfc: 60,  ecutrho: 480,   z_valence: 14 }
+  Ru: { pseudo: "Ru_ONCV_PBE-1.2.upf",                  ecutwfc: 55,  ecutrho: 220,   z_valence: 16 }
+  Rh: { pseudo: "Rh_ONCV_PBE-1.2.upf",                  ecutwfc: 55,  ecutrho: 220,   z_valence: 17 }
+  Pd: { pseudo: "Pd_ONCV_PBE-1.2.upf",                  ecutwfc: 45,  ecutrho: 180,   z_valence: 18 }
+  Ag: { pseudo: "Ag_ONCV_PBE-1.2.upf",                  ecutwfc: 45,  ecutrho: 180,   z_valence: 11 }
+  Cd: { pseudo: "Cd.pbe-dn-rrkjus_psl.1.0.0.UPF",       ecutwfc: 50,  ecutrho: 400,   z_valence: 12 }
+  In: { pseudo: "In.pbe-dn-rrkjus_psl.1.0.0.UPF",       ecutwfc: 50,  ecutrho: 400,   z_valence: 13 }
+  Sn: { pseudo: "Sn_pbe_v1.uspp.F.UPF",                 ecutwfc: 60,  ecutrho: 480,   z_valence: 14 }
+  Sb: { pseudo: "sb_pbe_v1.4.uspp.F.UPF",               ecutwfc: 40,  ecutrho: 320,   z_valence: 5  }
+  Te: { pseudo: "Te.pbe-n-rrkjus_psl.1.0.0.UPF",        ecutwfc: 30,  ecutrho: 240,   z_valence: 6  }
+  I:  { pseudo: "I.pbe-n-rrkjus_psl.1.0.0.UPF",         ecutwfc: 35,  ecutrho: 280,   z_valence: 7  }
+  # Row 6 (selected)
+  Cs: { pseudo: "Cs_pbe_v1.uspp.F.UPF",                 ecutwfc: 30,  ecutrho: 240,   z_valence: 9  }
+  Ba: { pseudo: "Ba.pbe-spn-kjpaw_psl.1.0.0.UPF",       ecutwfc: 25,  ecutrho: 200,   z_valence: 10 }
+  La: { pseudo: "La.pbe-spfn-kjpaw_psl.1.0.0.UPF",      ecutwfc: 40,  ecutrho: 320,   z_valence: 11 }
+  W:  { pseudo: "W_pbe_v1.2.uspp.F.UPF",                ecutwfc: 30,  ecutrho: 240,   z_valence: 14 }
+  Pt: { pseudo: "Pt.pbe-spfn-rrkjus_psl.1.0.0.UPF",     ecutwfc: 35,  ecutrho: 280,   z_valence: 18 }
+  Au: { pseudo: "Au_ONCV_PBE-1.2.upf",                  ecutwfc: 55,  ecutrho: 220,   z_valence: 11 }
+  Pb: { pseudo: "Pb.pbe-dn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 40,  ecutrho: 320,   z_valence: 14 }
+  Bi: { pseudo: "Bi.pbe-dn-kjpaw_psl.1.0.0.UPF",        ecutwfc: 45,  ecutrho: 360,   z_valence: 15 }

@@ -1,42 +1,322 @@
-from typing import Any
+"""Quantum ESPRESSO DFT backend implementation.
+
+Handles pw.x input file generation (namelists + cards) with structure-aware
+auto-detection, and pw.x stdout parsing for energy/forces/convergence.
+
+Input format reference: QE pw.x documentation (https://www.quantum-espresso.org/)
+Output parsing: regex-based on pw.x stdout (not XML — simpler, sufficient for
+                energy/forces/convergence extraction).
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import re
+from typing import Any, Dict, List, Optional
 
 from ase import Atoms
 
 from shalom.backends.base import DFTResult
+from shalom.backends.qe_config import (
+    QEInputConfig,
+    get_qe_preset,
+)
+
+# Unit conversions
+RY_TO_EV = 13.6057
+RY_PER_BOHR_TO_EV_PER_ANG = 25.7112  # 13.6057 eV/Ry * 1.8897 Bohr/Ang
+
+# Atomic masses (amu) — subset covering common elements.
+# Used only for ATOMIC_SPECIES card (masses don't affect pw.x results,
+# but the card requires them).
+_ATOMIC_MASSES: Dict[str, float] = {
+    "H": 1.0079, "He": 4.0026, "Li": 6.941, "Be": 9.0122, "B": 10.811,
+    "C": 12.011, "N": 14.007, "O": 15.999, "F": 18.998, "Ne": 20.180,
+    "Na": 22.990, "Mg": 24.305, "Al": 26.982, "Si": 28.086, "P": 30.974,
+    "S": 32.065, "Cl": 35.453, "Ar": 39.948, "K": 39.098, "Ca": 40.078,
+    "Sc": 44.956, "Ti": 47.867, "V": 50.942, "Cr": 51.996, "Mn": 54.938,
+    "Fe": 55.845, "Co": 58.933, "Ni": 58.693, "Cu": 63.546, "Zn": 65.38,
+    "Ga": 69.723, "Ge": 72.630, "As": 74.922, "Se": 78.971, "Br": 79.904,
+    "Kr": 83.798, "Rb": 85.468, "Sr": 87.62, "Y": 88.906, "Zr": 91.224,
+    "Nb": 92.906, "Mo": 95.95, "Tc": 98.0, "Ru": 101.07, "Rh": 102.91,
+    "Pd": 106.42, "Ag": 107.87, "Cd": 112.41, "In": 114.82, "Sn": 118.71,
+    "Sb": 121.76, "Te": 127.60, "I": 126.90, "Xe": 131.29, "Cs": 132.91,
+    "Ba": 137.33, "La": 138.91, "Ce": 140.12, "Pr": 140.91, "Nd": 144.24,
+    "Pm": 145.0, "Sm": 150.36, "Eu": 151.96, "Gd": 157.25, "Tb": 158.93,
+    "Dy": 162.50, "Ho": 164.93, "Er": 167.26, "Tm": 168.93, "Yb": 173.05,
+    "Lu": 174.97, "Hf": 178.49, "Ta": 180.95, "W": 183.84, "Re": 186.21,
+    "Os": 190.23, "Ir": 192.22, "Pt": 195.08, "Au": 196.97, "Hg": 200.59,
+    "Tl": 204.38, "Pb": 207.2, "Bi": 208.98,
+}
+
+
+def _format_qe_value(value: Any) -> str:
+    """Format a Python value for QE namelist syntax."""
+    if value is None:
+        raise ValueError("Cannot format None value for QE namelist")
+    if isinstance(value, bool):
+        return ".true." if value else ".false."
+    if isinstance(value, str):
+        if value.startswith("'") and value.endswith("'"):
+            return value
+        return f"'{value}'"
+    if isinstance(value, float):
+        if abs(value) < 1e-3 and value != 0:
+            return f"{value:.2E}"
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    raise TypeError(
+        f"Unsupported type for QE namelist: {type(value).__name__}. "
+        f"Expected bool, str, int, or float."
+    )
 
 
 class QEBackend:
-    """Quantum ESPRESSO DFT backend (stub).
+    """Quantum ESPRESSO DFT backend.
 
-    This backend will be fully implemented in Phase 3. It will handle
-    ``pw.x`` input file generation and XML output parsing.
+    Generates pw.x input files from ASE Atoms + QEInputConfig, and parses
+    pw.x stdout output for energy/forces/convergence.
     """
 
     name: str = "qe"
 
+    # ------------------------------------------------------------------
+    # Input generation
+    # ------------------------------------------------------------------
+
     def write_input(self, atoms: Atoms, directory: str, **params: Any) -> str:
-        """Write Quantum ESPRESSO input files.
+        """Write Quantum ESPRESSO pw.x input files.
 
-        Not yet implemented. Will generate ``pw.x`` input files from the
-        ASE Atoms object in Phase 3.
+        When ``config`` (QEInputConfig) is passed in **params, generates a
+        complete pw.in file. Otherwise creates a default SCF config.
 
-        Raises:
-            NotImplementedError: Always, until Phase 3 implementation.
+        Args:
+            atoms: ASE Atoms object representing the structure.
+            directory: Target directory for the input files.
+            **params: Optional parameters. Supported keys:
+                - config (QEInputConfig): Full input configuration.
+                - filename (str): pw.x input filename. Defaults to "pw.in".
+
+        Returns:
+            The directory path where input files were written.
         """
-        raise NotImplementedError(
-            "Quantum ESPRESSO backend will be implemented in Phase 3. "
-            "Use 'vasp' backend for now."
-        )
+        os.makedirs(directory, exist_ok=True)
+        config: Optional[QEInputConfig] = params.pop("config", None)
+        filename = params.get("filename", "pw.in")
+
+        if config is None:
+            config = get_qe_preset(atoms=atoms)
+
+        self._write_pw_input(atoms, directory, filename, config)
+        return directory
+
+    def _write_pw_input(
+        self, atoms: Atoms, directory: str, filename: str, config: QEInputConfig,
+    ) -> str:
+        """Write complete pw.x input file."""
+        filepath = os.path.join(directory, filename)
+        symbols = list(atoms.get_chemical_symbols())
+        species_order = list(dict.fromkeys(symbols))
+
+        namelists = config.get_merged_namelists()
+
+        # Ensure pseudo_dir is in CONTROL
+        namelists.setdefault("CONTROL", {})["pseudo_dir"] = config.pseudo_dir
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write("! pw.x input generated by SHALOM\n")
+
+            # Write namelists
+            for ns_name in ("CONTROL", "SYSTEM", "ELECTRONS", "IONS", "CELL"):
+                if ns_name not in namelists:
+                    continue
+                ns = namelists[ns_name]
+                f.write(f"&{ns_name}\n")
+                for key, val in ns.items():
+                    f.write(f"  {key} = {_format_qe_value(val)}\n")
+                f.write("/\n\n")
+
+            # ATOMIC_SPECIES card
+            f.write("ATOMIC_SPECIES\n")
+            for el in species_order:
+                mass = _ATOMIC_MASSES.get(el, 1.0)
+                pseudo = config.pseudo_map.get(el, f"{el}.UPF")
+                f.write(f"  {el:<4s} {mass:>10.4f}  {pseudo}\n")
+            f.write("\n")
+
+            # ATOMIC_POSITIONS card (crystal coordinates)
+            f.write("ATOMIC_POSITIONS crystal\n")
+            scaled = atoms.get_scaled_positions()
+            for sym, pos in zip(symbols, scaled):
+                f.write(f"  {sym:<4s} {pos[0]:16.10f} {pos[1]:16.10f} {pos[2]:16.10f}\n")
+            f.write("\n")
+
+            # K_POINTS card
+            kp = config.kpoints
+            if kp.mode == "gamma":
+                f.write("K_POINTS gamma\n")
+            elif kp.mode == "automatic":
+                grid = kp.grid or [4, 4, 4]
+                shift = kp.shift or [0, 0, 0]
+                f.write("K_POINTS automatic\n")
+                f.write(f"  {grid[0]} {grid[1]} {grid[2]}  {shift[0]} {shift[1]} {shift[2]}\n")
+            elif kp.mode == "crystal_b":
+                # Band structure path — placeholder
+                f.write("K_POINTS crystal_b\n")
+                f.write("! TODO: Add band path k-points manually\n")
+                f.write("! See: https://www.materialscloud.org/work/tools/seekpath\n")
+                f.write("0\n")
+            f.write("\n")
+
+            # CELL_PARAMETERS card (angstrom)
+            cell = atoms.get_cell()
+            f.write("CELL_PARAMETERS angstrom\n")
+            for i in range(3):
+                f.write(
+                    f"  {cell[i][0]:16.10f} {cell[i][1]:16.10f} {cell[i][2]:16.10f}\n"
+                )
+
+        return filepath
+
+    # ------------------------------------------------------------------
+    # Output parsing
+    # ------------------------------------------------------------------
 
     def parse_output(self, directory: str) -> DFTResult:
-        """Parse Quantum ESPRESSO XML output.
+        """Parse Quantum ESPRESSO pw.x stdout output.
 
-        Not yet implemented. Will parse ``pw.x`` XML output files in Phase 3.
+        Looks for pw.out (or any .out file) in the directory and parses
+        energy, forces, convergence, and magnetization using regex.
+
+        Args:
+            directory: Directory containing the pw.x output file.
+
+        Returns:
+            DFTResult with energy (eV), forces (eV/Ang), and convergence.
 
         Raises:
-            NotImplementedError: Always, until Phase 3 implementation.
+            FileNotFoundError: If no output file is found.
         """
-        raise NotImplementedError(
-            "Quantum ESPRESSO backend will be implemented in Phase 3. "
-            "Use 'vasp' backend for now."
+        # Try common output filenames
+        out_path = None
+        for candidate in ("pw.out", "pwscf.out", "espresso.out"):
+            p = os.path.join(directory, candidate)
+            if os.path.exists(p):
+                out_path = p
+                break
+
+        # Fallback: any .out file
+        if out_path is None:
+            for fname in os.listdir(directory):
+                if fname.endswith(".out"):
+                    out_path = os.path.join(directory, fname)
+                    break
+
+        if out_path is None:
+            raise FileNotFoundError(
+                f"No pw.x output file found in {directory}. "
+                "Expected pw.out, pwscf.out, or espresso.out."
+            )
+
+        return self._parse_pw_output(out_path)
+
+    def _parse_pw_output(self, filepath: str) -> DFTResult:
+        """Parse pw.x stdout using regex patterns."""
+        with open(filepath, "r", encoding="utf-8") as f:
+            text = f.read()
+
+        energy: Optional[float] = None
+        is_converged = False
+        forces_max: Optional[float] = None
+        all_forces: Optional[List[List[float]]] = None
+        magnetization: Optional[float] = None
+        ionic_energies: List[float] = []
+        ionic_forces_max: List[float] = []
+
+        # Total energy: "!    total energy              =    -xxx.xxx Ry"
+        for m in re.finditer(r"!\s+total energy\s+=\s+([-+\d.eE]+)\s+Ry", text):
+            try:
+                e_ry = float(m.group(1))
+            except ValueError:
+                continue
+            e_ev = e_ry * RY_TO_EV
+            energy = e_ev
+            ionic_energies.append(e_ev)
+
+        # Convergence: "convergence has been achieved in N iterations"
+        if re.search(r"convergence has been achieved", text):
+            is_converged = True
+
+        # Also check for "JOB DONE" as secondary convergence signal
+        if "JOB DONE" in text:
+            is_converged = True
+
+        # Total force: "Total force =     x.xxxxx"
+        for m in re.finditer(r"Total force\s*=\s*([\d.eE+-]+)", text):
+            try:
+                total_force_ry_bohr = float(m.group(1))
+            except ValueError:
+                continue
+            forces_max = total_force_ry_bohr * RY_PER_BOHR_TO_EV_PER_ANG
+            ionic_forces_max.append(forces_max)
+
+        # Per-atom forces block:
+        # "Forces acting on atoms (cartesian axes, Ry/au):"
+        # then lines like: "atom    1 type  1   force =     0.000  0.000  0.000"
+        force_blocks = list(re.finditer(
+            r"Forces acting on atoms.*?:\s*\n((?:\s+atom\s+\d+.*\n)+)",
+            text,
+        ))
+        if force_blocks:
+            last_block = force_blocks[-1].group(1)
+            current_forces = []
+            for line in last_block.strip().split("\n"):
+                m = re.match(
+                    r"\s*atom\s+\d+\s+type\s+\d+\s+force\s*=\s+"
+                    r"([-+\d.eE]+)\s+([-+\d.eE]+)\s+([-+\d.eE]+)",
+                    line,
+                )
+                if m:
+                    try:
+                        fx = float(m.group(1)) * RY_PER_BOHR_TO_EV_PER_ANG
+                        fy = float(m.group(2)) * RY_PER_BOHR_TO_EV_PER_ANG
+                        fz = float(m.group(3)) * RY_PER_BOHR_TO_EV_PER_ANG
+                        current_forces.append([fx, fy, fz])
+                    except ValueError:
+                        continue
+            if current_forces:
+                all_forces = current_forces
+                # Update forces_max from per-atom if available
+                step_fmax = max(
+                    math.sqrt(f[0]**2 + f[1]**2 + f[2]**2)
+                    for f in current_forces
+                )
+                forces_max = step_fmax
+
+        # Magnetization: "total magnetization       =     x.xx Bohr mag/cell"
+        mag_match = re.findall(
+            r"total magnetization\s+=\s+([-\d.]+)\s+Bohr mag/cell",
+            text,
+        )
+        if mag_match:
+            magnetization = float(mag_match[-1])
+
+        raw: Dict[str, Any] = {
+            "energy": energy,
+            "is_converged": is_converged,
+            "forces_max": forces_max,
+            "source": "qe_regex",
+        }
+
+        return DFTResult(
+            energy=energy,
+            forces_max=forces_max,
+            is_converged=is_converged,
+            forces=all_forces,
+            magnetization=magnetization,
+            ionic_energies=ionic_energies if ionic_energies else None,
+            ionic_forces_max=ionic_forces_max if ionic_forces_max else None,
+            raw=raw,
         )

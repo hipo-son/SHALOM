@@ -139,7 +139,7 @@ class TestVASPBackend:
 
 
 class TestQEBackend:
-    """Tests for QEBackend stub."""
+    """Tests for QEBackend implementation."""
 
     def test_implements_protocol(self):
         backend = QEBackend()
@@ -148,16 +148,50 @@ class TestQEBackend:
     def test_name(self):
         assert QEBackend().name == "qe"
 
-    def test_write_input_raises(self):
+    def test_write_input_creates_pw_in(self, tmp_path):
         atoms = bulk("Cu", "fcc", a=3.6)
         backend = QEBackend()
-        with pytest.raises(NotImplementedError, match="Phase 3"):
-            backend.write_input(atoms, "/tmp")
+        result_dir = backend.write_input(atoms, str(tmp_path))
+        assert result_dir == str(tmp_path)
+        pw_in = os.path.join(str(tmp_path), "pw.in")
+        assert os.path.exists(pw_in)
+        with open(pw_in, "r") as f:
+            content = f.read()
+        assert "&CONTROL" in content
+        assert "&SYSTEM" in content
+        assert "&ELECTRONS" in content
+        assert "ATOMIC_SPECIES" in content
+        assert "ATOMIC_POSITIONS" in content
+        assert "K_POINTS" in content
+        assert "CELL_PARAMETERS" in content
+        assert "Cu" in content
 
-    def test_parse_output_raises(self):
+    def test_write_input_custom_filename(self, tmp_path):
+        atoms = bulk("Cu", "fcc", a=3.6)
         backend = QEBackend()
-        with pytest.raises(NotImplementedError, match="Phase 3"):
-            backend.parse_output("/tmp")
+        backend.write_input(atoms, str(tmp_path), filename="test.in")
+        assert os.path.exists(os.path.join(str(tmp_path), "test.in"))
+
+    def test_parse_output_missing_file(self, tmp_path):
+        backend = QEBackend()
+        with pytest.raises(FileNotFoundError, match="No pw.x output"):
+            backend.parse_output(str(tmp_path))
+
+    def test_parse_output_converged(self, tmp_path):
+        out_file = tmp_path / "pw.out"
+        out_file.write_text(
+            "!    total energy              =     -31.50000000 Ry\n"
+            "     convergence has been achieved in   8 iterations\n"
+            "     Total force =     0.000100\n"
+            "     total magnetization       =     2.50 Bohr mag/cell\n"
+            "     JOB DONE.\n"
+        )
+        backend = QEBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.is_converged is True
+        assert result.energy is not None
+        assert abs(result.energy - (-31.5 * 13.6057)) < 0.1
+        assert result.magnetization == 2.5
 
 
 # ---------------------------------------------------------------------------

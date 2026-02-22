@@ -297,17 +297,18 @@ class TestGeometryReviewerWithBackend:
         return RankedMaterial(candidate=candidate, score=0.9, ranking_justification="test")
 
     def test_backend_with_vasp_config(self, mock_llm, tmp_path):
-        """GeometryReviewer passes vasp_config (with structure hints) to backend.write_input."""
+        """GeometryReviewer passes dft_config (with structure hints) to backend.write_input."""
         generator = GeometryGenerator(llm_provider=mock_llm)
 
         mock_backend = MagicMock()
+        mock_backend.name = "vasp"
         mock_backend.write_input.return_value = str(tmp_path / "output")
 
         real_config = VASPInputConfig()
 
         reviewer = GeometryReviewer(
             generator=generator, max_retries=3,
-            backend=mock_backend, vasp_config=real_config,
+            backend=mock_backend, dft_config=real_config,
         )
 
         mock_response = MagicMock()
@@ -339,7 +340,7 @@ class TestGeometryReviewerWithBackend:
 
         reviewer = GeometryReviewer(
             generator=generator, max_retries=3,
-            backend=mock_backend, vasp_config=None,
+            backend=mock_backend, dft_config=None,
         )
 
         mock_response = MagicMock()
@@ -363,7 +364,7 @@ class TestGeometryReviewerWithBackend:
 
         reviewer = GeometryReviewer(
             generator=generator, max_retries=3,
-            backend=mock_backend, vasp_config=None,
+            backend=mock_backend, dft_config=None,
         )
 
         call_count = 0

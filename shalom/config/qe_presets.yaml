@@ -1,0 +1,164 @@
+# Quantum ESPRESSO pw.x presets
+#
+# Key format: "calc_type:accuracy" (mirrors incar_presets.yaml convention)
+# Units: ecutwfc/ecutrho = Ry, conv_thr = Ry, degauss = Ry, forc_conv_thr = Ry/Bohr
+#
+# Smearing: Methfessel & Paxton, PRB 40, 3616 (1989)
+# degauss calibrated to match VASP SIGMA via exact conversion: degauss = SIGMA(eV) / 13.6057
+#   standard: degauss = 0.1 eV / 13.6057 = 0.00735 Ry
+#   precise:  degauss = 0.05 eV / 13.6057 = 0.00368 Ry
+# conv_thr calibrated: conv_thr = EDIFF(eV) / 13.6057
+#   standard: 1e-5 eV → 7.35e-7 Ry
+#   precise:  1e-7 eV → 7.35e-9 Ry
+
+scf:standard:
+  control:
+    calculation: scf
+    prefix: shalom
+    outdir: ./tmp
+    tprnfor: true
+    tstress: true
+  system:
+    occupations: smearing
+    smearing: methfessel-paxton
+    degauss: 0.00735
+  electrons:
+    conv_thr: 7.35e-7
+    mixing_beta: 0.7
+
+scf:precise:
+  control:
+    calculation: scf
+    prefix: shalom
+    outdir: ./tmp
+    tprnfor: true
+    tstress: true
+  system:
+    occupations: smearing
+    smearing: methfessel-paxton
+    degauss: 0.00368
+  electrons:
+    conv_thr: 7.35e-9
+    mixing_beta: 0.5
+
+vc-relax:standard:
+  control:
+    calculation: vc-relax
+    prefix: shalom
+    outdir: ./tmp
+    tprnfor: true
+    tstress: true
+    forc_conv_thr: 1.0e-3
+    nstep: 200
+  system:
+    occupations: smearing
+    smearing: methfessel-paxton
+    degauss: 0.00735
+  electrons:
+    conv_thr: 7.35e-8
+    mixing_beta: 0.7
+  ions:
+    ion_dynamics: bfgs
+  cell:
+    cell_dynamics: bfgs
+    press: 0.0
+
+vc-relax:precise:
+  control:
+    calculation: vc-relax
+    prefix: shalom
+    outdir: ./tmp
+    tprnfor: true
+    tstress: true
+    forc_conv_thr: 5.0e-4
+    nstep: 200
+  system:
+    occupations: smearing
+    smearing: methfessel-paxton
+    degauss: 0.00368
+  electrons:
+    conv_thr: 7.35e-10
+    mixing_beta: 0.5
+  ions:
+    ion_dynamics: bfgs
+  cell:
+    cell_dynamics: bfgs
+    press: 0.0
+
+relax:standard:
+  control:
+    calculation: relax
+    prefix: shalom
+    outdir: ./tmp
+    tprnfor: true
+    forc_conv_thr: 1.0e-3
+    nstep: 100
+  system:
+    occupations: smearing
+    smearing: methfessel-paxton
+    degauss: 0.00735
+  electrons:
+    conv_thr: 7.35e-8
+    mixing_beta: 0.7
+  ions:
+    ion_dynamics: bfgs
+
+relax:precise:
+  control:
+    calculation: relax
+    prefix: shalom
+    outdir: ./tmp
+    tprnfor: true
+    forc_conv_thr: 5.0e-4
+    nstep: 100
+  system:
+    occupations: smearing
+    smearing: methfessel-paxton
+    degauss: 0.00368
+  electrons:
+    conv_thr: 7.35e-10
+    mixing_beta: 0.5
+  ions:
+    ion_dynamics: bfgs
+
+bands:standard:
+  control:
+    calculation: bands
+    prefix: shalom
+    outdir: ./tmp
+    verbosity: high
+  system:
+    nbnd: 20
+  electrons:
+    conv_thr: 7.35e-7
+
+bands:precise:
+  control:
+    calculation: bands
+    prefix: shalom
+    outdir: ./tmp
+    verbosity: high
+  system:
+    nbnd: 30
+  electrons:
+    conv_thr: 7.35e-9
+
+nscf:standard:
+  control:
+    calculation: nscf
+    prefix: shalom
+    outdir: ./tmp
+  system:
+    occupations: tetrahedra
+  electrons:
+    conv_thr: 7.35e-7
+
+nscf:precise:
+  control:
+    calculation: nscf
+    prefix: shalom
+    outdir: ./tmp
+  system:
+    occupations: tetrahedra
+  electrons:
+    conv_thr: 7.35e-9
