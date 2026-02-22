@@ -25,6 +25,23 @@ class MaterialCandidate(BaseModel):
     )
 
 
+class EvaluationDetails(BaseModel):
+    """Multi-agent evaluation metadata attached to a RankedMaterial."""
+
+    evaluations: List["EvaluationResponse"] = Field(
+        default_factory=list,
+        description="Evaluation responses from each specialist evaluator.",
+    )
+    veto_reasons: List[str] = Field(
+        default_factory=list,
+        description="Reasons candidates were vetoed during this evaluation.",
+    )
+    micro_loop_retries: int = Field(
+        default=0, ge=0,
+        description="Number of design micro-loop retries before finding a non-vetoed candidate.",
+    )
+
+
 class RankedMaterial(BaseModel):
     """Final candidate schema evaluated and ranked by the Fine Selector."""
 
@@ -34,6 +51,10 @@ class RankedMaterial(BaseModel):
     )
     ranking_justification: str = Field(
         description="Detailed justification for the assigned score and ranking."
+    )
+    evaluation_details: Optional[EvaluationDetails] = Field(
+        default=None,
+        description="Multi-agent evaluation metadata (populated by MultiAgentFineSelector).",
     )
 
 
@@ -206,3 +227,7 @@ class PipelineResult(BaseModel):
         default_factory=list,
         description="Ordered list of successfully completed pipeline steps.",
     )
+
+
+# Resolve forward references for EvaluationDetails -> EvaluationResponse
+EvaluationDetails.model_rebuild()

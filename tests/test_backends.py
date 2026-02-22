@@ -393,8 +393,8 @@ class TestPOTCARSpec:
         backend.write_input(sample_tmo_feo, str(tmp_path), config=config)
         with open(os.path.join(str(tmp_path), "POTCAR.spec"), "r", encoding="utf-8") as f:
             content = f.read()
-        # Fe uses "Fe" in vasp_recommended (not Fe_pv)
-        assert "Fe\n" in content
+        # Fe uses "Fe_pv" in vasp_recommended (MP standard)
+        assert "Fe_pv\n" in content
         assert "O\n" in content
 
     def test_vasp_recommended_in_spec(self, tmp_path, sample_bulk_cu):

@@ -106,6 +106,22 @@ print(f"Top Material: {winner.candidate.material_name} (Score: {winner.score})")
 
 For the full pipeline (Simulation + Review layers) and guidance on building custom agent hierarchies, see the [Documentation](https://shalom.readthedocs.io/en/latest/).
 
+## Quick Demo
+
+Try the interactive demo with rich console output:
+
+```bash
+pip install -e ".[demo]"                # install with demo dependencies
+export OPENAI_API_KEY='sk-...'          # or ANTHROPIC_API_KEY
+
+python -m shalom.demo --dry-run                    # preview (no API calls, $0)
+python -m shalom.demo --scenario smoke_test         # real API (3 calls, ~$0.03)
+python -m shalom.demo --scenario her_catalyst       # multi-agent (9 calls, ~$0.12)
+python -m shalom.demo --list                        # list all scenarios
+```
+
+The demo runs the full pipeline (Design → Simulation) with real-time cost tracking, multi-agent evaluation matrix display, and JSON report generation. Use `--dry-run` for zero-cost offline testing.
+
 ## Documentation
 Read the full API reference and tutorials on [ReadTheDocs](https://shalom.readthedocs.io).
 

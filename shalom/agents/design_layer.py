@@ -12,7 +12,7 @@ from shalom.agents.evaluators import (
 )
 from shalom._config_loader import load_prompt
 from shalom.core.llm_provider import LLMProvider
-from shalom.core.schemas import MaterialCandidate, RankedMaterial
+from shalom.core.schemas import EvaluationDetails, MaterialCandidate, RankedMaterial
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,13 @@ class MultiAgentFineSelector:
             )
 
             if result is not None:
-                return result
+                return result.model_copy(update={
+                    "evaluation_details": EvaluationDetails(
+                        evaluations=evaluations,
+                        veto_reasons=veto_reasons,
+                        micro_loop_retries=retry,
+                    ),
+                })
 
             # All candidates vetoed
             if coarse_selector is None or retry == max_design_retries:
@@ -184,7 +190,7 @@ class MultiAgentFineSelector:
                     "All candidates vetoed after %d retries. Returning fallback.",
                     retry + 1,
                 )
-                return RankedMaterial(
+                fallback = RankedMaterial(
                     candidate=current_candidates[0],
                     score=0.0,
                     ranking_justification=(
@@ -193,6 +199,13 @@ class MultiAgentFineSelector:
                         + "; ".join(veto_reasons[:3])
                     ),
                 )
+                return fallback.model_copy(update={
+                    "evaluation_details": EvaluationDetails(
+                        evaluations=evaluations,
+                        veto_reasons=veto_reasons,
+                        micro_loop_retries=max_design_retries,
+                    ),
+                })
 
             # Micro-loop: feed veto reasons back to CoarseSelector
             veto_feedback = "\n".join(veto_reasons)

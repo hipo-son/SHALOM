@@ -167,7 +167,7 @@ CONFIGS: dict = {
             "K": "K_sv", "Ca": "Ca_sv",
             # 3d transition metals
             "Sc": "Sc_sv", "Ti": "Ti_sv", "V": "V_sv", "Cr": "Cr_pv",
-            "Mn": "Mn_pv", "Fe": "Fe", "Co": "Co", "Ni": "Ni",
+            "Mn": "Mn_pv", "Fe": "Fe_pv", "Co": "Co", "Ni": "Ni",
             "Cu": "Cu", "Zn": "Zn",
             # p-block row 4
             "Ga": "Ga_d", "Ge": "Ge_d", "As": "As", "Se": "Se", "Br": "Br", "Kr": "Kr",

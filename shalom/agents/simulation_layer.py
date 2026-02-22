@@ -1,5 +1,8 @@
+import copy
 import logging
+import re
 import traceback
+from pathlib import Path
 from typing import Any, Optional, Tuple
 
 from ase import Atoms
@@ -99,7 +102,7 @@ class FormFiller:
         if num_atoms == 0:
             is_valid = False
             feedback = "Error: No atoms were generated."
-        elif min_dist < 0.5 and num_atoms > 1:
+        elif min_dist < 0.8 and num_atoms > 1:
             is_valid = False
             feedback = (
                 f"Physical error: Interatomic distance is too short ({min_dist:.2f} A). "
@@ -124,7 +127,7 @@ class FormFiller:
                 slab_thickness = z_positions.max() - z_positions.min()
                 vacuum_thickness = cell[2][2] - slab_thickness
 
-                if 0 < vacuum_thickness < 8.0:
+                if 0 < vacuum_thickness < 12.0:
                     is_valid = False
                     feedback = (
                         f"Warning: Vacuum layer ({vacuum_thickness:.1f} A) is too thin. "
@@ -201,12 +204,15 @@ class GeometryReviewer:
 
                 if form_result.is_valid:
                     output_dir = "generated_structures"
-                    mat_name = ranked_material.candidate.material_name.replace(" ", "_")
+                    mat_name = re.sub(r'[^\w\-.]', '_', ranked_material.candidate.material_name)
 
                     if self.backend is not None:
                         write_params = {"filename": f"POSCAR_{mat_name}"}
                         if self.vasp_config is not None:
-                            write_params["config"] = self.vasp_config
+                            from shalom.backends.vasp_config import detect_and_apply_structure_hints
+                            effective_config = copy.deepcopy(self.vasp_config)
+                            detect_and_apply_structure_hints(atoms, effective_config)
+                            write_params["config"] = effective_config
                         filepath = self.backend.write_input(
                             atoms, output_dir, **write_params
                         )
@@ -225,9 +231,10 @@ class GeometryReviewer:
 
             except Exception as e:
                 error_trace = traceback.format_exc()
+                sanitized_trace = error_trace[-500:].replace(str(Path.home()), "~")
                 feedback = (
                     f"Exception during Python execution:\n{e}\n\n"
-                    f"Traceback:\n{error_trace}\n"
+                    f"Traceback (last 500 chars):\n{sanitized_trace}\n"
                     "Please check ASE syntax and produce a valid atoms object."
                 )
                 logger.warning("[Attempt %d] Code execution failed.", attempt + 1)

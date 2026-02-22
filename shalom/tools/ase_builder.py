@@ -31,7 +31,7 @@ class ASEBuilder:
 
     @staticmethod
     def construct_surface(
-        atoms: Atoms, indices: Tuple[int, int, int], layers: int, vacuum: float = 10.0
+        atoms: Atoms, indices: Tuple[int, int, int], layers: int, vacuum: float = 15.0
     ) -> Atoms:
         """
         Constructs a surface slab from the given lattice.

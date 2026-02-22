@@ -58,9 +58,15 @@ docs = [
     "nbsphinx",
     "sphinx-copybutton"
 ]
-all = [
-    "shalom[pymatgen,dev,docs]"
+demo = [
+    "rich>=13.0"
 ]
+all = [
+    "shalom[pymatgen,dev,docs,demo]"
+]
+
+[project.scripts]
+shalom-demo = "shalom.demo.__main__:main"
 
 [tool.ruff]
 line-length = 100

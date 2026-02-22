@@ -32,7 +32,7 @@ vasp_recommended:
   V: "V_sv"
   Cr: "Cr_pv"
   Mn: "Mn_pv"
-  Fe: "Fe"
+  Fe: "Fe_pv"
   Co: "Co"
   Ni: "Ni"
   Cu: "Cu"

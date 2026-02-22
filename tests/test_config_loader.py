@@ -247,3 +247,81 @@ class TestShalomConfigurationError:
         exc = ShalomConfigurationError("test error")
         assert isinstance(exc, Exception)
         assert str(exc) == "test error"
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: fallback paths and edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestConfigLoaderFallback:
+    """Tests for fallback and error paths in _config_loader."""
+
+    def setup_method(self):
+        clear_cache()
+
+    def test_yaml_unavailable_uses_defaults(self, monkeypatch):
+        """When PyYAML is not available, built-in defaults are used."""
+        import shalom._config_loader as loader
+
+        original = loader._YAML_AVAILABLE
+        monkeypatch.setattr(loader, "_YAML_AVAILABLE", False)
+        clear_cache()
+        try:
+            cfg = load_config("evaluator_weights")
+            assert "weights" in cfg
+        finally:
+            monkeypatch.setattr(loader, "_YAML_AVAILABLE", original)
+            clear_cache()
+
+    def test_yaml_syntax_error_raises(self, monkeypatch):
+        """Malformed YAML raises ShalomConfigurationError."""
+        import importlib.resources
+        import shalom._config_loader as loader
+
+        clear_cache()
+
+        # Monkey-patch to return invalid YAML
+        def fake_files(pkg):
+            mock = type("FakeFiles", (), {
+                "__truediv__": lambda self, name: type("FakePath", (), {
+                    "__truediv__": lambda self2, name2: type("FakeFile", (), {
+                        "read_text": lambda self3, encoding="utf-8": ":{bad yaml:\n  - [",
+                    })(),
+                })(),
+            })()
+            return mock
+
+        monkeypatch.setattr(importlib.resources, "files", fake_files)
+        try:
+            with pytest.raises(ShalomConfigurationError, match="Failed to parse"):
+                loader._load_config_cached.__wrapped__("bad_config_test")
+        finally:
+            clear_cache()
+
+    def test_prompt_fallback_warning(self, monkeypatch):
+        """When prompt file is not found, warning is issued with default."""
+        import importlib.resources
+        import warnings
+        import shalom._config_loader as loader
+
+        clear_cache()
+
+        def fake_files(pkg):
+            class FakeRef:
+                def __truediv__(self, name):
+                    return self
+                def read_text(self, encoding="utf-8"):
+                    raise FileNotFoundError("not found")
+            return FakeRef()
+
+        monkeypatch.setattr(importlib.resources, "files", fake_files)
+        try:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                result = loader._load_prompt_cached.__wrapped__("coarse_selector")
+                assert len(w) >= 1
+                assert "built-in default" in str(w[0].message)
+                assert len(result) > 0
+        finally:
+            clear_cache()

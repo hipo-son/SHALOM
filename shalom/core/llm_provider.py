@@ -1,10 +1,14 @@
+import logging
 import os
-from typing import Type, TypeVar, Optional, Union, cast
-from pydantic import BaseModel
+from typing import Any, Callable, Dict, Optional, Type, TypeVar, Union, cast
+
 import openai
 from anthropic import Anthropic
+from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProvider:
@@ -14,9 +18,15 @@ class LLMProvider:
     while exposing a single structured-output interface.
     """
 
-    def __init__(self, provider_type: str = "openai", model_name: str = "gpt-4o"):
+    def __init__(
+        self,
+        provider_type: str = "openai",
+        model_name: str = "gpt-4o",
+        usage_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
         self.provider_type = provider_type.lower()
         self.model_name = model_name
+        self.usage_callback = usage_callback
 
         self.client: Union[openai.OpenAI, Anthropic]
         if self.provider_type == "openai":
@@ -25,6 +35,38 @@ class LLMProvider:
             self.client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         else:
             raise ValueError(f"Unsupported provider: {provider_type}")
+
+    @staticmethod
+    def _extract_token_count(usage: Any, *attr_names: str) -> int:
+        """None-safe token extraction from usage objects.
+
+        Iterates through attribute names and returns the first non-None value.
+        Handles the ``getattr(x, a, 0) or getattr(x, b, 0)`` pitfall where
+        ``0 or fallback`` incorrectly falls through to the fallback.
+        """
+        for attr in attr_names:
+            value = getattr(usage, attr, None)
+            if value is not None:
+                return int(value)
+        return 0
+
+    def _report_usage(self, response_usage: Any) -> None:
+        """Report token usage to the registered callback, if any."""
+        if not self.usage_callback or not response_usage:
+            return
+        try:
+            self.usage_callback({
+                "provider": self.provider_type,
+                "model": self.model_name,
+                "input_tokens": self._extract_token_count(
+                    response_usage, "prompt_tokens", "input_tokens",
+                ),
+                "output_tokens": self._extract_token_count(
+                    response_usage, "completion_tokens", "output_tokens",
+                ),
+            })
+        except Exception as e:
+            logger.warning("Usage callback failed: %s", e)
 
     def generate_structured_output(
         self,
@@ -43,6 +85,10 @@ class LLMProvider:
 
         Returns:
             An instance of ``response_model`` populated with the LLM's response.
+
+        Note:
+            Anthropic API does not support the ``seed`` parameter; it is
+            silently ignored for reproducibility intent only.
         """
         if self.provider_type == "openai":
             return self._call_openai_structured(system_prompt, user_prompt, response_model, seed)
@@ -70,6 +116,7 @@ class LLMProvider:
                 temperature=0.0,  # Deterministic temperature for reproducibility
                 seed=seed,
             )
+            self._report_usage(response.usage)
             parsed = response.choices[0].message.parsed
             if parsed is None:
                 raise ValueError("Parsed result is None from openai beta completions.")
@@ -96,6 +143,7 @@ class LLMProvider:
                 seed=seed,
             )
 
+            self._report_usage(fallback_res.usage)
             func_call = fallback_res.choices[0].message.function_call
             if func_call is None or func_call.arguments is None:
                 raise ValueError("Function call arguments are missing.")
@@ -125,6 +173,8 @@ class LLMProvider:
             tool_choice={"type": "tool", "name": "structured_response"},
             temperature=0.0,  # Deterministic temperature for reproducibility
         )
+
+        self._report_usage(response.usage)
 
         # Parse tool_use result from response
         for block in response.content:

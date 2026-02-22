@@ -175,7 +175,17 @@ def evaluate_parallel(
         }
         results: List[EvaluationResponse] = []
         for future in as_completed(futures):
-            results.append(future.result())
+            perspective = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as e:
+                logger.error(
+                    "Evaluator '%s' failed after retries: %s", perspective, e,
+                )
+        if len(results) < len(futures):
+            logger.warning(
+                "%d/%d evaluators succeeded.", len(results), len(futures),
+            )
     return results
 
 

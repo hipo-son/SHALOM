@@ -337,7 +337,7 @@ def detect_and_apply_structure_hints(
         if u_elements:
             if config.accuracy == AccuracyLevel.PRECISE:
                 # Auto-enable GGA+U
-                all_elements_ordered = sorted(set(symbols))
+                all_elements_ordered = list(dict.fromkeys(symbols))
                 ldaul = []
                 ldauu = []
                 ldauj = []
@@ -375,10 +375,24 @@ def detect_and_apply_structure_hints(
         config.vdw_correction = 12  # D3(BJ) preferred over D3
         config.incar_settings["IVDW"] = 12
 
+    # 3b. Slab detection (vacuum > 5A but not 2D monolayer)
+    if not config.is_2d:
+        _cell = atoms.get_cell()
+        if len(_cell) >= 3 and len(_cell[2]) >= 3 and _cell[2][2] > 0:
+            _z_pos = atoms.positions[:, 2]
+            _slab_thickness = _z_pos.max() - _z_pos.min()
+            _vacuum = _cell[2][2] - _slab_thickness
+            if _vacuum > 5.0 and _slab_thickness > 3.0:
+                if config.calc_type == CalculationType.RELAXATION:
+                    config.incar_settings["ISIF"] = 2
+                config.incar_settings["IDIPOL"] = 3
+                config.incar_settings["LDIPOL"] = True
+
     # 4. Pure metal detection
     if _is_pure_metal(unique_elements):
         config.incar_settings["ISMEAR"] = 1
         config.incar_settings["SIGMA"] = 0.1
+        config.incar_settings["ALGO"] = "Fast"
 
     # 5. LMAXMIX
     lmaxmix = _get_lmaxmix(atomic_numbers)

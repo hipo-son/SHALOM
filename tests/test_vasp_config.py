@@ -171,9 +171,10 @@ class TestPOTCARMapping:
     """Tests for POTCAR variant selection."""
 
     def test_fe_vasp_recommended(self):
-        assert get_potcar_variant("Fe", "vasp_recommended") == "Fe"
+        assert get_potcar_variant("Fe", "vasp_recommended") == "Fe_pv"
 
     def test_fe_mp_default(self):
+        # MP default also uses Fe_pv (same as updated vasp_recommended)
         assert get_potcar_variant("Fe", "mp_default") == "Fe_pv"
 
     def test_ti_sv(self):

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from ase import Atoms
 from ase.build import bulk, surface
 
+from shalom.backends.vasp_config import VASPInputConfig, get_preset, CalculationType, AccuracyLevel
 from shalom.core.schemas import RankedMaterial, MaterialCandidate
 from shalom.agents.simulation_layer import (
     GeometryGenerator,
@@ -296,17 +297,17 @@ class TestGeometryReviewerWithBackend:
         return RankedMaterial(candidate=candidate, score=0.9, ranking_justification="test")
 
     def test_backend_with_vasp_config(self, mock_llm, tmp_path):
-        """GeometryReviewer passes vasp_config to backend.write_input."""
+        """GeometryReviewer passes vasp_config (with structure hints) to backend.write_input."""
         generator = GeometryGenerator(llm_provider=mock_llm)
 
         mock_backend = MagicMock()
         mock_backend.write_input.return_value = str(tmp_path / "output")
 
-        mock_config = MagicMock()
+        real_config = VASPInputConfig()
 
         reviewer = GeometryReviewer(
             generator=generator, max_retries=3,
-            backend=mock_backend, vasp_config=mock_config,
+            backend=mock_backend, vasp_config=real_config,
         )
 
         mock_response = MagicMock()
@@ -318,12 +319,16 @@ class TestGeometryReviewerWithBackend:
         success, atoms, path = reviewer.run_creation_loop("test", ranked)
 
         assert success is True
-        # Verify backend.write_input was called with config in kwargs
+        # Verify backend.write_input was called with a config (deepcopy + hints applied)
         mock_backend.write_input.assert_called_once()
         call_kwargs = mock_backend.write_input.call_args
-        assert "config" in call_kwargs.kwargs or (
-            len(call_kwargs.args) >= 2 and call_kwargs.kwargs.get("config") is mock_config
-        )
+        assert "config" in call_kwargs.kwargs
+        effective_config = call_kwargs.kwargs["config"]
+        # Config should be a deepcopy, not the original
+        assert effective_config is not real_config
+        # Cu is a pure metal: ISMEAR=1, ALGO=Fast should be auto-detected
+        assert effective_config.incar_settings.get("ISMEAR") == 1
+        assert effective_config.incar_settings.get("ALGO") == "Fast"
 
     def test_backend_without_vasp_config(self, mock_llm, tmp_path):
         """GeometryReviewer with backend but no vasp_config omits config param."""

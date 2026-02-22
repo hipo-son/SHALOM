@@ -254,3 +254,124 @@ class TestAnthropicStructured:
                 response_model=DummyResponse,
                 seed=42,
             )
+
+
+# ---------------------------------------------------------------------------
+# Usage callback and token extraction tests
+# ---------------------------------------------------------------------------
+
+
+class TestUsageCallback:
+    """Tests for _extract_token_count and _report_usage."""
+
+    def test_extract_token_count_first_attr(self):
+        """Returns first non-None attribute value."""
+        usage = MagicMock()
+        usage.prompt_tokens = 100
+        usage.input_tokens = 200
+        result = LLMProvider._extract_token_count(usage, "prompt_tokens", "input_tokens")
+        assert result == 100
+
+    def test_extract_token_count_fallback_attr(self):
+        """Falls back to second attr when first is None."""
+        usage = MagicMock()
+        usage.prompt_tokens = None
+        usage.input_tokens = 200
+        result = LLMProvider._extract_token_count(usage, "prompt_tokens", "input_tokens")
+        assert result == 200
+
+    def test_extract_token_count_all_none(self):
+        """Returns 0 when all attributes are None."""
+        usage = MagicMock()
+        usage.prompt_tokens = None
+        usage.input_tokens = None
+        result = LLMProvider._extract_token_count(usage, "prompt_tokens", "input_tokens")
+        assert result == 0
+
+    def test_extract_token_count_missing_attr(self):
+        """Returns 0 when attributes don't exist."""
+        usage = object()  # No attributes at all
+        result = LLMProvider._extract_token_count(usage, "prompt_tokens", "input_tokens")
+        assert result == 0
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)
+    @patch("shalom.core.llm_provider.openai.OpenAI")
+    def test_report_usage_calls_callback(self, mock_openai_cls):
+        """_report_usage invokes the callback with correct data."""
+        recorded = []
+        provider = LLMProvider(
+            provider_type="openai", model_name="gpt-4o",
+            usage_callback=lambda data: recorded.append(data),
+        )
+
+        mock_usage = MagicMock()
+        mock_usage.prompt_tokens = 500
+        mock_usage.completion_tokens = 200
+        provider._report_usage(mock_usage)
+
+        assert len(recorded) == 1
+        assert recorded[0]["provider"] == "openai"
+        assert recorded[0]["model"] == "gpt-4o"
+        assert recorded[0]["input_tokens"] == 500
+        assert recorded[0]["output_tokens"] == 200
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)
+    @patch("shalom.core.llm_provider.openai.OpenAI")
+    def test_report_usage_no_callback(self, mock_openai_cls):
+        """_report_usage does nothing without callback."""
+        provider = LLMProvider(provider_type="openai", model_name="gpt-4o")
+        assert provider.usage_callback is None
+        # Should not raise
+        provider._report_usage(MagicMock())
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)
+    @patch("shalom.core.llm_provider.openai.OpenAI")
+    def test_report_usage_none_response(self, mock_openai_cls):
+        """_report_usage handles None response_usage gracefully."""
+        recorded = []
+        provider = LLMProvider(
+            provider_type="openai", model_name="gpt-4o",
+            usage_callback=lambda data: recorded.append(data),
+        )
+        provider._report_usage(None)
+        assert len(recorded) == 0
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)
+    @patch("shalom.core.llm_provider.openai.OpenAI")
+    def test_report_usage_callback_exception_caught(self, mock_openai_cls):
+        """_report_usage catches callback exceptions."""
+        def bad_callback(data):
+            raise RuntimeError("callback error")
+
+        provider = LLMProvider(
+            provider_type="openai", model_name="gpt-4o",
+            usage_callback=bad_callback,
+        )
+        # Should not raise — exception is caught and logged
+        provider._report_usage(MagicMock())
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)
+    @patch("shalom.core.llm_provider.openai.OpenAI")
+    def test_openai_structured_reports_usage(self, mock_openai_cls):
+        """_call_openai_structured calls _report_usage."""
+        recorded = []
+        provider = LLMProvider(
+            provider_type="openai", model_name="gpt-4o",
+            usage_callback=lambda data: recorded.append(data),
+        )
+
+        mock_usage = MagicMock()
+        mock_usage.prompt_tokens = 100
+        mock_usage.completion_tokens = 50
+
+        expected = DummyResponse(answer="test", score=0.5)
+        mock_response = MagicMock()
+        mock_response.usage = mock_usage
+        mock_choice = MagicMock()
+        mock_choice.message.parsed = expected
+        mock_response.choices = [mock_choice]
+        provider.client.beta.chat.completions.parse.return_value = mock_response
+
+        provider._call_openai_structured("sys", "user", DummyResponse, 42)
+        assert len(recorded) == 1
+        assert recorded[0]["input_tokens"] == 100
