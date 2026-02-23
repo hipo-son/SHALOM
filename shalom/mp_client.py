@@ -116,7 +116,7 @@ def fetch_by_mp_id(mp_id: str) -> MPStructureResult:
         mp_id=str(doc.material_id),
         formula=str(structure.composition.reduced_formula),
         energy_above_hull=getattr(doc, "energy_above_hull", None),
-        space_group=getattr(doc, "symmetry", {}).get("symbol") if hasattr(doc, "symmetry") else None,
+        space_group=getattr(getattr(doc, "symmetry", None), "symbol", None),
         metadata={
             "nsites": len(structure),
             "volume": structure.volume,
@@ -165,7 +165,7 @@ def search_by_formula(formula: str, max_results: int = 5) -> List[MPStructureRes
             mp_id=str(doc.material_id),
             formula=str(structure.composition.reduced_formula),
             energy_above_hull=getattr(doc, "energy_above_hull", None),
-            space_group=getattr(doc, "symmetry", {}).get("symbol") if hasattr(doc, "symmetry") else None,
+            space_group=getattr(getattr(doc, "symmetry", None), "symbol", None),
             metadata={
                 "nsites": len(structure),
                 "volume": structure.volume,
