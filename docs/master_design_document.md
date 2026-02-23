@@ -165,7 +165,8 @@ A three-step self-correction loop validates the physical soundness of DFT input 
 | QE Backend & Token Compression | QE backend (write/parse), SSSP metadata, MP client, CLI, `compress_error_log`, 676 tests at 95.7% coverage | Complete |
 | Flexible Pipeline & Code Cleanup | `PipelineStep` enum, `synthesize_ranked_material()`, step-selective execution, config serialization, timing, bug fixes | Complete |
 | DFT Execution & Self-Correction | Local QE runner (`subprocess`), `--execute` CLI flag, execution → ReviewAgent auto-loop, error recovery retry (max 3), S-matrix diagnostic, quality warnings, 824 tests at 93.4% coverage | Complete |
-| VASP-Slurm HPC Integration | Slurm job submission/monitoring, VASP execution runner, end-to-end testing with bulk materials | Planned |
+| QE Environment Tooling | `setup-qe` CLI subcommand, UPF file validation (ATOMIC_SPECIES parsing), SSSP pseudo downloader, platform-aware error messages, 835 tests at 95.4% coverage | Complete |
+| VASP-Slurm HPC Integration | Slurm job submission/monitoring, VASP execution runner, end-to-end testing with bulk materials | Planned (v2) |
 
 #### 1b. arXiv submission + open-source release
 
@@ -207,6 +208,6 @@ Library-centric design implemented in Python for reproducibility and HPC integra
 | **Configuration** | `_config_loader` (prompt/config loading with caching, deepcopy, Fail-Fast), `_config_schemas` (Pydantic validation), `_defaults` (fallback) | Complete |
 | **Tool System** | ASE builder, DFT I/O parsers (VASP POSCAR/OUTCAR, QE pw.x/XML), structure validators | Complete |
 | **DFT Backend** | Quantum ESPRESSO (local), VASP (HPC), unified solver abstraction, error recovery engine, token-aware context compression | Complete |
-| **Execution Layer** | Local QE runner, Slurm job submission, MCP server, SafeExecutor sandbox | Partial (sandbox complete, runners planned) |
+| **Execution Layer** | Local QE runner (subprocess + error recovery), SafeExecutor sandbox, `setup-qe` CLI | Complete (local); Slurm HPC planned (v2) |
 | **Provider Interface** | LLMProvider (OpenAI, Anthropic), structured output enforcement | Complete |
 | **Recipe System** | Dynamic Recipe Generator — LLM infers optimal execution DAG (`WorkflowRecipe`) from natural language | Planned (v2.0) |

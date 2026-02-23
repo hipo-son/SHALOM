@@ -5,6 +5,7 @@ including error recovery loops, double relaxation, and physics validation.
 """
 
 import os
+import shutil
 import textwrap
 
 import pytest
@@ -283,9 +284,6 @@ class TestPipelineConfigFields:
 # ---------------------------------------------------------------------------
 # QE End-to-End Integration Tests (requires pw.x)
 # ---------------------------------------------------------------------------
-
-import shutil
-
 
 @pytest.mark.integration
 @pytest.mark.skipif(
