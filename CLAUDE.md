@@ -85,16 +85,25 @@ shalom/
 
 ### CLI Usage
 ```bash
-python -m shalom run mp-19717                              # VASP vc-relax (default)
+python -m shalom run mp-19717                              # VASP vc-relax → ~/Desktop/shalom-runs/
 python -m shalom run Fe2O3 --backend qe --calc scf         # QE SCF
 python -m shalom run --structure POSCAR --backend vasp      # Local file
 python -m shalom run mp-19717 --set ENCUT=600               # VASP override
 python -m shalom run mp-19717 --backend qe --set ecutwfc=80 # QE override
 python -m shalom run Fe2O3 -b qe --execute                 # QE execute locally
 python -m shalom run Fe2O3 -b qe -x -np 4 --timeout 7200   # QE execute, 4 MPI procs
+python -m shalom run Si -p silicon_study                    # project sub-folder grouping
+python -m shalom run Si -w /data/runs                      # custom workspace root
 python -m shalom setup-qe                                   # QE environment check
 python -m shalom setup-qe --elements Si,Fe --download       # Download missing pseudos
 ```
+
+### Workspace / Output Directory
+- Default root: `~/Desktop/shalom-runs/` (Desktop present) or `~/shalom-runs/`
+- Override with `$SHALOM_WORKSPACE` env var or `-w/--workspace` CLI flag
+- Project grouping: `-p/--project NAME` → `workspace/NAME/auto_name/`
+- Explicit path: `-o/--output PATH` → bypasses workspace logic entirely
+- Each output folder contains a `README.md` with next steps and reproduce command
 
 ### Git
 - Commit messages in English

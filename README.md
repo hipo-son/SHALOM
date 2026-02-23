@@ -172,6 +172,7 @@ Each run creates a timestamped output folder (e.g., `Si_qe_static/`) containing 
 ## CLI Reference
 
 ```bash
+# ── Basic runs ────────────────────────────────────────────────────────────────
 python -m shalom run mp-19717                              # VASP vc-relax (default)
 python -m shalom run Fe2O3 --backend qe --calc scf         # QE SCF
 python -m shalom run --structure POSCAR --backend vasp      # Local structure file
@@ -179,6 +180,15 @@ python -m shalom run mp-19717 --set ENCUT=600               # Override a paramet
 python -m shalom run Fe2O3 --backend qe --set ecutwfc=80    # QE parameter override
 python -m shalom run Si --backend qe --calc scf --execute   # Generate + run pw.x
 python -m shalom run Si --backend qe -x -np 4 --timeout 7200  # 4 MPI procs, 2h timeout
+
+# ── Output location ───────────────────────────────────────────────────────────
+# Default: ~/Desktop/shalom-runs/{formula}_{mp_id}_{backend}_{calc}/
+python -m shalom run Si -p silicon_study                    # group runs: shalom-runs/silicon_study/Si_.../
+python -m shalom run Si -w /data/dft_runs                  # custom workspace root
+python -m shalom run Si -o ./my_output                     # explicit path (bypasses workspace)
+# Set permanently:  export SHALOM_WORKSPACE=~/Desktop/shalom-runs
+
+# ── QE setup ──────────────────────────────────────────────────────────────────
 python -m shalom setup-qe                                   # Check QE environment
 python -m shalom setup-qe --elements Si,Fe --download       # Download pseudopotentials
 ```

@@ -112,6 +112,8 @@ class QEInputConfig:
     cell: Dict[str, Any] = field(default_factory=dict)
     user_settings: Dict[str, Any] = field(default_factory=dict)
     kpoints: QEKPointsConfig = field(default_factory=QEKPointsConfig)
+    # Resolved at runtime by direct_run._create_qe_config() via $SHALOM_PSEUDO_DIR
+    # or ~/pseudopotentials. Only used as-is when QEInputConfig is built directly.
     pseudo_dir: str = "./"
     pseudo_map: Dict[str, str] = field(default_factory=dict)
     functional: str = "PBE"
