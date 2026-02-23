@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Materials Project (MP) API Integration Router** (`shalom/pipeline.py`)
+  - Added Fast Track routing to bypass AI generation and fetch accurate structures directly via `mp_client.fetch_structure`
+  - Seamless fallback logic to `GeometryGenerator` if the requested material is novel or MP search fails
 - **Band/DOS visualisation** (`shalom/plotting/` — optional; `pip install shalom[plotting]`)
   - `BandStructurePlotter`: band structure plot with high-symmetry tick labels (`Dict[int, str]` index keys), spin-polarised two-colour rendering (royalblue / crimson), Fermi-level shift, energy window clamping, PNG export
   - `DOSPlotter`: total/spin-polarised DOS with mirrored spin-down convention, integrated DOS overlay, fill shading, Fermi-level vertical line, energy window support
