@@ -1,7 +1,7 @@
 """Tests for shalom.direct_run module."""
 
 import os
-
+from pathlib import Path
 from unittest.mock import patch
 from ase.build import bulk
 
@@ -11,6 +11,7 @@ from shalom.direct_run import (
     CALC_TYPE_ALIASES,
     _resolve_calc_type,
     _auto_output_dir,
+    _resolve_workspace,
 )
 
 
@@ -296,3 +297,94 @@ class TestAutoDetectedNoNone:
         assert result.success is True
         for v in result.auto_detected.values():
             assert v is not None
+
+
+# ---------------------------------------------------------------------------
+# Workspace / project directory structure
+# ---------------------------------------------------------------------------
+
+
+class TestResolveWorkspace:
+    """_resolve_workspace() priority: arg > $SHALOM_WORKSPACE > Desktop > home."""
+
+    def test_explicit_arg_wins(self, tmp_path):
+        ws = str(tmp_path / "my_ws")
+        assert _resolve_workspace(ws) == ws
+
+    def test_env_var_used_when_no_arg(self, tmp_path, monkeypatch):
+        ws = str(tmp_path / "env_ws")
+        monkeypatch.setenv("SHALOM_WORKSPACE", ws)
+        assert _resolve_workspace() == ws
+
+    def test_arg_beats_env_var(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHALOM_WORKSPACE", str(tmp_path / "env_ws"))
+        explicit = str(tmp_path / "explicit")
+        assert _resolve_workspace(explicit) == explicit
+
+    def test_desktop_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SHALOM_WORKSPACE", raising=False)
+        # Pretend home is tmp_path so Desktop sub-path is predictable
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+        result = _resolve_workspace()
+        assert result == str(desktop / "shalom-runs")
+
+    def test_home_fallback_when_no_desktop(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SHALOM_WORKSPACE", raising=False)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        # Desktop does NOT exist
+        result = _resolve_workspace()
+        assert result == str(tmp_path / "shalom-runs")
+
+
+class TestWorkspaceOutputDir:
+    """direct_run() places outputs inside workspace and optional project folder."""
+
+    def _cu_poscar(self, tmp_path):
+        from ase.io import write
+        atoms = bulk("Cu", "fcc", a=3.6)
+        p = tmp_path / "POSCAR"
+        write(str(p), atoms, format="vasp")
+        return str(p)
+
+    def test_workspace_used_as_root(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SHALOM_WORKSPACE", raising=False)
+        ws = str(tmp_path / "runs")
+        config = DirectRunConfig(
+            backend_name="vasp",
+            structure_file=self._cu_poscar(tmp_path),
+            workspace_dir=ws,
+        )
+        result = direct_run("", config)
+        assert result.success is True
+        # Output must be inside the workspace
+        assert result.output_dir.startswith(ws)
+
+    def test_project_subfolder_created(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SHALOM_WORKSPACE", raising=False)
+        ws = str(tmp_path / "runs")
+        config = DirectRunConfig(
+            backend_name="vasp",
+            structure_file=self._cu_poscar(tmp_path),
+            workspace_dir=ws,
+            project="my_study",
+        )
+        result = direct_run("", config)
+        assert result.success is True
+        expected_project_path = os.path.join(ws, "my_study")
+        assert result.output_dir.startswith(expected_project_path)
+
+    def test_explicit_output_dir_bypasses_workspace(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("SHALOM_WORKSPACE", raising=False)
+        ws = str(tmp_path / "should_not_be_used")
+        explicit = str(tmp_path / "explicit_out")
+        config = DirectRunConfig(
+            backend_name="vasp",
+            structure_file=self._cu_poscar(tmp_path),
+            workspace_dir=ws,
+            output_dir=explicit,
+        )
+        result = direct_run("", config)
+        assert result.success is True
+        assert result.output_dir == explicit

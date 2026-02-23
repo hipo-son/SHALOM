@@ -49,12 +49,22 @@ CALC_TYPE_ALIASES: Dict[str, str] = {
 
 @dataclass
 class DirectRunConfig:
-    """Configuration for a direct material run."""
+    """Configuration for a direct material run.
+
+    Output directory resolution order (highest priority first):
+    1. ``output_dir`` — explicit absolute/relative path (bypass workspace)
+    2. ``workspace_dir / project / auto_name`` — workspace + optional project
+    3. ``$SHALOM_WORKSPACE / project / auto_name`` — env var workspace
+    4. ``~/Desktop/shalom-runs / project / auto_name`` (Desktop present)
+       ``~/shalom-runs / project / auto_name``         (fallback)
+    """
 
     backend_name: str = "vasp"
     calc_type: Optional[str] = None
     accuracy: str = "standard"
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None       # explicit override — skips workspace logic
+    workspace_dir: Optional[str] = None    # workspace root (overrides $SHALOM_WORKSPACE)
+    project: Optional[str] = None          # optional sub-folder inside workspace
     user_settings: Optional[Dict[str, Any]] = None
     functional: str = "PBE"
     potcar_preset: Literal["vasp_recommended", "mp_default"] = "vasp_recommended"
@@ -223,7 +233,7 @@ def _resolve_calc_type(calc_type: Optional[str], backend_name: str) -> str:
 def _auto_output_dir(
     formula: str, mp_id: Optional[str], backend_name: str, calc_type: str,
 ) -> str:
-    """Generate automatic output directory name."""
+    """Generate automatic output directory name (basename only, no path)."""
     import re as _re
     parts = [formula]
     if mp_id:
@@ -231,6 +241,26 @@ def _auto_output_dir(
     parts.extend([backend_name, calc_type.replace("-", "")])
     name = "_".join(parts)
     return _re.sub(r'[<>:"/\\|?*]', '_', name)
+
+
+def _resolve_workspace(workspace_dir: Optional[str] = None) -> str:
+    """Resolve the workspace root directory.
+
+    Priority:
+    1. ``workspace_dir`` argument
+    2. ``$SHALOM_WORKSPACE`` environment variable
+    3. ``~/Desktop/shalom-runs`` if Desktop exists
+    4. ``~/shalom-runs`` (universal fallback)
+    """
+    if workspace_dir:
+        return workspace_dir
+    env = os.environ.get("SHALOM_WORKSPACE")
+    if env:
+        return env
+    desktop = Path.home() / "Desktop"
+    if desktop.is_dir():
+        return str(desktop / "shalom-runs")
+    return str(Path.home() / "shalom-runs")
 
 
 def _create_vasp_config(
@@ -408,9 +438,16 @@ def direct_run(
         dft_config = None
 
     # 4. Output directory
-    output_dir = config.output_dir or _auto_output_dir(
-        formula, mp_id, config.backend_name, calc_type,
-    )
+    if config.output_dir:
+        # Explicit path — use as-is (no workspace prefix)
+        output_dir = config.output_dir
+    else:
+        auto_name = _auto_output_dir(formula, mp_id, config.backend_name, calc_type)
+        workspace = _resolve_workspace(config.workspace_dir)
+        if config.project:
+            output_dir = os.path.join(workspace, config.project, auto_name)
+        else:
+            output_dir = os.path.join(workspace, auto_name)
 
     # 5. Overwrite protection
     if os.path.exists(output_dir) and not config.force_overwrite:

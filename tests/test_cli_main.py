@@ -165,6 +165,7 @@ class TestCmdRun:
         defaults = dict(
             material=None, structure=None, backend="vasp", calc=None,
             accuracy="standard", set_values=None, output=None,
+            workspace=None, project=None,
             pseudo_dir=None, no_validate=False, force=False,
             quiet=True, verbose=False, command="run",
         )
@@ -413,6 +414,7 @@ class TestExecutionFlags:
         args = argparse.Namespace(
             material=None, structure="POSCAR", backend="vasp", calc=None,
             accuracy="standard", set_values=None, output=None,
+            workspace=None, project=None,
             pseudo_dir=None, no_validate=False, force=False,
             quiet=False, verbose=False, command="run",
             execute=True, nprocs=1, timeout=86400, mpi_command="mpirun",

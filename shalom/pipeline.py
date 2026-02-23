@@ -103,8 +103,11 @@ class PipelineConfig(BaseModel):
         description="Max Design->Sim->Review iterations. >1 enables closed-loop retry.",
     )
     output_dir: str = Field(
-        default="pipeline_output",
-        description="Base directory for generated files.",
+        default="",
+        description=(
+            "Base directory for pipeline outputs. "
+            "Defaults to $SHALOM_WORKSPACE/pipeline (or ~/Desktop/shalom-runs/pipeline)."
+        ),
     )
     skip_review: bool = Field(
         default=True,
@@ -752,7 +755,11 @@ class Pipeline:
         if not self.config.save_state:
             return
         try:
-            output_dir = Path(self.config.output_dir)
+            from shalom.direct_run import _resolve_workspace
+            _base = self.config.output_dir or str(
+                Path(_resolve_workspace()) / "pipeline"
+            )
+            output_dir = Path(_base)
             output_dir.mkdir(parents=True, exist_ok=True)
             state_path = output_dir / "pipeline_state.json"
             state_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")

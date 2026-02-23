@@ -105,7 +105,29 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "-o", "--output",
         default=None,
-        help="Output directory (auto-generated if omitted).",
+        help=(
+            "Explicit output directory (bypasses workspace logic). "
+            "Default: $SHALOM_WORKSPACE/{project}/{auto_name} "
+            "or ~/Desktop/shalom-runs/{auto_name}."
+        ),
+    )
+    run_parser.add_argument(
+        "-w", "--workspace",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Workspace root directory where all runs are stored. "
+            "Default: $SHALOM_WORKSPACE, then ~/Desktop/shalom-runs."
+        ),
+    )
+    run_parser.add_argument(
+        "-p", "--project",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Project sub-folder inside the workspace (optional grouping). "
+            "E.g. --project silicon_study → workspace/silicon_study/Si_qe_scf/."
+        ),
     )
     run_parser.add_argument(
         "--structure",
@@ -215,6 +237,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         calc_type=args.calc,
         accuracy=args.accuracy,
         output_dir=args.output,
+        workspace_dir=args.workspace,
+        project=args.project,
         user_settings=user_settings if user_settings else None,
         pseudo_dir=args.pseudo_dir,
         validate_structure=not args.no_validate,
