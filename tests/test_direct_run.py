@@ -407,7 +407,7 @@ class TestWriteOutputReadme:
             files_generated=files or ["pw.in"],
         )
         readme = tmp_path / "README.md"
-        return readme.read_text() if readme.exists() else ""
+        return readme.read_text(encoding="utf-8") if readme.exists() else ""
 
     def test_with_mp_id_includes_link(self, tmp_path):
         """MP ID → README contains materials project link."""
