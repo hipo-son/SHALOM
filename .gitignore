@@ -83,3 +83,13 @@ demo_report.json
 
 # Claude Code local settings
 .claude/
+
+# Local dev scripts and test output files
+*.bat
+*_out*.txt
+manual_test*.py
+mock_test*.py
+import_trace*
+test_import*
+pyver.txt
+where.txt

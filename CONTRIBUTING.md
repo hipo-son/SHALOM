@@ -7,7 +7,15 @@ Thank you for your interest in contributing to SHALOM! We welcome contributions 
 1. Fork and clone the repository.
 2. Create a virtual environment and install the development dependencies:
    ```bash
+   # Option A — venv (built-in)
+   python -m venv .venv
+   source .venv/bin/activate          # Linux / macOS
+   # .venv\Scripts\activate           # Windows
    pip install -e ".[dev]"
+
+   # Option B — conda
+   conda env create -f environment.yml
+   conda activate shalom-env
    ```
 3. Install the pre-commit hooks to ensure code quality before commits:
    ```bash
