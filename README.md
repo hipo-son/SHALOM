@@ -70,7 +70,8 @@ SHALOM abstracts DFT-specific details behind a unified interface so that agents 
 
 ## Getting Started
 
-> **Note**: SHALOM is not yet published to PyPI. Install from source via GitHub clone.
+> **Note**: SHALOM is not yet published to PyPI — install from source via GitHub clone (see below).
+> `pip install shalom` is planned for a future release.
 
 ### Step 1 — Clone the Repository
 
