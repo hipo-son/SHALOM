@@ -456,7 +456,7 @@ class TestCmdSetupQE:
         assert rc == 0
         out = capsys.readouterr().out
         assert "pw.x" in out
-        assert "[OK]" in out
+        assert "OK" in out
 
     def test_pw_x_not_found(self, capsys):
         """pw.x missing → return 1 with install instructions."""

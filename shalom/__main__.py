@@ -292,6 +292,124 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _detect_wsl_distros() -> list:
+    """Return list of installed WSL distro names (Windows only).
+
+    WSL outputs UTF-16-LE encoded text; decodes and strips null bytes.
+    Returns an empty list on any error or non-Windows platform.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["wsl", "--list", "--quiet"],
+            capture_output=True,
+            timeout=5,
+        )
+        # No distros installed → WSL returns non-zero or outputs help text
+        if result.returncode != 0:
+            return []
+        # WSL --list outputs UTF-16-LE with BOM on some builds
+        raw = result.stdout
+        try:
+            text = raw.decode("utf-16-le", errors="ignore")
+        except Exception:
+            text = raw.decode("utf-8", errors="ignore")
+        distros = [ln.strip().strip("\x00") for ln in text.splitlines() if ln.strip().strip("\x00")]
+        # Filter out lines that look like help text rather than distro names
+        distros = [d for d in distros if not d.startswith("-") and " " not in d]
+        return distros
+    except Exception:
+        return []
+
+
+def _print_install_guide_windows(distros: list) -> None:
+    """Print step-by-step QE installation guide for Windows."""
+    SEP = "─" * 60
+
+    print()
+    print("┌" + "─" * 58 + "┐")
+    print("│  QE Installation Guide — Windows                        │")
+    print("└" + "─" * 58 + "┘")
+    print()
+    print("  QE (pw.x) cannot run natively on Windows.")
+    print("  You need WSL2 (Windows Subsystem for Linux).")
+    print()
+
+    if not distros:
+        # No WSL distro installed yet
+        print(f"  {SEP}")
+        print("  Step 1 — Install Ubuntu via WSL2")
+        print(f"  {SEP}")
+        print("  Open PowerShell as Administrator and run:")
+        print()
+        print("    wsl --install -d Ubuntu-22.04")
+        print()
+        print("  Restart your computer if prompted.")
+        print("  When Ubuntu opens, set a username and password.")
+        print()
+    else:
+        ubuntu = next((d for d in distros if "ubuntu" in d.lower()), distros[0])
+        print(f"  WSL2 distro found: {ubuntu}")
+        print()
+
+    wsl_cmd = "wsl -d Ubuntu-22.04" if not distros else f"wsl -d {next((d for d in distros if 'ubuntu' in d.lower()), distros[0])}"
+
+    print(f"  {SEP}")
+    step = "Step 2" if not distros else "Step 1"
+    print(f"  {step} — Install Quantum ESPRESSO inside Ubuntu")
+    print(f"  {SEP}")
+    print(f"  In the Ubuntu terminal ({wsl_cmd}):")
+    print()
+    print("    sudo apt update")
+    print("    sudo apt install -y quantum-espresso")
+    print("    pw.x --version   # verify")
+    print()
+
+    print(f"  {SEP}")
+    step2 = "Step 3" if not distros else "Step 2"
+    print(f"  {step2} — Run SHALOM from inside Ubuntu")
+    print(f"  {SEP}")
+    print("  All SHALOM commands must be run from within WSL2:")
+    print()
+    print(f"    {wsl_cmd}")
+    print("    cd /mnt/c/Users/$USER/Desktop/SHALOM")
+    print()
+    print("  Set up Python environment inside Ubuntu:")
+    print()
+    print("    conda env create -f environment.yml   # if conda installed")
+    print("    conda activate shalom-env")
+    print()
+    print("  Download pseudopotentials:")
+    print()
+    print("    python -m shalom setup-qe --elements Si --download")
+    print()
+    print("  Run first calculation:")
+    print()
+    print("    python -m shalom run Si --backend qe --calc scf")
+    print()
+
+
+def _print_install_guide_linux() -> None:
+    """Print QE installation options for Linux/macOS."""
+    SEP = "─" * 60
+    print()
+    print(f"  {SEP}")
+    print("  QE Installation Options")
+    print(f"  {SEP}")
+    print()
+    print("  Option A — System package manager (Ubuntu/Debian):")
+    print()
+    print("    sudo apt update && sudo apt install -y quantum-espresso")
+    print()
+    print("  Option B — Conda (cross-platform):")
+    print()
+    print("    conda install -c conda-forge qe")
+    print()
+    print("  Option C — Build from source (latest features):")
+    print("    https://www.quantum-espresso.org/Doc/user_guide/")
+    print()
+
+
 def cmd_setup_qe(args: argparse.Namespace) -> int:
     """Execute the 'setup-qe' subcommand."""
     import os
@@ -301,31 +419,60 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
 
     from shalom.backends.qe_config import SSSP_ELEMENTS, get_pseudo_filename
 
+    SEP = "─" * 60
     issues = 0
+    is_windows = platform.system() == "Windows"
+
+    print("=" * 60)
+    print("  SHALOM — QE Environment Check")
+    print("=" * 60)
 
     # 1. Check pw.x
+    print()
     pw_path = shutil.which("pw.x")
     if pw_path:
-        print(f"pw.x:       {pw_path}")
+        print(f"  pw.x        OK   {pw_path}")
     else:
-        print("pw.x:       NOT FOUND")
-        if platform.system() == "Windows":
-            print("  Tip:      Run from inside WSL2 (wsl -d Ubuntu-22.04)")
-            print("            sudo apt install quantum-espresso")
-        else:
-            print("  Install:  sudo apt install quantum-espresso  (Ubuntu/Debian)")
-            print("            conda install -c conda-forge qe     (conda)")
+        print("  pw.x        NOT FOUND")
         issues += 1
+        if is_windows:
+            distros = _detect_wsl_distros()
+            wsl_available = bool(shutil.which("wsl"))
+            if wsl_available:
+                _print_install_guide_windows(distros)
+            else:
+                print()
+                print(f"  {SEP}")
+                print("  WSL2 is not available on this machine.")
+                print("  Enable it in Windows Features → 'Windows Subsystem for Linux'")
+                print("  then run:  wsl --install -d Ubuntu-22.04")
+                print(f"  {SEP}")
+        else:
+            _print_install_guide_linux()
 
     # 2. Resolve pseudo_dir
+    print()
     _default_pseudo = str(Path.home() / "pseudopotentials")
     pseudo_dir_arg = args.pseudo_dir or os.environ.get("SHALOM_PSEUDO_DIR", _default_pseudo)
     pseudo_path = Path(pseudo_dir_arg).expanduser().resolve()
     if pseudo_path.is_dir():
-        print(f"pseudo_dir: {pseudo_path}")
+        print(f"  pseudo_dir  OK   {pseudo_path}")
     else:
-        print(f"pseudo_dir: {pseudo_dir_arg} (NOT FOUND)")
-        print("  Set:      export SHALOM_PSEUDO_DIR=/path/to/pseudos")
+        print(f"  pseudo_dir  NOT FOUND   ({pseudo_path})")
+        print()
+        print(f"  {SEP}")
+        print("  Pseudopotential Directory Setup")
+        print(f"  {SEP}")
+        print()
+        print("  Option A — Auto-download (recommended):")
+        print()
+        print("    python -m shalom setup-qe --elements Si,Fe,O --download")
+        print()
+        print("  Option B — Set an existing directory:")
+        print()
+        print(f"    export SHALOM_PSEUDO_DIR=/path/to/pseudos")
+        print(f"    python -m shalom setup-qe")
+        print()
         if not args.download:
             issues += 1
 
@@ -338,14 +485,12 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
     # 4. Check each UPF file
     missing: list = []
     if pseudo_path.is_dir():
-        print(f"\nElements ({len(elements)}):")
+        n_ok = 0
         for el in elements:
             if el not in SSSP_ELEMENTS:
-                print(f"  {el:<4s} (unknown element, not in SSSP)")
                 continue
             upf = get_pseudo_filename(el)
             upf_path = pseudo_path / upf
-            # Case-insensitive fallback
             found = upf_path.exists()
             if not found:
                 try:
@@ -356,23 +501,47 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
                 except OSError:
                     pass
             if found:
-                print(f"  {el:<4s} {upf}  [OK]")
+                n_ok += 1
             else:
-                print(f"  {el:<4s} {upf}  [MISSING]")
                 missing.append((el, upf))
                 issues += 1
+
+        total = len(elements)
+        print()
+        if missing:
+            print(f"  Pseudopotentials  {n_ok}/{total} OK — {len(missing)} missing")
+            if len(missing) <= 10:
+                print()
+                for el, upf in missing:
+                    print(f"    {el:<4s}  {upf}  [MISSING]")
+            else:
+                print(f"    (showing first 5 of {len(missing)})")
+                for el, upf in missing[:5]:
+                    print(f"    {el:<4s}  {upf}  [MISSING]")
+                print(f"    ... and {len(missing) - 5} more")
+            print()
+            print(f"  Download missing pseudopotentials:")
+            if args.elements:
+                print(f"    python -m shalom setup-qe --elements {args.elements} --download")
+            else:
+                print(f"    python -m shalom setup-qe --elements Si,Fe,O --download  # specific")
+                print(f"    python -m shalom setup-qe --download                     # all 60")
+        else:
+            print(f"  Pseudopotentials  {n_ok}/{total} OK")
 
     # 5. Download if requested
     if args.download and missing:
         import urllib.request
 
         pseudo_path.mkdir(parents=True, exist_ok=True)
-        print(f"\nDownloading {len(missing)} pseudopotential(s)...")
+        print()
+        print(f"  Downloading {len(missing)} pseudopotential(s) to {pseudo_path} ...")
+        print()
         base_url = "https://pseudopotentials.quantum-espresso.org/upf_files"
         for el, upf in missing:
             url = f"{base_url}/{upf}"
             dest = pseudo_path / upf
-            print(f"  {upf} ... ", end="", flush=True)
+            print(f"    {upf:<50s} ", end="", flush=True)
             try:
                 urllib.request.urlretrieve(url, str(dest))
                 print("OK")
@@ -382,11 +551,14 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
 
     # 6. Summary
     print()
+    print("=" * 60)
     if issues == 0:
-        print("Ready for QE execution.")
+        print("  Status: READY — QE execution is available.")
     else:
-        print(f"{issues} issue(s) found.")
-        print("Fix and re-run: python -m shalom setup-qe")
+        print(f"  Status: {issues} issue(s) remaining.")
+        print("  Fix the items above, then re-run:")
+        print("    python -m shalom setup-qe")
+    print("=" * 60)
     return 0 if issues == 0 else 1
 
 
