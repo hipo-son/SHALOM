@@ -239,7 +239,15 @@ class VASPBackend:
             raise FileNotFoundError(f"OUTCAR file not found: {outcar_path}")
 
         if _PYMATGEN_AVAILABLE:
-            result = self._parse_with_pymatgen(directory)
+            try:
+                result = self._parse_with_pymatgen(directory)
+            except Exception as e:
+                logger.warning(
+                    "pymatgen OUTCAR parsing failed (%s: %s). Falling back to regex.",
+                    type(e).__name__,
+                    e,
+                )
+                result = self._parse_regex(outcar_path)
         else:
             result = self._parse_regex(outcar_path)
 

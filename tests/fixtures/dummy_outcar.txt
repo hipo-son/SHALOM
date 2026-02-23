@@ -1,10 +1,14 @@
- vasp.6.3.2 27Jun22 (build Aug 04 2022 13:45:19) complex                        
-                            
+ vasp.6.3.2 27Jun22 (build Aug 04 2022 13:45:19) complex
+
+ running on    4 cores
+
  INCAR:
    SYSTEM = Dummy Synthesis
    ENCUT  =  400.000000
    EDIFF  = 0.1E-04
    ISMEAR =     0;   SIGMA  =   0.050
+
+ number of bands NBANDS=     16
 
  FREE ENERGIE OF THE ION-ELECTRON SYSTEM (eV)
   ---------------------------------------------------
