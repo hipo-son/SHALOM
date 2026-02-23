@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from ase import Atoms
@@ -279,8 +280,12 @@ def _create_qe_config(
     config.functional = functional
     if pseudo_dir:
         config.pseudo_dir = pseudo_dir
-    elif os.environ.get("SHALOM_PSEUDO_DIR"):
-        config.pseudo_dir = os.environ["SHALOM_PSEUDO_DIR"]
+    else:
+        resolved = os.environ.get(
+            "SHALOM_PSEUDO_DIR",
+            str(Path.home() / "pseudopotentials"),
+        )
+        config.pseudo_dir = resolved
     if user_settings:
         config.user_settings.update(user_settings)
     return config

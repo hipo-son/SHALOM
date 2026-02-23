@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--pseudo-dir",
         default=None,
-        help="QE pseudopotential directory (default: $SHALOM_PSEUDO_DIR or './').",
+        help="QE pseudopotential directory (default: $SHALOM_PSEUDO_DIR or ~/pseudopotentials).",
     )
     run_parser.add_argument(
         "--no-validate",
@@ -294,7 +294,8 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
         issues += 1
 
     # 2. Resolve pseudo_dir
-    pseudo_dir_arg = args.pseudo_dir or os.environ.get("SHALOM_PSEUDO_DIR", "./")
+    _default_pseudo = str(Path.home() / "pseudopotentials")
+    pseudo_dir_arg = args.pseudo_dir or os.environ.get("SHALOM_PSEUDO_DIR", _default_pseudo)
     pseudo_path = Path(pseudo_dir_arg).expanduser().resolve()
     if pseudo_path.is_dir():
         print(f"pseudo_dir: {pseudo_path}")
