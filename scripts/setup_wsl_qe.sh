@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 # =============================================================================
 # SHALOM — WSL2 Ubuntu QE Setup Script
-# Run this INSIDE Ubuntu after first login:
+# Run this INSIDE WSL Ubuntu:
 #   wsl -d Ubuntu-22.04
-#   bash /mnt/c/Users/Sejong/Desktop/SHALOM/scripts/setup_wsl_qe.sh
+#   bash /mnt/c/.../SHALOM/scripts/setup_wsl_qe.sh
+#
+# The script auto-detects SHALOM_ROOT from its own location.
 # =============================================================================
 set -e
 
-SHALOM_WIN_PATH="/mnt/c/Users/Sejong/Desktop/SHALOM"
-PSEUDO_DIR="$HOME/pseudopotentials"
+# Auto-detect SHALOM root (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHALOM_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PSEUDO_DIR="${SHALOM_PSEUDO_DIR:-$HOME/pseudopotentials}"
 
 echo "============================================================"
 echo "  SHALOM — QE Environment Setup for WSL2 Ubuntu"
 echo "============================================================"
+echo ""
+echo "  SHALOM_ROOT:  $SHALOM_ROOT"
+echo "  PSEUDO_DIR:   $PSEUDO_DIR"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -55,9 +62,9 @@ echo ""
 echo "[3/5] Setting up shalom-env (Python 3.11)..."
 if conda env list | grep -q "^shalom-env"; then
     echo "  shalom-env already exists, updating..."
-    conda env update -f "$SHALOM_WIN_PATH/environment.yml" -n shalom-env --prune
+    conda env update -f "$SHALOM_ROOT/environment.yml" -n shalom-env --prune
 else
-    conda env create -f "$SHALOM_WIN_PATH/environment.yml"
+    conda env create -f "$SHALOM_ROOT/environment.yml"
 fi
 
 echo ""
@@ -107,7 +114,7 @@ echo "============================================================"
 echo ""
 echo "  conda activate shalom-env"
 echo "  export SHALOM_PSEUDO_DIR=$PSEUDO_DIR"
-echo "  cd $SHALOM_WIN_PATH"
+echo "  cd $SHALOM_ROOT"
 echo ""
 echo "  # Check QE environment"
 echo "  python -m shalom setup-qe --elements Si"
