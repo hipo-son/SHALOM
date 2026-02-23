@@ -35,6 +35,27 @@ import os
 import subprocess
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from ase.io import read as ase_read
+
+from shalom.backends._physics import AccuracyLevel
+from shalom.backends.qe import QEBackend
+from shalom.backends.qe_config import (
+    QECalculationType,
+    QEKPointsConfig,
+    compute_ecutrho,
+    generate_band_kpath,
+    get_band_calc_atoms,
+    get_qe_preset,
+)
+from shalom.backends.qe_parser import (
+    compute_nbnd,
+    extract_fermi_energy,
+    find_xml_path,
+    parse_dos_file,
+    parse_xml_bands,
+)
+from shalom.backends.runner import ExecutionConfig, ExecutionRunner
+
 if TYPE_CHECKING:
     from ase import Atoms
 
@@ -156,7 +177,6 @@ class StandardWorkflow:
         # coordinates returned by seekpath (crystal_b frame) match the cell
         # written to QE CELL_PARAMETERS. SCF, bands and NSCF must all share
         # the same cell for the charge-density transfer to be valid.
-        from shalom.backends.qe_config import get_band_calc_atoms, generate_band_kpath
         calc_atoms = get_band_calc_atoms(current_atoms, is_2d=self.is_2d) or current_atoms
         self._calc_atoms = calc_atoms
         self._kpath_cfg = generate_band_kpath(
@@ -217,12 +237,6 @@ class StandardWorkflow:
 
     def _run_vc_relax(self, calc_dir: str, atoms: "Atoms") -> "Atoms":
         """Run vc-relax and return the relaxed structure."""
-        from ase.io import read as ase_read
-        from shalom.backends.qe import QEBackend
-        from shalom.backends.qe_config import QECalculationType, get_qe_preset
-        from shalom.backends._physics import AccuracyLevel
-        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
-
         os.makedirs(calc_dir, exist_ok=True)
         acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
         config = get_qe_preset(QECalculationType.VC_RELAX, accuracy=acc, atoms=atoms)
@@ -245,10 +259,6 @@ class StandardWorkflow:
 
     def _run_scf(self, calc_dir: str, atoms: "Atoms") -> None:
         """Run scf calculation."""
-        from shalom.backends.qe import QEBackend
-        from shalom.backends.qe_config import QECalculationType, get_qe_preset
-        from shalom.backends._physics import AccuracyLevel
-
         os.makedirs(calc_dir, exist_ok=True)
         acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
         config = get_qe_preset(QECalculationType.SCF, accuracy=acc, atoms=atoms)
@@ -261,13 +271,6 @@ class StandardWorkflow:
 
     def _run_bands(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> None:
         """Run bands calculation using the scf charge density."""
-        from shalom.backends.qe import QEBackend
-        from shalom.backends.qe_config import (
-            QECalculationType, get_qe_preset, generate_band_kpath,
-        )
-        from shalom.backends._physics import AccuracyLevel
-        from shalom.backends.qe_parser import compute_nbnd
-
         os.makedirs(calc_dir, exist_ok=True)
         acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
         config = get_qe_preset(QECalculationType.BANDS, accuracy=acc, atoms=atoms)
@@ -292,10 +295,6 @@ class StandardWorkflow:
 
     def _run_nscf(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> None:
         """Run nscf calculation using the scf charge density."""
-        from shalom.backends.qe import QEBackend
-        from shalom.backends.qe_config import QECalculationType, get_qe_preset
-        from shalom.backends._physics import AccuracyLevel
-
         os.makedirs(calc_dir, exist_ok=True)
         acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
         config = get_qe_preset(QECalculationType.NSCF, accuracy=acc, atoms=atoms)
@@ -342,7 +341,6 @@ class StandardWorkflow:
 
     def _get_best_fermi_energy(self, scf_dir: str, nscf_dir: str) -> Optional[float]:
         """Return Fermi energy in eV: NSCF preferred, fallback to SCF."""
-        from shalom.backends.qe_parser import extract_fermi_energy
         nscf_efermi = extract_fermi_energy(os.path.join(nscf_dir, "pw.out"))
         if nscf_efermi is not None:
             logger.info("Fermi energy from NSCF: %.4f eV", nscf_efermi)
@@ -358,9 +356,6 @@ class StandardWorkflow:
 
     def _plot_bands(self, bands_dir: str, fermi: Optional[float]) -> Optional[str]:
         """Parse bands XML and generate band structure plot."""
-        from shalom.backends.qe_parser import find_xml_path, parse_xml_bands
-        from shalom.backends.qe_config import generate_band_kpath
-
         try:
             from shalom.plotting.band_plot import BandStructurePlotter
         except ImportError:
@@ -415,8 +410,6 @@ class StandardWorkflow:
 
     def _plot_dos(self, nscf_dir: str, fermi: Optional[float]) -> Optional[str]:
         """Parse pwscf.dos and generate DOS plot."""
-        from shalom.backends.qe_parser import parse_dos_file
-
         try:
             from shalom.plotting.dos_plot import DOSPlotter
         except ImportError:
@@ -444,8 +437,6 @@ class StandardWorkflow:
 
     def _pw_run(self, calc_dir: str) -> None:
         """Run pw.x in ``calc_dir`` and raise on failure."""
-        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
-
         exec_config = ExecutionConfig(
             command=self.pw_executable,
             input_file="pw.in",
@@ -463,8 +454,6 @@ class StandardWorkflow:
 
     def _dos_run(self, calc_dir: str) -> None:
         """Run dos.x in ``calc_dir`` (serial; no MPI needed)."""
-        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
-
         exec_config = ExecutionConfig(
             command=self.dos_executable,
             input_file="dos.in",

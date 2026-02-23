@@ -521,3 +521,97 @@ class TestGenerateBandKpath:
         intermediate_npts = [npts for _, npts in cfg.kpath_points[:-1] if npts != 1]
         if intermediate_npts:
             assert all(n == npoints for n in intermediate_npts)
+
+
+# ---------------------------------------------------------------------------
+# generate_band_kpath — seekpath Tier 1 path (mock seekpath module)
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateBandKpathSeekpathTier1:
+    """Tests that exercise the seekpath Tier 1 branch (lines 516-549)."""
+
+    def _si(self):
+        return bulk("Si", "diamond", a=5.43)
+
+    def _inject_seekpath(self, monkeypatch, path_data):
+        """Inject a fake seekpath module returning path_data."""
+        import sys
+        import types
+
+        fake_seekpath = types.ModuleType("seekpath")
+        fake_seekpath.get_path = lambda *a, **kw: path_data
+        monkeypatch.setitem(sys.modules, "seekpath", fake_seekpath)
+
+    def test_simple_continuous_path(self, monkeypatch):
+        """Seekpath returns continuous path → kpath built correctly."""
+        from shalom.backends.qe_config import generate_band_kpath, QEKPointsConfig
+
+        path_data = {
+            "point_coords": {
+                "G": [0.0, 0.0, 0.0],
+                "X": [0.5, 0.0, 0.5],
+                "L": [0.5, 0.5, 0.5],
+            },
+            "path": [("G", "X"), ("X", "L")],  # continuous
+        }
+        self._inject_seekpath(monkeypatch, path_data)
+
+        cfg = generate_band_kpath(self._si())
+        assert isinstance(cfg, QEKPointsConfig)
+        assert cfg.mode == "crystal_b"
+        # Should have labels for G, X, L
+        labels = set(cfg.kpath_labels.values())
+        assert "G" in labels
+
+    def test_discontinuous_path_creates_composite_label(self, monkeypatch):
+        """Seekpath discontinuity → composite label like 'X|U' is created."""
+        from shalom.backends.qe_config import generate_band_kpath
+
+        path_data = {
+            "point_coords": {
+                "G": [0.0, 0.0, 0.0],
+                "X": [0.5, 0.0, 0.0],
+                "U": [0.625, 0.25, 0.625],
+                "K": [0.375, 0.375, 0.75],
+            },
+            # Discontinuity between X and U
+            "path": [("G", "X"), ("U", "K")],
+        }
+        self._inject_seekpath(monkeypatch, path_data)
+
+        cfg = generate_band_kpath(self._si())
+        # Should have a composite label containing '|'
+        composite = [lbl for lbl in cfg.kpath_labels.values() if "|" in lbl]
+        assert len(composite) >= 1
+
+    def test_seekpath_exception_falls_to_ase_tier2(self, monkeypatch):
+        """seekpath.get_path raising Exception → falls back to Tier 2 (ASE)."""
+        import sys
+        import types
+        from shalom.backends.qe_config import generate_band_kpath, QEKPointsConfig
+
+        fake_seekpath = types.ModuleType("seekpath")
+        fake_seekpath.get_path = lambda *a, **kw: (_ for _ in ()).throw(
+            RuntimeError("seekpath internal error")
+        )
+        monkeypatch.setitem(sys.modules, "seekpath", fake_seekpath)
+
+        # Should still return a valid config via Tier 2 or Tier 3
+        cfg = generate_band_kpath(self._si())
+        assert isinstance(cfg, QEKPointsConfig)
+        assert len(cfg.kpath_points) > 0
+
+
+class TestDetectBravais:
+    def test_exception_returns_cub(self):
+        """_detect_bravais falling through exception → 'CUB' default returned."""
+        from unittest.mock import patch, MagicMock
+        from shalom.backends.qe_config import _detect_bravais
+        from ase.build import bulk
+
+        si = bulk("Si", "diamond", a=5.43)
+        with patch.object(si.cell, "get_bravais_lattice",
+                          side_effect=RuntimeError("no lattice")):
+            result = _detect_bravais(si)
+        assert result == "CUB"

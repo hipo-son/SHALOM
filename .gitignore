@@ -93,3 +93,13 @@ import_trace*
 test_import*
 pyver.txt
 where.txt
+
+# Crash/fault diagnostic files
+*_crash.txt
+*_fault.txt
+*_test.txt
+pytest_capture.txt
+ase_crash.txt
+ase_fault.txt
+np_fault.txt
+np_test.txt

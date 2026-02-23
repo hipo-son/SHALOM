@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `nosym: true`, `noinv: true` — full BZ sampling required for DOS
 - **`[plotting]` optional dependency extra** (`pyproject.toml`): `matplotlib>=3.5.0`, `seekpath>=2.0.0`
 - **63 new tests** (922 passed, 1 skipped): `test_qe_parser.py` (26), `test_band_plot.py` (13), `test_dos_plot.py` (6), `test_convergence.py` (13), `test_standard_workflow.py` (9), `test_qe_config.py` (11 new: `TestGetBandCalcAtoms`, `TestGenerateBandKpath`); fixtures: `mock_bands_xml.xml`, `mock_dos.dat`, `mock_dos_spin.dat`
+- **122 new tests** (1044 passed, 1 skipped; 94.6% coverage) closing coverage gaps across CLI, workflows, parsers, and plotting:
+  - `test_cli_main.py`: 10 new test classes covering `cmd_plot`, `cmd_workflow`, `cmd_converge`, `_load_atoms`, `_execute_dft`, `_detect_wsl_distros`, `_print_install_guide_windows/linux`, `main()` dispatcher (~50 tests)
+  - `test_standard_workflow.py`: 66 tests for `StandardWorkflow` lifecycle, step isolation, error propagation, and `_plot_bands()` gap-collapse logic
+  - `test_convergence.py`: 28 tests for `CutoffConvergence`/`KpointConvergence` including parallel path, `_run_single` error handling, `summary()` output, and plot creation
+  - `test_qe_parser.py`: 11 edge-case tests (malformed XML, missing k_point, spin-polarised detection, `find_xml_path` glob fallback, `parse_dos_file` single-row reshape)
+  - `test_direct_run.py`: 11 tests for `_write_output_readme()` and error-path branches (no structure, `write_input` exception, MP import error, unknown calc_type)
+  - `test_dos_plot.py`: 2 tests (integrated DOS twin-axis rendering, `_require_matplotlib` ImportError)
+  - `test_qe_config.py`: 6 tests for seekpath Tier 1 (continuous/discontinuous paths, exception fallback) and `_detect_bravais_lattice` error path
 
 - **`setup-qe` CLI subcommand** (`python -m shalom setup-qe`)
   - QE prerequisite checker: pw.x detection, pseudo_dir validation
@@ -125,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All existing tests pass unchanged (zero behavioral change)
 
 ### Fixed
+- `test_standard_workflow.py`: corrected 4 `BandStructureData` fixture instantiations that omitted the required `kpoint_coords` positional argument (exposed by dataclass field ordering change)
+- `test_convergence.py`: added `matplotlib.use("Agg")` + `plt.switch_backend("Agg")` guard to `test_convergence_plot_creates_file` to prevent `_tkinter.TclError: main thread is not in main loop` on Windows when running the full test suite
 - `standard.py` `_plot_bands()`: x-axis gaps at BZ path discontinuities — cumulative distance is now reset at break points (composite "X|U" labels) so sub-paths are plotted side-by-side with zero gap (standard scientific convention; previously the X→U jump distance inflated the x-axis)
 - `qe_config.py` `generate_band_kpath()` Tier 2: partial results from a failed ASE `cell.bandpath()` call are now discarded before Tier 3 runs (previously partial `seg_labels` could bypass Tier 3 and produce an incomplete k-path)
 - `standard.py` `run()`: corrected `"atoms"` return-dict docstring (now returns seekpath primitive cell, not the raw vc-relax output)

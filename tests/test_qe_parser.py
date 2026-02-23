@@ -210,3 +210,138 @@ def test_qe_xml_ns():
     """QE XML namespace dict must contain the expected URL."""
     assert "qes" in QE_XML_NS
     assert "quantum-espresso.org" in QE_XML_NS["qes"]
+
+
+# ---------------------------------------------------------------------------
+# Additional edge-case tests for missed coverage
+# ---------------------------------------------------------------------------
+
+
+class TestParseXmlBandsEdgeCases:
+    def test_malformed_xml_raises_valueerror(self, tmp_path):
+        """Malformed XML → ValueError wrapping ParseError."""
+        bad_xml = tmp_path / "bad.xml"
+        bad_xml.write_text("<<< this is not valid XML >>>")
+        with pytest.raises(ValueError, match="Malformed XML"):
+            parse_xml_bands(str(bad_xml))
+
+    def test_no_ks_energies_raises_valueerror(self, tmp_path):
+        """XML with no <ks_energies> → ValueError."""
+        xml = tmp_path / "empty.xml"
+        xml.write_text(
+            '<?xml version="1.0"?>\n'
+            '<espresso xmlns="http://www.quantum-espresso.org/ns/qes/qes-1.0">'
+            '<output><band_structure><lsda>false</lsda></band_structure></output>'
+            '</espresso>'
+        )
+        with pytest.raises(ValueError, match="No <ks_energies>"):
+            parse_xml_bands(str(xml))
+
+    def test_missing_kpoint_falls_back_to_zero(self, tmp_path):
+        """ks_energies without k_point element → [0,0,0] fallback."""
+        xml = tmp_path / "nokpt.xml"
+        xml.write_text(
+            '<?xml version="1.0"?>\n'
+            '<espresso xmlns="http://www.quantum-espresso.org/ns/qes/qes-1.0">'
+            '<output><band_structure><lsda>false</lsda>'
+            '<ks_energies>'
+            '  <eigenvalues size="2">-0.01 0.02</eigenvalues>'
+            '</ks_energies>'
+            '</band_structure></output></espresso>'
+        )
+        bs = parse_xml_bands(str(xml))
+        # k-point should be [0,0,0]
+        assert bs.kpoint_coords[0].tolist() == pytest.approx([0.0, 0.0, 0.0])
+
+    def test_spin_polarized_two_eigenvalue_elements(self, tmp_path):
+        """lsda=true with two eigenvalue elements per k-point → spin arrays set."""
+        xml = tmp_path / "spin.xml"
+        xml.write_text(
+            '<?xml version="1.0"?>\n'
+            '<espresso xmlns="http://www.quantum-espresso.org/ns/qes/qes-1.0">'
+            '<output><band_structure><lsda>true</lsda>'
+            '<ks_energies>'
+            '  <k_point weight="1.0">0.0 0.0 0.0</k_point>'
+            '  <eigenvalues size="2">-0.01 0.02</eigenvalues>'
+            '  <eigenvalues size="2">-0.015 0.025</eigenvalues>'
+            '</ks_energies>'
+            '</band_structure></output></espresso>'
+        )
+        bs = parse_xml_bands(str(xml))
+        assert bs.is_spin_polarized is True
+        assert bs.spin_up is not None
+        assert bs.spin_down is not None
+        assert bs.spin_up.shape == (1, 2)
+        assert bs.spin_down.shape == (1, 2)
+
+    def test_bvectors_without_namespace(self, tmp_path):
+        """Reciprocal lattice vectors without namespace prefix → parsed via fallback."""
+        # Build XML without namespace → b1/b2/b3 won't match qes: prefix
+        xml = tmp_path / "nons.xml"
+        xml.write_text(
+            '<?xml version="1.0"?>\n'
+            '<espresso xmlns="http://www.quantum-espresso.org/ns/qes/qes-1.0">'
+            '<output><basis_set>'
+            '<reciprocal_lattice>'
+            '  <b1>1.0 0.0 0.0</b1>'
+            '  <b2>0.0 1.0 0.0</b2>'
+            '  <b3>0.0 0.0 1.0</b3>'
+            '</reciprocal_lattice>'
+            '</basis_set>'
+            '<band_structure><lsda>false</lsda>'
+            '<ks_energies>'
+            '  <k_point weight="1.0">0.0 0.0 0.0</k_point>'
+            '  <eigenvalues size="2">-0.01 0.02</eigenvalues>'
+            '</ks_energies>'
+            '</band_structure></output></espresso>'
+        )
+        bs = parse_xml_bands(str(xml))
+        assert bs.nkpts == 1
+
+
+class TestFindXmlPathGlobFallback:
+    def test_glob_fallback_finds_nested_xml(self, tmp_path):
+        """Deep nested XML found via glob fallback."""
+        nested = tmp_path / "deep" / "nested.save"
+        nested.mkdir(parents=True)
+        xml = nested / "data-file-schema.xml"
+        xml.write_text("<root/>")
+        found = find_xml_path(str(tmp_path))
+        assert found is not None
+        assert "data-file-schema.xml" in found
+
+
+class TestExtractFermiEnergyEdgeCases:
+    def test_ioerror_returns_none(self, tmp_path):
+        """OSError when opening pw.out → None returned."""
+        from unittest.mock import patch
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("the Fermi energy is 5.0 ev\n")
+        with patch("builtins.open", side_effect=OSError("permission denied")):
+            result = extract_fermi_energy(str(pw_out))
+        assert result is None
+
+
+class TestParseDosFileEdgeCases:
+    def test_loadtxt_error_raises_valueerror(self, tmp_path):
+        """Un-parseable DOS file → ValueError."""
+        dos_path = tmp_path / "bad.dos"
+        dos_path.write_text("not\tnumeric\ndata\n")
+        with pytest.raises(ValueError, match="Cannot parse DOS"):
+            parse_dos_file(str(dos_path))
+
+    def test_single_row_parses_ok(self, tmp_path):
+        """Single-row DOS file (1D array from loadtxt) → reshaped correctly."""
+        dos_path = tmp_path / "single.dos"
+        dos_path.write_text("# E dos idos\n0.0 1.5 0.5\n")
+        dos = parse_dos_file(str(dos_path))
+        assert len(dos.energies) == 1
+        assert dos.energies[0] == pytest.approx(0.0)
+        assert dos.dos[0] == pytest.approx(1.5)
+
+    def test_too_few_columns_raises_valueerror(self, tmp_path):
+        """DOS file with only 2 columns → ValueError."""
+        dos_path = tmp_path / "twocol.dos"
+        dos_path.write_text("# E dos\n-1.0 0.5\n0.0 1.0\n")
+        with pytest.raises(ValueError, match="Expected"):
+            parse_dos_file(str(dos_path))

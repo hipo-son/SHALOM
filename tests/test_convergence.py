@@ -220,7 +220,11 @@ class TestKpointConvergence:
     reason="matplotlib not installed",
 )
 def test_convergence_plot_creates_file(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")  # avoid tkinter on Windows
     pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+    plt.switch_backend("Agg")
     si = bulk("Si", "diamond", a=5.43)
     results = [
         ConvergenceResult(30.0, -100.0 * 2, True),
@@ -245,3 +249,413 @@ def test_convergence_plot_creates_file(tmp_path):
 
 
 import os  # noqa: E402  (needed for the test above)
+
+
+# ---------------------------------------------------------------------------
+# CutoffConvergence._run_single (mocked pw.x + backend)
+# ---------------------------------------------------------------------------
+
+
+class TestCutoffRunSingle:
+    """Unit tests for CutoffConvergence._run_single without pw.x."""
+
+    def _make_mock_runner_result(self, success=True):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.success = success
+        return r
+
+    def _make_mock_dft_result(self, energy=-100.0, converged=True):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.energy = energy
+        r.is_converged = converged
+        return r
+
+    def test_run_single_success(self, tmp_path):
+        """_run_single returns ConvergenceResult with energy on success."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            values=[40.0],
+            kgrid=[4, 4, 4],
+        )
+
+        from unittest.mock import patch, MagicMock
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result(energy=-200.0, converged=True)
+
+        calc_dir = str(tmp_path / "ecutwfc_40")
+
+        with patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            result = conv._run_single(40.0, calc_dir)
+
+        assert result.parameter_value == pytest.approx(40.0)
+        assert result.energy == pytest.approx(-200.0)
+        assert result.is_converged is True
+
+    def test_run_single_runner_failure(self, tmp_path):
+        """_run_single returns is_converged=False when runner fails."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            values=[40.0],
+            kgrid=[4, 4, 4],
+        )
+
+        from unittest.mock import patch
+
+        mock_runner_result = self._make_mock_runner_result(success=False)
+        mock_dft_result = self._make_mock_dft_result(energy=-200.0, converged=True)
+
+        calc_dir = str(tmp_path / "ecutwfc_40")
+
+        with patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            result = conv._run_single(40.0, calc_dir)
+
+        # is_converged = dft.is_converged AND runner.success → both needed
+        assert result.is_converged is False
+
+    def test_run_single_exception_caught(self, tmp_path):
+        """_run_single catches exceptions and returns error result."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            values=[40.0],
+            kgrid=[4, 4, 4],
+        )
+
+        from unittest.mock import patch
+
+        calc_dir = str(tmp_path / "ecutwfc_40")
+
+        with patch("shalom.backends.qe.QEBackend.write_input",
+                   side_effect=RuntimeError("write failed")):
+            result = conv._run_single(40.0, calc_dir)
+
+        assert result.is_converged is False
+        assert result.energy is None
+        assert "write failed" in result.error_message
+
+    def test_run_single_no_kgrid_uses_default(self, tmp_path):
+        """When kgrid=None, _run_single computes default grid."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            values=[40.0],
+            kgrid=None,  # trigger default grid path
+        )
+
+        from unittest.mock import patch
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result(energy=-100.0, converged=True)
+
+        calc_dir = str(tmp_path / "ecutwfc_40")
+
+        with patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            result = conv._run_single(40.0, calc_dir)
+
+        assert result.is_converged is True
+
+    def test_run_single_pseudo_dir_applied(self, tmp_path):
+        """pseudo_dir is forwarded to config when set."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            values=[40.0],
+            kgrid=[4, 4, 4],
+            pseudo_dir="/my/pseudos",
+        )
+
+        from unittest.mock import patch, MagicMock
+
+        captured_config = {}
+
+        def fake_write(atoms, calc_dir, config=None):
+            captured_config["pseudo_dir"] = getattr(config, "pseudo_dir", None)
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result()
+
+        calc_dir = str(tmp_path / "ecutwfc_40")
+
+        with patch("shalom.backends.qe.QEBackend.write_input", side_effect=fake_write), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            conv._run_single(40.0, calc_dir)
+
+        assert captured_config.get("pseudo_dir") == "/my/pseudos"
+
+    def test_run_single_precise_accuracy(self, tmp_path):
+        """AccuracyLevel.PRECISE is used when accuracy='precise'."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            values=[60.0],
+            kgrid=[4, 4, 4],
+            accuracy="precise",
+        )
+
+        from unittest.mock import patch
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result()
+        calc_dir = str(tmp_path / "ecutwfc_60")
+
+        captured_acc = {}
+
+        def fake_preset(calc_type, accuracy, atoms=None):
+            captured_acc["acc"] = accuracy
+            from shalom.backends.qe_config import get_qe_preset as real_preset
+            return real_preset(calc_type, accuracy, atoms=atoms)
+
+        with patch("shalom.backends.qe_config.get_qe_preset", side_effect=fake_preset), \
+             patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            conv._run_single(60.0, calc_dir)
+
+        from shalom.backends._physics import AccuracyLevel
+        assert captured_acc.get("acc") == AccuracyLevel.PRECISE
+
+
+# ---------------------------------------------------------------------------
+# KpointConvergence._run_single (mocked pw.x + backend)
+# ---------------------------------------------------------------------------
+
+
+class TestKpointRunSingle:
+    """Unit tests for KpointConvergence._run_single without pw.x."""
+
+    def _make_mock_runner_result(self, success=True):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.success = success
+        return r
+
+    def _make_mock_dft_result(self, energy=-100.0, converged=True):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.energy = energy
+        r.is_converged = converged
+        return r
+
+    def test_run_single_success(self, tmp_path):
+        """_run_single returns ConvergenceResult with energy."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = KpointConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            resolutions=[30.0],
+            ecutwfc=50.0,
+        )
+
+        from unittest.mock import patch
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result(energy=-150.0, converged=True)
+
+        calc_dir = str(tmp_path / "kpoint_30")
+
+        with patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            result = conv._run_single(30.0, calc_dir)
+
+        assert result.parameter_value == pytest.approx(30.0)
+        assert result.energy == pytest.approx(-150.0)
+        assert result.is_converged is True
+
+    def test_run_single_ecutwfc_applied(self, tmp_path):
+        """Fixed ecutwfc is written to config.system."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = KpointConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            resolutions=[30.0],
+            ecutwfc=55.0,
+        )
+
+        from unittest.mock import patch
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result()
+        calc_dir = str(tmp_path / "kpoint_30")
+
+        captured_system = {}
+
+        def fake_write(atoms, calc_dir, config=None):
+            if config:
+                captured_system.update(config.system)
+
+        with patch("shalom.backends.qe.QEBackend.write_input", side_effect=fake_write), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            conv._run_single(30.0, calc_dir)
+
+        assert captured_system.get("ecutwfc") == pytest.approx(55.0)
+
+    def test_run_single_no_ecutwfc_uses_preset(self, tmp_path):
+        """When ecutwfc=None, default preset value is used."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = KpointConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            resolutions=[30.0],
+            ecutwfc=None,  # don't override
+        )
+
+        from unittest.mock import patch
+
+        mock_runner_result = self._make_mock_runner_result(success=True)
+        mock_dft_result = self._make_mock_dft_result()
+        calc_dir = str(tmp_path / "kpoint_30")
+
+        with patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_runner_result), \
+             patch("shalom.backends.qe.QEBackend.parse_output", return_value=mock_dft_result):
+            result = conv._run_single(30.0, calc_dir)
+
+        assert result.is_converged is True  # no crash
+
+    def test_run_single_exception_caught(self, tmp_path):
+        """_run_single catches exceptions and returns error result."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = KpointConvergence(
+            atoms=si,
+            output_dir=str(tmp_path),
+            resolutions=[30.0],
+            ecutwfc=50.0,
+        )
+
+        from unittest.mock import patch
+
+        calc_dir = str(tmp_path / "kpoint_30")
+
+        with patch("shalom.backends.qe.QEBackend.write_input",
+                   side_effect=ValueError("bad atoms")):
+            result = conv._run_single(30.0, calc_dir)
+
+        assert result.is_converged is False
+        assert result.energy is None
+        assert "bad atoms" in result.error_message
+
+
+# ---------------------------------------------------------------------------
+# ConvergenceWorkflow base helpers: _make_calc_dir, _run_sequential, parallel
+# ---------------------------------------------------------------------------
+
+
+class TestConvergenceBaseHelpers:
+    def test_make_calc_dir_creates_directory(self, tmp_path):
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si, output_dir=str(tmp_path), values=[40.0], kgrid=[4, 4, 4]
+        )
+        calc_dir = conv._make_calc_dir(40.0)
+        assert os.path.isdir(calc_dir)
+        assert "ecutwfc" in calc_dir
+
+    def test_make_calc_dir_tag_format(self, tmp_path):
+        """Directory name replaces '.' with 'p'."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = KpointConvergence(
+            atoms=si, output_dir=str(tmp_path), resolutions=[25.5], ecutwfc=50.0
+        )
+        calc_dir = conv._make_calc_dir(25.5)
+        assert "25p5" in calc_dir
+
+    def test_run_sequential_calls_all(self, tmp_path):
+        """_run_sequential calls _run_single for each value."""
+        si = bulk("Si", "diamond", a=5.43)
+        called = []
+
+        conv = CutoffConvergence(
+            atoms=si, output_dir=str(tmp_path), values=[30.0, 40.0, 50.0], kgrid=[4, 4, 4]
+        )
+
+        def fake_run_single(val, calc_dir):
+            called.append(val)
+            return ConvergenceResult(val, -100.0 * val, True, calc_dir)
+
+        conv._run_single = fake_run_single  # type: ignore[method-assign]
+        results = conv._run_sequential()
+
+        assert sorted(called) == [30.0, 40.0, 50.0]
+        assert len(results) == 3
+
+    def test_run_parallel_calls_all(self, tmp_path):
+        """_run_parallel calls _run_single for each value concurrently."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si, output_dir=str(tmp_path), values=[30.0, 40.0], kgrid=[4, 4, 4]
+        )
+
+        # Override _run_single to be picklable (no mock) for multiprocessing
+        # Instead, patch the pool to avoid spawning actual processes
+        from unittest.mock import patch, MagicMock
+
+        results_data = [
+            ConvergenceResult(30.0, -100.0, True),
+            ConvergenceResult(40.0, -100.01, True),
+        ]
+
+        mock_pool = MagicMock()
+        mock_pool.__enter__ = MagicMock(return_value=mock_pool)
+        mock_pool.__exit__ = MagicMock(return_value=False)
+        mock_pool.starmap = MagicMock(return_value=results_data)
+
+        with patch("multiprocessing.Pool", return_value=mock_pool):
+            results = conv._run_parallel()
+
+        assert len(results) == 2
+        mock_pool.starmap.assert_called_once()
+
+    def test_run_uses_parallel_when_flag_set(self, tmp_path):
+        """run() delegates to _run_parallel when parallel=True."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si, output_dir=str(tmp_path), values=[30.0], kgrid=[4, 4, 4],
+            parallel=True,
+        )
+
+        from unittest.mock import patch, MagicMock
+
+        results_data = [ConvergenceResult(30.0, -100.0, True)]
+
+        with patch.object(conv, "_run_parallel", return_value=results_data) as mock_parallel, \
+             patch.object(conv, "_run_sequential") as mock_seq:
+            conv.run()
+
+        mock_parallel.assert_called_once()
+        mock_seq.assert_not_called()
+
+    def test_convergence_plot_no_converged_results(self, tmp_path):
+        """plot() returns None when all results failed."""
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si, output_dir=str(tmp_path), values=[30.0], kgrid=[4, 4, 4]
+        )
+        result = ConvergenceTestResult(
+            parameter_name="ecutwfc",
+            results=[ConvergenceResult(30.0, None, False)],
+        )
+        # Should not crash even with no converged results
+        import pytest
+        pytest.importorskip("matplotlib")
+        plot_path = conv.plot(result, output_path=str(tmp_path / "conv.png"))
+        assert plot_path is None

@@ -86,3 +86,25 @@ class TestDOSPlotter:
         fig = plotter.plot(title="My DOS")
         assert fig.axes[0].get_title() == "My DOS"
         plt.close(fig)
+
+    def test_show_integrated_creates_twin_axis(self, mock_dos_data):
+        """show_integrated=True → twin axis for integrated DOS is created."""
+        import matplotlib.pyplot as plt
+        plotter = DOSPlotter(mock_dos_data)
+        fig = plotter.plot(show_integrated=True)
+        # Twin axis should give us 2 axes on the figure
+        assert len(fig.axes) >= 2
+        plt.close(fig)
+
+
+class TestRequireMatplotlib:
+    def test_importerror_raised_when_missing(self):
+        """_require_matplotlib raises ImportError when matplotlib unavailable."""
+        import sys
+        from unittest.mock import patch
+        from shalom.plotting.dos_plot import _require_matplotlib
+
+        with patch.dict(sys.modules, {"matplotlib": None,
+                                       "matplotlib.pyplot": None}):
+            with pytest.raises(ImportError, match="matplotlib is required"):
+                _require_matplotlib()

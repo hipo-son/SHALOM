@@ -388,3 +388,166 @@ class TestWorkspaceOutputDir:
         result = direct_run("", config)
         assert result.success is True
         assert result.output_dir == explicit
+
+
+# ---------------------------------------------------------------------------
+# _write_output_readme — direct unit tests for README generation
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOutputReadme:
+    def _call(self, tmp_path, structure_info=None, auto_detected=None, files=None):
+        from shalom.direct_run import _write_output_readme
+        _write_output_readme(
+            output_dir=str(tmp_path),
+            backend_name="qe",
+            calc_type="scf",
+            structure_info=structure_info,
+            auto_detected=auto_detected,
+            files_generated=files or ["pw.in"],
+        )
+        readme = tmp_path / "README.md"
+        return readme.read_text() if readme.exists() else ""
+
+    def test_with_mp_id_includes_link(self, tmp_path):
+        """MP ID → README contains materials project link."""
+        info = {"mp_id": "mp-149", "formula": "Si", "source": "materials_project"}
+        text = self._call(tmp_path, structure_info=info)
+        assert "mp-149" in text
+        assert "materialsproject.org" in text
+
+    def test_with_spacegroup(self, tmp_path):
+        """spacegroup in structure_info → shown in README."""
+        info = {"formula": "Si", "space_group": "Fd-3m"}
+        text = self._call(tmp_path, structure_info=info)
+        assert "Fd-3m" in text
+
+    def test_with_energy_above_hull(self, tmp_path):
+        """energy_above_hull → shown in README."""
+        info = {"formula": "Fe2O3", "energy_above_hull": 0.0025}
+        text = self._call(tmp_path, structure_info=info)
+        assert "E above hull" in text
+        assert "0.0025" in text
+
+    def test_local_file_source(self, tmp_path):
+        """local file source → --structure placeholder in reproduce command."""
+        info = {"formula": "Cu", "source": "local file"}
+        text = self._call(tmp_path, structure_info=info)
+        assert "--structure" in text
+
+    def test_oswrite_error_gracefully_ignored(self, tmp_path):
+        """OSError when writing README → function returns without crashing."""
+        from unittest.mock import patch, mock_open
+        from shalom.direct_run import _write_output_readme
+
+        m = mock_open()
+        m.side_effect = OSError("disk full")
+        with patch("builtins.open", m):
+            # Should not raise
+            _write_output_readme(
+                output_dir=str(tmp_path),
+                backend_name="qe", calc_type="scf",
+                structure_info={"formula": "Si"},
+                auto_detected=None,
+                files_generated=["pw.in"],
+            )
+
+    def test_version_included(self, tmp_path):
+        """SHALOM version included in README."""
+        text = self._call(tmp_path)
+        assert "SHALOM v" in text
+
+
+# ---------------------------------------------------------------------------
+# direct_run — additional error path coverage
+# ---------------------------------------------------------------------------
+
+
+class TestDirectRunErrorPaths:
+    def test_no_structure_returns_error(self, tmp_path):
+        """Empty material_spec and no structure_file → failure."""
+        config = DirectRunConfig(
+            backend_name="vasp",
+            output_dir=str(tmp_path / "out"),
+        )
+        result = direct_run("", config)
+        assert result.success is False
+        assert "No material" in result.error
+
+    def test_write_input_exception_returns_failure(self, tmp_path):
+        """backend.write_input raising → failure result."""
+        from unittest.mock import patch
+        from ase.io import write
+        from ase.build import bulk
+
+        si = bulk("Si", "diamond", a=5.43)
+        poscar = tmp_path / "Si.vasp"
+        write(str(poscar), si, format="vasp")
+
+        config = DirectRunConfig(
+            backend_name="vasp",
+            structure_file=str(poscar),
+            output_dir=str(tmp_path / "out"),
+        )
+        with patch("shalom.backends.vasp.VASPBackend.write_input",
+                   side_effect=IOError("disk error")):
+            result = direct_run("", config)
+        assert result.success is False
+        assert "Failed to write" in result.error
+
+    def test_validation_failure(self, tmp_path):
+        """Invalid structure → validation failure result."""
+        from unittest.mock import patch, MagicMock
+        from ase.build import bulk
+        from ase.io import write
+
+        si = bulk("Si", "diamond", a=5.43)
+        poscar = tmp_path / "Si.vasp"
+        write(str(poscar), si, format="vasp")
+
+        mock_form = MagicMock()
+        mock_form.is_valid = False
+        mock_form.feedback = "atoms too close"
+
+        config = DirectRunConfig(
+            backend_name="vasp",
+            structure_file=str(poscar),
+            output_dir=str(tmp_path / "out"),
+            validate_structure=True,
+        )
+        with patch("shalom.direct_run.FormFiller.evaluate_atoms", return_value=mock_form):
+            result = direct_run("", config)
+        assert result.success is False
+        assert "validation" in result.error.lower()
+
+    def test_mp_importerror_returns_failure(self, tmp_path):
+        """fetch_structure ImportError → failure with error message."""
+        from unittest.mock import patch
+
+        config = DirectRunConfig(
+            backend_name="vasp",
+            output_dir=str(tmp_path / "out"),
+        )
+        with patch("shalom.mp_client.fetch_structure",
+                   side_effect=ImportError("mp-api not installed")):
+            result = direct_run("mp-19717", config)
+        assert result.success is False
+
+    def test_qe_unknown_calc_type_defaults_scf(self, tmp_path):
+        """Unknown QE calc_type falls back to SCF."""
+        from ase.build import bulk
+        from ase.io import write
+
+        si = bulk("Si", "diamond", a=5.43)
+        poscar = tmp_path / "Si.vasp"
+        write(str(poscar), si, format="vasp")
+
+        config = DirectRunConfig(
+            backend_name="qe",
+            calc_type="totally_unknown_calc",
+            structure_file=str(poscar),
+            output_dir=str(tmp_path / "out"),
+        )
+        result = direct_run("", config)
+        # Should still succeed (defaults to SCF)
+        assert result.success is True
