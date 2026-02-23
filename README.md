@@ -117,6 +117,20 @@ python -m shalom run --structure POSCAR --backend vasp      # Local file
 python -m shalom run mp-19717 --set ENCUT=600               # Override parameters
 ```
 
+### QE Execution (Local)
+
+Run QE calculations directly from SHALOM:
+
+```bash
+# 1. Check QE setup
+python -m shalom setup-qe --elements Si --download
+
+# 2. Generate + execute
+python -m shalom run Si --backend qe --calc scf --execute
+```
+
+Requires `pw.x` on PATH. On Windows, run from inside WSL2.
+
 ## Quick Demo
 
 Try the interactive demo with rich console output:

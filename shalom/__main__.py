@@ -162,6 +162,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="MPI launcher command (default: mpirun).",
     )
 
+    # 'setup-qe' subcommand
+    setup_parser = subparsers.add_parser(
+        "setup-qe",
+        help="Check QE prerequisites and download pseudopotentials.",
+        description=(
+            "Verify pw.x installation, validate pseudo_dir, "
+            "and manage SSSP pseudopotentials."
+        ),
+    )
+    setup_parser.add_argument(
+        "--pseudo-dir",
+        default=None,
+        help="Pseudopotential directory (default: $SHALOM_PSEUDO_DIR or './').",
+    )
+    setup_parser.add_argument(
+        "--elements",
+        default=None,
+        help="Comma-separated elements to check (default: all SSSP).",
+    )
+    setup_parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download missing pseudopotentials from SSSP repository.",
+    )
+
     return parser
 
 
@@ -243,6 +268,103 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def cmd_setup_qe(args: argparse.Namespace) -> int:
+    """Execute the 'setup-qe' subcommand."""
+    import os
+    import platform
+    import shutil
+    from pathlib import Path
+
+    from shalom.backends.qe_config import SSSP_ELEMENTS, get_pseudo_filename
+
+    issues = 0
+
+    # 1. Check pw.x
+    pw_path = shutil.which("pw.x")
+    if pw_path:
+        print(f"pw.x:       {pw_path}")
+    else:
+        print("pw.x:       NOT FOUND")
+        if platform.system() == "Windows":
+            print("  Tip:      Run from inside WSL2 (wsl -d Ubuntu-22.04)")
+            print("            sudo apt install quantum-espresso")
+        else:
+            print("  Install:  sudo apt install quantum-espresso  (Ubuntu/Debian)")
+            print("            conda install -c conda-forge qe     (conda)")
+        issues += 1
+
+    # 2. Resolve pseudo_dir
+    pseudo_dir_arg = args.pseudo_dir or os.environ.get("SHALOM_PSEUDO_DIR", "./")
+    pseudo_path = Path(pseudo_dir_arg).expanduser().resolve()
+    if pseudo_path.is_dir():
+        print(f"pseudo_dir: {pseudo_path}")
+    else:
+        print(f"pseudo_dir: {pseudo_dir_arg} (NOT FOUND)")
+        print("  Set:      export SHALOM_PSEUDO_DIR=/path/to/pseudos")
+        if not args.download:
+            issues += 1
+
+    # 3. Parse elements
+    if args.elements:
+        elements = [e.strip() for e in args.elements.split(",")]
+    else:
+        elements = sorted(SSSP_ELEMENTS.keys())
+
+    # 4. Check each UPF file
+    missing: list = []
+    if pseudo_path.is_dir():
+        print(f"\nElements ({len(elements)}):")
+        for el in elements:
+            if el not in SSSP_ELEMENTS:
+                print(f"  {el:<4s} (unknown element, not in SSSP)")
+                continue
+            upf = get_pseudo_filename(el)
+            upf_path = pseudo_path / upf
+            # Case-insensitive fallback
+            found = upf_path.exists()
+            if not found:
+                try:
+                    for entry in pseudo_path.iterdir():
+                        if entry.name.lower() == upf.lower():
+                            found = True
+                            break
+                except OSError:
+                    pass
+            if found:
+                print(f"  {el:<4s} {upf}  [OK]")
+            else:
+                print(f"  {el:<4s} {upf}  [MISSING]")
+                missing.append((el, upf))
+                issues += 1
+
+    # 5. Download if requested
+    if args.download and missing:
+        import urllib.request
+
+        pseudo_path.mkdir(parents=True, exist_ok=True)
+        print(f"\nDownloading {len(missing)} pseudopotential(s)...")
+        base_url = "https://pseudopotentials.quantum-espresso.org/upf_files"
+        for el, upf in missing:
+            url = f"{base_url}/{upf}"
+            dest = pseudo_path / upf
+            print(f"  {upf} ... ", end="", flush=True)
+            try:
+                urllib.request.urlretrieve(url, str(dest))
+                print("OK")
+                issues -= 1
+            except Exception as e:
+                print(f"FAILED ({e})")
+
+    # 6. Summary
+    print()
+    if issues == 0:
+        print("Ready for QE execution.")
+    else:
+        print(f"{issues} issue(s) found.")
+        print("Fix and re-run: python -m shalom setup-qe")
+    return 0 if issues == 0 else 1
+
+
 def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
     """Execute DFT and display results."""
     from shalom.backends.qe import QEBackend
@@ -313,6 +435,8 @@ def main() -> None:
 
     if args.command == "run":
         sys.exit(cmd_run(args))
+    elif args.command == "setup-qe":
+        sys.exit(cmd_setup_qe(args))
     else:
         parser.print_help()
         sys.exit(0)

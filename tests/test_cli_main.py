@@ -384,6 +384,18 @@ class TestExecutionFlags:
         assert args.timeout == 86400
         assert args.mpi_command == "mpirun"
 
+    def test_setup_qe_parser(self):
+        """setup-qe subcommand parses correctly."""
+        parser = build_parser()
+        args = parser.parse_args(["setup-qe", "--elements", "Si,Fe"])
+        assert args.command == "setup-qe"
+        assert args.elements == "Si,Fe"
+
+    def test_setup_qe_download_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["setup-qe", "--download"])
+        assert args.download is True
+
     def test_vasp_execute_error(self, capsys):
         """VASP + --execute → error message."""
         from unittest.mock import patch, MagicMock
@@ -411,3 +423,91 @@ class TestExecutionFlags:
         assert rc == 1
         captured = capsys.readouterr()
         assert "VASP" in captured.out and "not yet supported" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# setup-qe tests
+# ---------------------------------------------------------------------------
+
+
+class TestCmdSetupQE:
+    def _make_args(self, **overrides):
+        import argparse
+        defaults = dict(
+            pseudo_dir=None, elements=None, download=False, command="setup-qe",
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_pw_x_found_and_pseudo_ok(self, capsys, tmp_path):
+        """pw.x found + pseudo exists → return 0."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "pseudo"
+        pseudo_dir.mkdir()
+        (pseudo_dir / "Si.pbe-n-rrkjus_psl.1.0.0.UPF").write_text("data")
+
+        args = self._make_args(pseudo_dir=str(pseudo_dir), elements="Si")
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            rc = cmd_setup_qe(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "pw.x" in out
+        assert "[OK]" in out
+
+    def test_pw_x_not_found(self, capsys):
+        """pw.x missing → return 1 with install instructions."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        args = self._make_args(elements="Si")
+        with patch("shutil.which", return_value=None):
+            rc = cmd_setup_qe(args)
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "NOT FOUND" in out
+
+    def test_missing_upf_reported(self, capsys, tmp_path):
+        """UPF file missing → MISSING reported."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "pseudo"
+        pseudo_dir.mkdir()
+        args = self._make_args(pseudo_dir=str(pseudo_dir), elements="Si")
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            rc = cmd_setup_qe(args)
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "[MISSING]" in out
+
+    def test_download_triggers_urllib(self, capsys, tmp_path):
+        """--download triggers urllib download."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "pseudo"
+        pseudo_dir.mkdir()
+        args = self._make_args(
+            pseudo_dir=str(pseudo_dir), elements="Si", download=True,
+        )
+        with patch("shutil.which", return_value="/usr/bin/pw.x"), \
+             patch("urllib.request.urlretrieve") as mock_dl:
+            cmd_setup_qe(args)
+        mock_dl.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Downloading" in out
+
+    def test_unknown_element_handled(self, capsys, tmp_path):
+        """Unknown element gracefully reported."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "pseudo"
+        pseudo_dir.mkdir()
+        args = self._make_args(pseudo_dir=str(pseudo_dir), elements="Xx")
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            cmd_setup_qe(args)
+        out = capsys.readouterr().out
+        assert "unknown" in out.lower()

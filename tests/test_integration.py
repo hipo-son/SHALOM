@@ -278,3 +278,58 @@ class TestPipelineConfigFields:
         restored = PipelineConfig.model_validate_json(json_str)
         assert restored.calc_type == "dos"
         assert restored.vasp_user_incar["NEDOS"] == 5001
+
+
+# ---------------------------------------------------------------------------
+# QE End-to-End Integration Tests (requires pw.x)
+# ---------------------------------------------------------------------------
+
+import shutil
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    shutil.which("pw.x") is None,
+    reason="pw.x not installed (run from WSL with QE)",
+)
+class TestQEEndToEnd:
+    """Real QE pw.x integration tests — skipped unless QE available."""
+
+    def test_si_scf_end_to_end(self, tmp_path):
+        """Real Si SCF with pw.x."""
+        from ase.build import bulk
+        from ase.io import write as ase_write
+
+        from shalom.direct_run import direct_run, DirectRunConfig
+        from shalom.backends.runner import ExecutionRunner, ExecutionConfig
+        from shalom.backends.qe import QEBackend
+
+        # Generate Si structure
+        si = bulk("Si", "diamond", a=5.43)
+        poscar = tmp_path / "Si_POSCAR"
+        ase_write(str(poscar), si, format="vasp")
+
+        pseudo_dir = os.environ.get("SHALOM_PSEUDO_DIR", str(tmp_path))
+        config = DirectRunConfig(
+            backend_name="qe",
+            calc_type="scf",
+            output_dir=str(tmp_path / "calc"),
+            structure_file=str(poscar),
+            pseudo_dir=pseudo_dir,
+            force_overwrite=True,
+        )
+        result = direct_run("", config)
+        assert result.success
+        assert "pw.in" in result.files_generated
+
+        # Execute
+        runner = ExecutionRunner(ExecutionConfig(nprocs=1))
+        exec_result = runner.run(result.output_dir)
+        assert exec_result.success, f"QE failed: {exec_result.error_message}"
+
+        # Parse
+        backend = QEBackend()
+        dft_result = backend.parse_output(result.output_dir)
+        assert dft_result.is_converged
+        assert dft_result.energy is not None
+        assert dft_result.energy < 0  # Negative total energy

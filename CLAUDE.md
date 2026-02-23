@@ -90,6 +90,8 @@ python -m shalom run mp-19717 --set ENCUT=600               # VASP override
 python -m shalom run mp-19717 --backend qe --set ecutwfc=80 # QE override
 python -m shalom run Fe2O3 -b qe --execute                 # QE execute locally
 python -m shalom run Fe2O3 -b qe -x -np 4 --timeout 7200   # QE execute, 4 MPI procs
+python -m shalom setup-qe                                   # QE environment check
+python -m shalom setup-qe --elements Si,Fe --download       # Download missing pseudos
 ```
 
 ### Git

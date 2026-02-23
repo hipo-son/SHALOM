@@ -109,14 +109,20 @@ class ExecutionRunner:
         # Check executable
         if shutil.which(self.config.command) is None:
             errors.append(
-                f"Executable '{self.config.command}' not found on PATH."
+                f"Executable '{self.config.command}' not found on PATH.\n"
+                f"  Install: sudo apt install quantum-espresso  (Ubuntu/Debian)\n"
+                f"           conda install -c conda-forge qe     (conda)\n"
+                f"  Windows: Run from inside WSL2, not native Windows.\n"
+                f"  Check:   python -m shalom setup-qe"
             )
 
         # Check MPI if parallel
         if self.config.nprocs > 1:
             if shutil.which(self.config.mpi_command) is None:
                 errors.append(
-                    f"MPI launcher '{self.config.mpi_command}' not found on PATH."
+                    f"MPI launcher '{self.config.mpi_command}' not found on PATH.\n"
+                    f"  Install: sudo apt install openmpi-bin  (Ubuntu/Debian)\n"
+                    f"  Check:   python -m shalom setup-qe"
                 )
 
         # Check input file
@@ -140,14 +146,45 @@ class ExecutionRunner:
                 content = f.read()
             # Extract pseudo_dir
             match = re.search(r"pseudo_dir\s*=\s*['\"]([^'\"]+)['\"]", content)
-            if match:
-                pseudo_dir = match.group(1)
-                if not os.path.isabs(pseudo_dir):
-                    pseudo_dir = os.path.join(
-                        os.path.dirname(input_path), pseudo_dir
-                    )
-                if not os.path.isdir(pseudo_dir):
-                    errors.append(f"pseudo_dir not found: {pseudo_dir}")
+            if not match:
+                return errors  # No pseudo_dir — not a QE input
+            pseudo_dir = match.group(1)
+            if not os.path.isabs(pseudo_dir):
+                pseudo_dir = os.path.join(
+                    os.path.dirname(input_path), pseudo_dir
+                )
+            if not os.path.isdir(pseudo_dir):
+                errors.append(f"pseudo_dir not found: {pseudo_dir}")
+                return errors  # Can't check files if dir missing
+
+            # Parse ATOMIC_SPECIES card for required UPF files
+            species_match = re.search(
+                r"ATOMIC_SPECIES\s*\n((?:\s+\S+\s+[\d.eE+-]+\s+\S+.*\n)+)",
+                content,
+            )
+            if species_match:
+                for line in species_match.group(1).strip().split("\n"):
+                    parts = line.strip().split()
+                    if len(parts) >= 3:
+                        element = parts[0]
+                        upf_file = parts[2]
+                        upf_path = os.path.join(pseudo_dir, upf_file)
+                        if not os.path.exists(upf_path):
+                            # Case-insensitive fallback
+                            found = False
+                            try:
+                                for entry in os.listdir(pseudo_dir):
+                                    if entry.lower() == upf_file.lower():
+                                        found = True
+                                        break
+                            except OSError:
+                                pass
+                            if not found:
+                                errors.append(
+                                    f"Pseudopotential not found: {upf_path}\n"
+                                    f"  Download: python -m shalom setup-qe "
+                                    f"--elements {element} --download"
+                                )
         except OSError:
             pass  # Input file read error handled by caller
         return errors

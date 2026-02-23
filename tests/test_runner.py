@@ -792,3 +792,81 @@ class TestExecutionRunnerEdgeCases:
 
         assert result.success is False
         assert "Permission denied" in result.error_message
+
+
+# =========================================================================
+# TestUPFValidation
+# =========================================================================
+
+class TestUPFValidation:
+    """Test individual UPF pseudopotential file validation."""
+
+    def test_missing_upf_file_detected(self, tmp_path):
+        """UPF file in ATOMIC_SPECIES but not in pseudo_dir."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n  pseudo_dir = './pseudo'\n/\n"
+            "ATOMIC_SPECIES\n  Fe 55.845 Fe.pbe-spn-kjpaw_psl.1.0.0.UPF\n"
+        )
+        (tmp_path / "pseudo").mkdir()
+        runner = ExecutionRunner()
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            errors = runner.validate_prerequisites(str(tmp_path))
+        assert any("Fe.pbe-spn-kjpaw_psl" in e for e in errors)
+
+    def test_present_upf_passes(self, tmp_path):
+        """UPF file exists — no error."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n  pseudo_dir = './pseudo'\n/\n"
+            "ATOMIC_SPECIES\n  Si 28.086 Si.pbe-n-rrkjus_psl.1.0.0.UPF\n"
+        )
+        pseudo_dir = tmp_path / "pseudo"
+        pseudo_dir.mkdir()
+        (pseudo_dir / "Si.pbe-n-rrkjus_psl.1.0.0.UPF").write_text("pseudo")
+        runner = ExecutionRunner()
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            errors = runner.validate_prerequisites(str(tmp_path))
+        assert errors == []
+
+    def test_multi_element_upf_check(self, tmp_path):
+        """Multi-element: report all missing UPFs."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n  pseudo_dir = './pseudo'\n/\n"
+            "ATOMIC_SPECIES\n"
+            "  Fe 55.845 Fe.pbe-spn-kjpaw_psl.1.0.0.UPF\n"
+            "  O  15.999 O.pbe-n-kjpaw_psl.1.0.0.UPF\n"
+        )
+        (tmp_path / "pseudo").mkdir()
+        runner = ExecutionRunner()
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            errors = runner.validate_prerequisites(str(tmp_path))
+        upf_errors = [e for e in errors if "Pseudopotential not found" in e]
+        assert len(upf_errors) == 2
+
+    def test_case_insensitive_upf(self, tmp_path):
+        """Lowercase .upf file found via case-insensitive fallback."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n  pseudo_dir = './pseudo'\n/\n"
+            "ATOMIC_SPECIES\n  Mo 95.94 Mo_ONCV_PBE-1.2.upf\n"
+        )
+        pseudo_dir = tmp_path / "pseudo"
+        pseudo_dir.mkdir()
+        (pseudo_dir / "Mo_ONCV_PBE-1.2.upf").write_text("pseudo")
+        runner = ExecutionRunner()
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            errors = runner.validate_prerequisites(str(tmp_path))
+        assert errors == []
+
+    def test_improved_error_message_for_missing_executable(self, tmp_path):
+        """Missing pw.x shows install instructions."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text("&CONTROL\n/\n")
+        runner = ExecutionRunner()
+        with patch("shutil.which", return_value=None):
+            errors = runner.validate_prerequisites(str(tmp_path))
+        msg = errors[0]
+        assert "sudo apt install" in msg
+        assert "setup-qe" in msg

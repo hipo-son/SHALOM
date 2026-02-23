@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`setup-qe` CLI subcommand** (`python -m shalom setup-qe`)
+  - QE prerequisite checker: pw.x detection, pseudo_dir validation
+  - Per-element SSSP pseudopotential file checking with case-insensitive fallback
+  - `--download` flag: auto-download missing UPFs from SSSP repository
+  - Platform-aware install instructions (apt, conda, WSL2)
+- **UPF file validation in `runner.py`**: parses ATOMIC_SPECIES from pw.in to verify each pseudopotential file exists before execution
+- **Improved error messages**: missing pw.x/mpirun now shows install instructions and `setup-qe` reference
+- **QE integration test** (`test_integration.py`): real Si SCF test, skipped without pw.x
 - **QE Local Execution** (`--execute` CLI flag, `runner.py`, `qe_error_recovery.py`)
   - `ExecutionRunner`: subprocess-based pw.x execution with threading.Timer timeout, SIGINT cleanup
   - `execute_with_recovery()`: automatic error recovery loop with progressive correction escalation
