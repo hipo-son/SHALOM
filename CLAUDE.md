@@ -64,12 +64,13 @@ shalom/
 4. Use `load_config("new_name")` in consuming code
 
 ### Testing
-- `pytest tests/ -x` — run all tests (954 total, 95.4% coverage)
-- `pytest tests/ --cov=shalom --cov-fail-under=85` — with coverage
+- `pytest tests/ -x` — run all tests (922 passed, 1 skipped; 83% coverage on Windows)
+- `pytest tests/ --cov=shalom --cov-fail-under=85` — with coverage (85% threshold; integration paths require pw.x to reach full coverage)
 - All existing tests must pass unchanged when refactoring
 - Mock LLM calls with `unittest.mock` (no real API calls in tests)
 - Known: 19 VASP OUTCAR parse tests fail with pymatgen>=2025.10 (upstream `IndexError` in `Outcar.__init__`); QE/agent/CLI tests unaffected
 - QE integration test (`test_si_scf_end_to_end`) requires pw.x; auto-skipped on Windows
+- Run via `call conda activate shalom-env` in a batch script (direct conda Python path fails from bash on Windows)
 
 ### Code Quality
 - `ruff check shalom/` — linting

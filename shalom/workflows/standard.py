@@ -123,8 +123,9 @@ class StandardWorkflow:
 
         Returns:
             Dict with keys:
-            - ``"atoms"`` — final relaxed structure (after vc-relax, or
-              original if ``skip_relax=True``).
+            - ``"atoms"`` — seekpath standardized primitive cell used for SCF,
+              bands, and NSCF (``get_band_calc_atoms(relaxed)`` when seekpath
+              is available, otherwise the post-vc-relax or original structure).
             - ``"fermi_energy"`` — Fermi energy in eV (NSCF > SCF priority).
             - ``"bands_png"`` — absolute path to the band structure plot, or
               ``None`` if plotting failed.
@@ -379,7 +380,7 @@ class StandardWorkflow:
             self.atoms, npoints=self.npoints_kpath, is_2d=self.is_2d
         )
         if kpath_cfg.kpath_labels:
-            # Build cumulative index mapping
+            # Build cumulative k-point index → label mapping
             cumulative_idx = 0
             label_by_idx: Dict[int, str] = {}
             if kpath_cfg.kpath_points:
@@ -389,6 +390,22 @@ class StandardWorkflow:
                         label_by_idx[cumulative_idx] = label
                     cumulative_idx += npts
             bs.high_sym_labels = label_by_idx
+
+            # Collapse spurious x-axis gaps at path discontinuities.
+            # parse_xml_bands() computes cumulative |Δk| distances, so at a
+            # break point "X|U" (npts=1), the next k-point U is at
+            # dist[b+1] = dist[b] + |X-U|.  Standard band-structure plots
+            # reset the distance counter at discontinuities so the sub-paths
+            # are plotted side by side with no artificial gap.
+            if len(bs.kpath_distances) > 1:
+                import numpy as np
+                dist = bs.kpath_distances.copy()
+                for k_idx in sorted(label_by_idx):
+                    if "|" in label_by_idx[k_idx] and k_idx + 1 < len(dist):
+                        gap = dist[k_idx + 1] - dist[k_idx]
+                        if gap > 0.0:
+                            dist[k_idx + 1:] -= gap
+                bs.kpath_distances = dist
 
         output_path = os.path.join(self.output_dir, "bands.png")
         plotter = BandStructurePlotter(bs)

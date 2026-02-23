@@ -581,10 +581,12 @@ def generate_band_kpath(
                         seg_coords.append(list(special_pts[lbl]))
                 prev_last_lbl = seg_str[-1]
 
-            _tier1_ok = True  # reuse flag to skip Tier 3
-
         except Exception as exc2:
             logger.debug("ASE bandpath failed (%s) — using hardcoded table (Tier 3)", exc2)
+            # Discard any partial results so Tier 3 receives an empty seg_labels
+            seg_labels.clear()
+            seg_coords.clear()
+            break_indices.clear()
 
     # ------------------------------------------------------------------
     # Tier 3: hardcoded _FALLBACK_KPATHS table

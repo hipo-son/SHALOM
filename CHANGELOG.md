@@ -27,8 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `BandStructureData`: eigenvalues (eV), kpath_distances, high_sym_labels `Dict[int, str]`, optional spin_up/spin_down arrays, source tag ("qe"/"vasp")
   - `DOSData`: energies (eV), dos, integrated_dos, optional dos_up/dos_down, source tag
 - **K-path generation** (`shalom/backends/qe_config.py`)
-  - `generate_band_kpath(atoms, npoints, is_2d)`: seekpath-based high-symmetry path with FCC/BCC/HEX/ORC/CUB fallback; `is_2d=True` forces kz=0 on all k-points; returns `QEKPointsConfig(mode="crystal_b")`
+  - `get_band_calc_atoms(atoms, is_2d)`: extracts seekpath's standardized primitive cell so that `crystal_b` k-coordinates are consistent with `CELL_PARAMETERS`; returns `None` for 2D structures or when seekpath is unavailable
+  - `generate_band_kpath(atoms, npoints, is_2d)`: three-tier fallback (seekpath → ASE `cell.bandpath()` → hardcoded table); handles BZ path discontinuities (e.g. X→U jumps) as composite labels "X|U" with `npts=1` (prevents spurious band segments); `_FALLBACK_KPATHS` extended from 5 to 8 types (+TET, BCT, RHL)
   - `QEKPointsConfig` extended with `kpath_points: List[Tuple[List[float], int]]` and `kpath_labels: Dict[int, str]`
+- **`_format_label()` composite label support** (`shalom/plotting/band_plot.py`): `"G|K"` → `"Γ|K"` at band-path discontinuity tick marks
 - **Convergence workflows** (`shalom/workflows/`)
   - `ConvergenceWorkflow` ABC (`base.py`): per-atom convergence threshold (1 meV/atom default), sequential/parallel run dispatch, `_find_converged_value()`, `plot()` interface
   - `CutoffConvergence` (`convergence.py`): sweeps `ecutwfc` values with fixed k-mesh; `ecutrho` maintained at SSSP ratio; convergence plot (energy vs. ecutwfc)
@@ -36,11 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ConvergenceResult` / `ConvergenceTestResult` dataclasses with `.summary()` and `.converged_results` property
 - **5-step QE workflow** (`shalom/workflows/standard.py`)
   - `StandardWorkflow`: orchestrates vc-relax → scf → bands → nscf → dos.x → band/DOS plots in a single call
+  - Primitive cell consistency: after vc-relax, converts to seekpath primitive cell (via `get_band_calc_atoms()`) so SCF, bands, and NSCF share the same cell and charge density transfer is valid
+  - k-path pre-computed once (`self._kpath_cfg`) and reused by `_run_bands()` and `_plot_bands()`; `_plot_bands()` collapses x-axis gaps at discontinuities (standard band-structure convention)
   - Absolute `outdir` path sharing between scf, bands, and nscf (HPC-safe)
   - dos.x input energies in Ry (`EV_TO_RY = 1/13.6057`); dos.x run serial (nprocs=1)
   - Fermi energy priority: NSCF > SCF (metals may differ by 10–100 meV)
   - `--skip-relax` flag to restart from existing structure
-  - Returns dict with `bands_png`, `dos_png`, `fermi_energy`, and per-step `calc_dirs`
+  - Returns dict with `bands_png`, `dos_png`, `fermi_energy`, `atoms` (primitive cell), and per-step `calc_dirs`
 - **New CLI subcommands** (`shalom/__main__.py`)
   - `python -m shalom plot <dir>` — generate band or DOS plot from completed calculation
   - `python -m shalom workflow <formula>` — run full 5-step pipeline
@@ -50,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `occupations: tetrahedra_opt` (replaces `tetrahedra`) for improved DOS integration accuracy
   - `nosym: true`, `noinv: true` — full BZ sampling required for DOS
 - **`[plotting]` optional dependency extra** (`pyproject.toml`): `matplotlib>=3.5.0`, `seekpath>=2.0.0`
-- **48 new tests** (954 total): `test_qe_parser.py` (26), `test_band_plot.py` (6), `test_dos_plot.py` (6), `test_convergence.py` (13), `test_standard_workflow.py` (9); fixtures: `mock_bands_xml.xml`, `mock_dos.dat`, `mock_dos_spin.dat`
+- **63 new tests** (922 passed, 1 skipped): `test_qe_parser.py` (26), `test_band_plot.py` (13), `test_dos_plot.py` (6), `test_convergence.py` (13), `test_standard_workflow.py` (9), `test_qe_config.py` (11 new: `TestGetBandCalcAtoms`, `TestGenerateBandKpath`); fixtures: `mock_bands_xml.xml`, `mock_dos.dat`, `mock_dos_spin.dat`
 
 - **`setup-qe` CLI subcommand** (`python -m shalom setup-qe`)
   - QE prerequisite checker: pw.x detection, pseudo_dir validation
@@ -121,6 +125,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All existing tests pass unchanged (zero behavioral change)
 
 ### Fixed
+- `standard.py` `_plot_bands()`: x-axis gaps at BZ path discontinuities — cumulative distance is now reset at break points (composite "X|U" labels) so sub-paths are plotted side-by-side with zero gap (standard scientific convention; previously the X→U jump distance inflated the x-axis)
+- `qe_config.py` `generate_band_kpath()` Tier 2: partial results from a failed ASE `cell.bandpath()` call are now discarded before Tier 3 runs (previously partial `seg_labels` could bypass Tier 3 and produce an incomplete k-path)
+- `standard.py` `run()`: corrected `"atoms"` return-dict docstring (now returns seekpath primitive cell, not the raw vc-relax output)
 - `qe.py`: JOB DONE convergence bug — "convergence NOT achieved" now overrides JOB DONE signal
 - `simulation_layer.py`: QE backend now uses default `pw.in` filename instead of `POSCAR_{name}`
 - `design_layer.py`: guard against empty candidates list (IndexError on veto fallback)
