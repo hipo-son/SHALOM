@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<espresso xmlns="http://www.quantum-espresso.org/ns/qes/qes-1.0">
+  <output>
+    <basis_set>
+      <reciprocal_lattice>
+        <b1> 1.15470054 0.00000000 0.00000000 </b1>
+        <b2> 0.57735027 1.00000000 0.00000000 </b2>
+        <b3> 0.00000000 0.00000000 1.15470054 </b3>
+      </reciprocal_lattice>
+    </basis_set>
+    <band_structure>
+      <lsda>false</lsda>
+      <nbnd>3</nbnd>
+      <ks_energies>
+        <k_point weight="0.5">0.0 0.0 0.0</k_point>
+        <eigenvalues size="3">-0.01716 0.00934 0.03350</eigenvalues>
+        <occupations size="3">2.0 2.0 0.0</occupations>
+      </ks_energies>
+      <ks_energies>
+        <k_point weight="0.5">0.5 0.0 0.5</k_point>
+        <eigenvalues size="3">-0.01450 0.01470 0.03510</eigenvalues>
+        <occupations size="3">2.0 2.0 0.0</occupations>
+      </ks_energies>
+    </band_structure>
+  </output>
+</espresso>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from ase import Atoms
 
@@ -52,6 +52,80 @@ class DFTResult:
     quality_warnings: List[str] = field(default_factory=list)
     correction_history: List[Dict[str, Any]] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class BandStructureData:
+    """Backend-agnostic band structure representation.
+
+    Populated by the QE parser (qe_parser.py) or a future VASP parser.
+    Stored in ``DFTResult.raw["band_structure"]`` by convention.
+
+    Attributes:
+        eigenvalues: Shape ``(nkpts, nbands)`` array of band energies in eV.
+        kpoint_coords: Shape ``(nkpts, 3)`` array of k-point coordinates in
+            crystal (fractional) units.
+        kpath_distances: Shape ``(nkpts,)`` cumulative distances along the
+            k-path in reciprocal-space (Cartesian, 1/Angstrom).
+        fermi_energy: Fermi energy in eV. Prefer the value from a dense-mesh
+            NSCF calculation over the SCF value (especially for metals).
+        high_sym_labels: Map from k-point *index* to high-symmetry label,
+            e.g. ``{0: "G", 40: "X", 80: "L"}``. Integer keys are used to
+            avoid IEEE-754 floating-point comparison issues.
+        spin_up: Shape ``(nkpts, nbands)`` spin-up eigenvalues in eV (only
+            populated for spin-polarised calculations).
+        spin_down: Shape ``(nkpts, nbands)`` spin-down eigenvalues in eV.
+        is_spin_polarized: Whether the calculation used ``nspin=2``.
+        nbands: Number of bands.
+        nkpts: Number of k-points along the path.
+        projections: Optional orbital-projection data for future VASP PROCAR
+            support.  Shape and key conventions are backend-specific.
+        source: Backend that produced this data (``"qe"`` or ``"vasp"``).
+    """
+
+    eigenvalues: Any  # np.ndarray (nkpts, nbands), eV
+    kpoint_coords: Any  # np.ndarray (nkpts, 3), crystal coords
+    kpath_distances: Any  # np.ndarray (nkpts,), 1/Angstrom
+    fermi_energy: float = 0.0
+    high_sym_labels: Dict[int, str] = field(default_factory=dict)
+    spin_up: Optional[Any] = None  # np.ndarray (nkpts, nbands), eV
+    spin_down: Optional[Any] = None
+    is_spin_polarized: bool = False
+    nbands: int = 0
+    nkpts: int = 0
+    projections: Optional[Dict[Tuple, Any]] = None
+    source: str = "unknown"
+
+
+@dataclass
+class DOSData:
+    """Backend-agnostic density of states representation.
+
+    Produced by ``dos.x`` (QE) or a future VASP DOSCAR parser.
+    Stored in ``DFTResult.raw["dos"]`` by convention.
+
+    Attributes:
+        energies: Shape ``(npts,)`` energy grid in eV.
+        dos: Shape ``(npts,)`` total DOS in states/eV.
+        integrated_dos: Shape ``(npts,)`` integrated DOS (number of states).
+        fermi_energy: Fermi energy in eV.
+        dos_up: Spin-up partial DOS in states/eV (spin-polarised only).
+        dos_down: Spin-down partial DOS in states/eV.
+        is_spin_polarized: Whether the calculation used ``nspin=2``.
+        dos_orbital: Optional l-decomposed or orbital-projected DOS for future
+            VASP DOSCAR support. Keys are ``(atom_idx, orbital_label)``.
+        source: Backend that produced this data (``"qe"`` or ``"vasp"``).
+    """
+
+    energies: Any  # np.ndarray (npts,), eV
+    dos: Any  # np.ndarray (npts,), states/eV
+    integrated_dos: Any  # np.ndarray (npts,)
+    fermi_energy: float = 0.0
+    dos_up: Optional[Any] = None
+    dos_down: Optional[Any] = None
+    is_spin_polarized: bool = False
+    dos_orbital: Optional[Dict[Tuple, Any]] = None
+    source: str = "unknown"
 
 
 @runtime_checkable

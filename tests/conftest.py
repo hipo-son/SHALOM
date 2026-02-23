@@ -1,3 +1,4 @@
+import os
 import textwrap
 
 import pytest
@@ -145,6 +146,63 @@ def dummy_outcar_scf_error(tmp_path):
     outcar_path = tmp_path / "OUTCAR"
     outcar_path.write_text(content)
     return str(tmp_path)
+
+
+@pytest.fixture
+def mock_band_data():
+    """Synthetic band structure data (Si-like, 20 k-points, 8 bands)."""
+    import numpy as np
+    from shalom.backends.base import BandStructureData
+
+    nkpts, nbands = 20, 8
+    rng = np.random.default_rng(42)
+    return BandStructureData(
+        eigenvalues=rng.standard_normal((nkpts, nbands)) * 2 + 5.0,
+        kpoint_coords=np.zeros((nkpts, 3)),
+        kpath_distances=np.linspace(0, 1, nkpts),
+        fermi_energy=5.12,
+        high_sym_labels={0: "G", 10: "X", 19: "L"},
+        nbands=nbands,
+        nkpts=nkpts,
+        source="qe",
+    )
+
+
+@pytest.fixture
+def mock_dos_data():
+    """Synthetic non-spin DOS data (100 energy points)."""
+    import numpy as np
+    from shalom.backends.base import DOSData
+
+    energies = np.linspace(-10, 10, 100)
+    dos = np.exp(-((energies - 0) ** 2) / 2.0)  # Gaussian
+    idos = np.cumsum(dos) * (energies[1] - energies[0])
+    return DOSData(
+        energies=energies,
+        dos=dos,
+        integrated_dos=idos,
+        fermi_energy=0.0,
+        is_spin_polarized=False,
+        source="qe",
+    )
+
+
+@pytest.fixture
+def mock_bands_xml_path():
+    """Path to the mock bands XML fixture file."""
+    return os.path.join(os.path.dirname(__file__), "fixtures", "mock_bands_xml.xml")
+
+
+@pytest.fixture
+def mock_dos_path():
+    """Path to the mock DOS fixture file."""
+    return os.path.join(os.path.dirname(__file__), "fixtures", "mock_dos.dat")
+
+
+@pytest.fixture
+def mock_dos_spin_path():
+    """Path to the mock spin-polarised DOS fixture file."""
+    return os.path.join(os.path.dirname(__file__), "fixtures", "mock_dos_spin.dat")
 
 
 @pytest.fixture

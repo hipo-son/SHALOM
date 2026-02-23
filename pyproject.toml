@@ -46,6 +46,10 @@ mp = [
     "mp-api>=0.39.0",
     "pymatgen>=2023.10.11,<2025.10.0",  # 2025.10+ has upstream IndexError in Outcar.__init__
 ]
+plotting = [
+    "matplotlib>=3.5.0",
+    "seekpath>=2.0.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
@@ -54,6 +58,7 @@ dev = [
     "black",
     "mypy",
     "rich>=13.0",   # needed to run demo tests in dev environment
+    "matplotlib>=3.5.0",   # for plotting tests
 ]
 docs = [
     "sphinx",
@@ -67,7 +72,7 @@ demo = [
     "rich>=13.0"
 ]
 all = [
-    "shalom[pymatgen,mp,dev,docs,demo]"
+    "shalom[pymatgen,mp,dev,docs,demo,plotting]"
 ]
 
 [project.scripts]

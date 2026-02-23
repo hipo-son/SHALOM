@@ -22,7 +22,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from ase import Atoms
 
@@ -83,11 +83,22 @@ class QEKPointsConfig:
         mode: K_POINTS card mode — automatic, gamma, or crystal_b.
         grid: Explicit grid [Nx, Ny, Nz].
         shift: Grid offset [sx, sy, sz] (0 or 1).
+        kpath_points: High-symmetry k-path for ``crystal_b`` mode.
+            Each entry is ``(crystal_coords, npts_on_segment)`` where
+            ``crystal_coords`` is a 3-element list in fractional primitive-cell
+            coordinates and ``npts_on_segment`` is the number of k-points on
+            the segment (the last point conventionally uses ``npts=1``).
+            Example: ``[([0,0,0], 40), ([0.5,0,0.5], 40), ([0.5,0.5,0.5], 1)]``
+        kpath_labels: Map from *segment index* (0-based) to high-symmetry label,
+            e.g. ``{0: "G", 1: "X", 2: "L"}``.  Used by plotters to annotate
+            band-structure axes.
     """
 
     mode: Literal["automatic", "gamma", "crystal_b"] = "automatic"
     grid: Optional[List[int]] = None
     shift: List[int] = field(default_factory=lambda: [0, 0, 0])
+    kpath_points: Optional[List[Tuple[List[float], int]]] = None
+    kpath_labels: Optional[Dict[int, str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -367,3 +378,124 @@ def get_qe_preset(
         detect_and_apply_qe_hints(atoms, config)
 
     return config
+
+
+# ---------------------------------------------------------------------------
+# Band path generation
+# ---------------------------------------------------------------------------
+
+# Hardcoded high-symmetry paths for common Bravais lattices.
+# Used as fallback when seekpath is not installed.
+# Key: ASE Bravais-lattice name → list of (label, crystal_coords) segments
+_FALLBACK_KPATHS: Dict[str, List[Tuple[str, List[float]]]] = {
+    "FCC":  [("G", [0.0, 0.0, 0.0]), ("X", [0.5, 0.0, 0.5]),
+             ("U", [0.625, 0.25, 0.625]), ("K", [0.375, 0.375, 0.75]),
+             ("G", [0.0, 0.0, 0.0]), ("L", [0.5, 0.5, 0.5]),
+             ("W", [0.5, 0.25, 0.75]), ("X", [0.5, 0.0, 0.5])],
+    "BCC":  [("G", [0.0, 0.0, 0.0]), ("H", [0.5, -0.5, 0.5]),
+             ("N", [0.0, 0.0, 0.5]), ("G", [0.0, 0.0, 0.0]),
+             ("P", [0.25, 0.25, 0.25])],
+    "HEX":  [("G", [0.0, 0.0, 0.0]), ("M", [0.5, 0.0, 0.0]),
+             ("K", [1.0/3, 1.0/3, 0.0]), ("G", [0.0, 0.0, 0.0]),
+             ("A", [0.0, 0.0, 0.5])],
+    "ORC":  [("G", [0.0, 0.0, 0.0]), ("X", [0.5, 0.0, 0.0]),
+             ("S", [0.5, 0.5, 0.0]), ("G", [0.0, 0.0, 0.0]),
+             ("Z", [0.0, 0.0, 0.5])],
+    # Simple cubic and default fallback
+    "CUB":  [("G", [0.0, 0.0, 0.0]), ("X", [0.5, 0.0, 0.0]),
+             ("M", [0.5, 0.5, 0.0]), ("G", [0.0, 0.0, 0.0]),
+             ("R", [0.5, 0.5, 0.5])],
+}
+
+
+def generate_band_kpath(
+    atoms: Atoms,
+    npoints: int = 40,
+    is_2d: bool = False,
+) -> QEKPointsConfig:
+    """Generate a high-symmetry k-path for a band-structure (``crystal_b``) run.
+
+    Uses :mod:`seekpath` if available; falls back to a hardcoded table of
+    common Bravais lattice paths (FCC, BCC, HEX, ORC, CUB).
+
+    The returned ``QEKPointsConfig`` has ``mode='crystal_b'`` with
+    ``kpath_points`` and ``kpath_labels`` populated.
+
+    2-D correction:
+        If ``is_2d=True``, all k-point z-coordinates are forced to 0.0 to
+        restrict the path to the in-plane Brillouin zone.
+
+    Args:
+        atoms: ASE ``Atoms`` object (should be the primitive cell).
+        npoints: Number of k-points per segment (default 40).  The last point
+            in each segment uses ``npts=1`` per the QE ``crystal_b`` convention.
+        is_2d: Whether the structure is a 2D material.  Enforces kz = 0.
+
+    Returns:
+        ``QEKPointsConfig`` with ``mode='crystal_b'`` and path data filled in.
+    """
+    seg_labels: List[str] = []
+    seg_coords: List[List[float]] = []
+
+    try:
+        import seekpath  # type: ignore[import]
+
+        spg_structure = (
+            atoms.cell[:].tolist(),
+            atoms.get_scaled_positions().tolist(),
+            atoms.get_atomic_numbers().tolist(),
+        )
+        path_data = seekpath.get_path(spg_structure)
+        point_coords: Dict[str, List[float]] = path_data["point_coords"]
+        path_segments: List[Tuple[str, str]] = path_data["path"]
+
+        # Flatten path segments into an ordered list of unique waypoints
+        for start_lbl, end_lbl in path_segments:
+            if not seg_labels or seg_labels[-1] != start_lbl:
+                seg_labels.append(start_lbl)
+                seg_coords.append(list(point_coords[start_lbl]))
+            seg_labels.append(end_lbl)
+            seg_coords.append(list(point_coords[end_lbl]))
+
+    except ImportError:
+        logger.debug("seekpath not available — using hardcoded k-path fallback")
+        lattice_name = _detect_bravais(atoms)
+        path_pts = _FALLBACK_KPATHS.get(lattice_name, _FALLBACK_KPATHS["CUB"])
+        for lbl, coords in path_pts:
+            seg_labels.append(lbl)
+            seg_coords.append(list(coords))
+
+    # 2D correction: set kz = 0 for all points
+    if is_2d:
+        seg_coords = [[c[0], c[1], 0.0] for c in seg_coords]
+
+    # Build QE crystal_b format: (coords, npts) per point.
+    # The last point gets npts=1 (no continuation segment).
+    kpath_points: List[Tuple[List[float], int]] = []
+    kpath_labels: Dict[int, str] = {}
+    n = len(seg_coords)
+    for i, (coords, lbl) in enumerate(zip(seg_coords, seg_labels)):
+        npts = 1 if i == n - 1 else npoints
+        kpath_points.append((coords, npts))
+        kpath_labels[i] = lbl
+
+    return QEKPointsConfig(
+        mode="crystal_b",
+        kpath_points=kpath_points,
+        kpath_labels=kpath_labels,
+    )
+
+
+def _detect_bravais(atoms: Atoms) -> str:
+    """Detect the Bravais lattice type for the fallback k-path table.
+
+    Returns one of the keys in ``_FALLBACK_KPATHS``.
+    """
+    try:
+        bravais = atoms.cell.get_bravais_lattice()
+        name = bravais.name  # e.g. "FCC", "BCC", "HEX", "ORC", "CUB", ...
+        if name in _FALLBACK_KPATHS:
+            return name
+    except Exception:
+        pass
+    return "CUB"  # safe default: G→X→M→G→R path

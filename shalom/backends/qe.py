@@ -166,11 +166,19 @@ class QEBackend:
                 f.write("K_POINTS automatic\n")
                 f.write(f"  {grid[0]} {grid[1]} {grid[2]}  {shift[0]} {shift[1]} {shift[2]}\n")
             elif kp.mode == "crystal_b":
-                # Band structure path — placeholder
-                f.write("K_POINTS crystal_b\n")
-                f.write("! TODO: Add band path k-points manually\n")
-                f.write("! See: https://www.materialscloud.org/work/tools/seekpath\n")
-                f.write("0\n")
+                if kp.kpath_points:
+                    f.write("K_POINTS crystal_b\n")
+                    f.write(f"  {len(kp.kpath_points)}\n")
+                    for coords, npts in kp.kpath_points:
+                        f.write(
+                            f"  {coords[0]:.8f} {coords[1]:.8f} {coords[2]:.8f}  {npts}\n"
+                        )
+                else:
+                    # Fallback: placeholder warning when kpath_points not set
+                    f.write("K_POINTS crystal_b\n")
+                    f.write("! WARNING: kpath_points not set.\n")
+                    f.write("! Use generate_band_kpath() (seekpath-based) from shalom.backends.qe_config.\n")
+                    f.write("  0\n")
             f.write("\n")
 
             # CELL_PARAMETERS card (angstrom)
@@ -346,5 +354,60 @@ class QEBackend:
             magnetization=magnetization,
             ionic_energies=ionic_energies if ionic_energies else None,
             ionic_forces_max=ionic_forces_max if ionic_forces_max else None,
+            raw=raw,
+        )
+
+    def parse_output_bands(self, directory: str) -> DFTResult:
+        """Parse QE pw.x output for a ``bands`` or ``nscf`` calculation.
+
+        Unlike :meth:`parse_output` (designed for SCF/relax), this method
+        treats the absence of a total-energy line as normal (``bands``
+        calculations do not print the total energy) and determines convergence
+        solely from the ``JOB DONE.`` marker.
+
+        ``BandStructureData`` is **not** populated here — callers should use
+        :func:`shalom.backends.qe_parser.parse_xml_bands` separately after
+        locating the ``data-file-schema.xml`` with
+        :func:`shalom.backends.qe_parser.find_xml_path`.
+
+        Args:
+            directory: Directory containing the QE output files.
+
+        Returns:
+            ``DFTResult`` with ``is_converged=True`` iff ``JOB DONE.`` was
+            found.  ``energy`` and ``forces_max`` are ``None`` for pure
+            ``bands`` runs.
+        """
+        out_path = os.path.join(directory, "pw.out")
+        if not os.path.isfile(out_path):
+            # Accept any single .out file as fallback
+            out_files = [f for f in os.listdir(directory) if f.endswith(".out")]
+            if out_files:
+                out_path = os.path.join(directory, out_files[0])
+            else:
+                return DFTResult(is_converged=False, error_log="pw.out not found")
+
+        try:
+            content = open(out_path, encoding="utf-8", errors="replace").read()
+        except OSError as exc:
+            return DFTResult(is_converged=False, error_log=str(exc))
+
+        is_converged = "JOB DONE." in content
+
+        # Fermi energy (may be printed for metals even in bands calculations)
+        fermi_match = re.search(
+            r"the Fermi energy is\s+([-\d.]+)\s+ev", content, re.IGNORECASE
+        )
+        fermi_energy: Optional[float] = None
+        if fermi_match:
+            fermi_energy = float(fermi_match.group(1))
+
+        raw: Dict[str, Any] = {
+            "source": "qe_bands",
+            "fermi_energy_ev": fermi_energy,
+            "is_converged": is_converged,
+        }
+        return DFTResult(
+            is_converged=is_converged,
             raw=raw,
         )

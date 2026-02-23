@@ -16,7 +16,7 @@ Example::
 
 from typing import Union
 
-from shalom.backends.base import DFTBackend, DFTResult
+from shalom.backends.base import DFTBackend, DFTResult, BandStructureData, DOSData
 from shalom.backends.vasp import VASPBackend
 from shalom.backends.qe import QEBackend
 from shalom.backends.vasp_config import (
@@ -35,6 +35,16 @@ from shalom.backends.qe_config import (
     QEInputConfig,
     QEKPointsConfig,
     get_qe_preset,
+    generate_band_kpath,
+)
+from shalom.backends.qe_parser import (
+    parse_xml_bands,
+    parse_dos_file,
+    find_xml_path,
+    extract_fermi_energy,
+    compute_nbnd,
+    HA_TO_EV,
+    QE_XML_NS,
 )
 from shalom.backends.runner import (
     ExecutionConfig,
@@ -44,9 +54,13 @@ from shalom.backends.runner import (
 )
 
 __all__ = [
-    "DFTBackend", "DFTResult", "VASPBackend", "QEBackend", "get_backend",
+    "DFTBackend", "DFTResult", "BandStructureData", "DOSData",
+    "VASPBackend", "QEBackend", "get_backend",
     "CalculationType", "AccuracyLevel", "VASPInputConfig", "KPointsConfig", "get_preset",
     "QECalculationType", "QEInputConfig", "QEKPointsConfig", "get_qe_preset",
+    "generate_band_kpath",
+    "parse_xml_bands", "parse_dos_file", "find_xml_path",
+    "extract_fermi_energy", "compute_nbnd", "HA_TO_EV", "QE_XML_NS",
     "ErrorRecoveryEngine", "VASPError", "Correction",
     "QEErrorRecoveryEngine", "QEError", "QECorrection", "compute_safe_dt",
     "ExecutionConfig", "ExecutionResult", "ExecutionRunner", "execute_with_recovery",

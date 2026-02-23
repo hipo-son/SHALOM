@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from typing import Dict, Any, Optional
 
@@ -182,6 +183,216 @@ def build_parser() -> argparse.ArgumentParser:
         "--mpi-command",
         default="mpirun",
         help="MPI launcher command (default: mpirun).",
+    )
+
+    # 'plot' subcommand
+    plot_parser = subparsers.add_parser(
+        "plot",
+        help="Plot band structure or DOS from an existing QE calculation directory.",
+        description=(
+            "Generate band structure or DOS plots from completed QE pw.x / dos.x outputs."
+        ),
+    )
+    plot_parser.add_argument(
+        "calc_dir",
+        help="QE calculation directory (bands or nscf run).",
+    )
+    plot_parser.add_argument(
+        "--bands",
+        action="store_true",
+        help="Plot band structure (requires data-file-schema.xml).",
+    )
+    plot_parser.add_argument(
+        "--dos",
+        action="store_true",
+        help="Plot DOS (requires pwscf.dos).",
+    )
+    plot_parser.add_argument(
+        "--fermi-from",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Directory to read Fermi energy from (e.g. nscf run dir). "
+            "Overrides Fermi energy found in calc_dir."
+        ),
+    )
+    plot_parser.add_argument(
+        "--emin",
+        type=float,
+        default=-6.0,
+        help="Energy window minimum in eV relative to Fermi (default: -6).",
+    )
+    plot_parser.add_argument(
+        "--emax",
+        type=float,
+        default=6.0,
+        help="Energy window maximum in eV relative to Fermi (default: 6).",
+    )
+    plot_parser.add_argument(
+        "--title",
+        default=None,
+        help="Plot title.",
+    )
+    plot_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output file path for the plot (default: bands.png or dos.png in calc_dir).",
+    )
+
+    # 'workflow' subcommand
+    workflow_parser = subparsers.add_parser(
+        "workflow",
+        help="Run the 5-step sequential QE workflow: vc-relax → scf → bands → nscf → dos.",
+        description=(
+            "Full sequential QE workflow for a given material. "
+            "Produces bands.png and dos.png in the output directory."
+        ),
+    )
+    workflow_parser.add_argument(
+        "material",
+        nargs="?",
+        help="Material spec: MP ID (mp-19717), formula (Si), or omit with --structure.",
+    )
+    workflow_parser.add_argument(
+        "--structure",
+        default=None,
+        help="Path to local structure file (POSCAR, CIF, etc.).",
+    )
+    workflow_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        required=True,
+        help="Output directory for all workflow steps.",
+    )
+    workflow_parser.add_argument(
+        "--skip-relax",
+        action="store_true",
+        help="Skip the vc-relax step.",
+    )
+    workflow_parser.add_argument(
+        "--accuracy", "-a",
+        default="standard",
+        choices=["standard", "precise"],
+        help="QE preset accuracy level (default: standard).",
+    )
+    workflow_parser.add_argument(
+        "--pseudo-dir",
+        default=None,
+        help="QE pseudopotential directory.",
+    )
+    workflow_parser.add_argument(
+        "--nprocs", "-np",
+        type=int,
+        default=1,
+        help="MPI process count (default: 1).",
+    )
+    workflow_parser.add_argument(
+        "--mpi-command",
+        default="mpirun",
+        help="MPI launcher (default: mpirun).",
+    )
+    workflow_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=7200,
+        help="Per-step timeout in seconds (default: 7200).",
+    )
+    workflow_parser.add_argument(
+        "--dos-emin",
+        type=float,
+        default=-20.0,
+        help="DOS energy window min in eV (default: -20).",
+    )
+    workflow_parser.add_argument(
+        "--dos-emax",
+        type=float,
+        default=10.0,
+        help="DOS energy window max in eV (default: 10).",
+    )
+    workflow_parser.add_argument(
+        "--is-2d",
+        action="store_true",
+        help="Treat structure as 2D (kz=0 k-path, 2D isolation flags).",
+    )
+
+    # 'converge' subcommand
+    converge_parser = subparsers.add_parser(
+        "converge",
+        help="Run cutoff or k-point convergence tests.",
+        description=(
+            "Sweep ecutwfc or k-point resolution to find the converged DFT parameter. "
+            "Run cutoff convergence FIRST, then k-point convergence."
+        ),
+    )
+    converge_parser.add_argument(
+        "material",
+        nargs="?",
+        help="Material spec: MP ID, formula, or omit with --structure.",
+    )
+    converge_parser.add_argument(
+        "--structure",
+        default=None,
+        help="Path to local structure file.",
+    )
+    converge_parser.add_argument(
+        "--test",
+        choices=["cutoff", "kpoints"],
+        required=True,
+        help="Type of convergence test.",
+    )
+    converge_parser.add_argument(
+        "--values",
+        default=None,
+        help=(
+            "Comma-separated list of values to test. "
+            "Cutoff: ecutwfc in Ry (e.g. 30,40,50,60). "
+            "Kpoints: resolutions in Bohr^-1 (e.g. 20,30,40,50)."
+        ),
+    )
+    converge_parser.add_argument(
+        "--ecutwfc",
+        type=float,
+        default=None,
+        help="Fixed ecutwfc for k-point test (required for --test kpoints).",
+    )
+    converge_parser.add_argument(
+        "--kgrid",
+        default=None,
+        help=(
+            "Fixed k-grid for cutoff test as NxNyNz (e.g. 4x4x4). "
+            "If omitted, estimated from lattice."
+        ),
+    )
+    converge_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        required=True,
+        help="Output directory for convergence runs.",
+    )
+    converge_parser.add_argument(
+        "--accuracy", "-a",
+        default="standard",
+        choices=["standard", "precise"],
+    )
+    converge_parser.add_argument(
+        "--pseudo-dir",
+        default=None,
+    )
+    converge_parser.add_argument(
+        "--nprocs", "-np",
+        type=int,
+        default=1,
+    )
+    converge_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=3600,
+    )
+    converge_parser.add_argument(
+        "--threshold",
+        type=float,
+        default=1e-3,
+        help="Convergence threshold in eV/atom (default: 1e-3).",
     )
 
     # 'setup-qe' subcommand
@@ -615,6 +826,218 @@ def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_plot(args: argparse.Namespace) -> int:
+    """Execute the 'plot' subcommand."""
+    from shalom.backends.qe_parser import (
+        find_xml_path, parse_xml_bands, parse_dos_file, extract_fermi_energy,
+    )
+
+    if not args.bands and not args.dos:
+        print("Error: specify at least one of --bands or --dos.")
+        return 1
+
+    calc_dir = os.path.abspath(args.calc_dir)
+    if not os.path.isdir(calc_dir):
+        print(f"Error: directory not found: {calc_dir}")
+        return 1
+
+    # Determine Fermi energy
+    fermi: Optional[float] = None
+    if args.fermi_from:
+        fermi = extract_fermi_energy(os.path.join(args.fermi_from, "pw.out"))
+    if fermi is None:
+        fermi = extract_fermi_energy(os.path.join(calc_dir, "pw.out"))
+    if fermi is None:
+        fermi = 0.0
+        print("Warning: Fermi energy not found; using 0.0 eV.")
+
+    energy_window = (args.emin, args.emax)
+    rc = 0
+
+    if args.bands:
+        xml_path = find_xml_path(calc_dir)
+        if xml_path is None:
+            print(f"Error: data-file-schema.xml not found in {calc_dir}")
+            rc = 1
+        else:
+            try:
+                from shalom.plotting.band_plot import BandStructurePlotter
+                bs = parse_xml_bands(xml_path, fermi_energy=fermi)
+                out = args.output or os.path.join(calc_dir, "bands.png")
+                plotter = BandStructurePlotter(bs)
+                plotter.plot(output_path=out, title=args.title, energy_window=energy_window)
+                print(f"Band structure plot saved: {out}")
+            except ImportError:
+                print("Error: matplotlib not installed. Run: pip install shalom[plotting]")
+                rc = 1
+
+    if args.dos:
+        dos_path = os.path.join(calc_dir, "pwscf.dos")
+        if not os.path.isfile(dos_path):
+            print(f"Error: pwscf.dos not found in {calc_dir}")
+            rc = 1
+        else:
+            try:
+                from shalom.plotting.dos_plot import DOSPlotter
+                dos_data = parse_dos_file(dos_path)
+                dos_data.fermi_energy = fermi
+                out = args.output or os.path.join(calc_dir, "dos.png")
+                plotter = DOSPlotter(dos_data)
+                plotter.plot(output_path=out, title=args.title, energy_window=energy_window)
+                print(f"DOS plot saved: {out}")
+            except ImportError:
+                print("Error: matplotlib not installed. Run: pip install shalom[plotting]")
+                rc = 1
+
+    return rc
+
+
+def cmd_workflow(args: argparse.Namespace) -> int:
+    """Execute the 'workflow' subcommand."""
+    from shalom.workflows.standard import StandardWorkflow
+
+    atoms = _load_atoms(args)
+    if atoms is None:
+        return 1
+
+    wf = StandardWorkflow(
+        atoms=atoms,
+        output_dir=args.output,
+        pseudo_dir=args.pseudo_dir,
+        nprocs=args.nprocs,
+        mpi_command=args.mpi_command,
+        timeout=args.timeout,
+        accuracy=args.accuracy,
+        skip_relax=args.skip_relax,
+        is_2d=args.is_2d,
+        dos_emin=args.dos_emin,
+        dos_emax=args.dos_emax,
+    )
+
+    try:
+        result = wf.run()
+        print(f"Workflow complete: {args.output}")
+        if result.get("bands_png"):
+            print(f"  bands.png: {result['bands_png']}")
+        if result.get("dos_png"):
+            print(f"  dos.png:   {result['dos_png']}")
+        if result.get("fermi_energy") is not None:
+            print(f"  Fermi energy: {result['fermi_energy']:.4f} eV")
+        return 0
+    except Exception as exc:
+        print(f"Error: workflow failed: {exc}")
+        return 1
+
+
+def cmd_converge(args: argparse.Namespace) -> int:
+    """Execute the 'converge' subcommand."""
+    from shalom.workflows.convergence import CutoffConvergence, KpointConvergence
+
+    atoms = _load_atoms(args)
+    if atoms is None:
+        return 1
+
+    # Parse values
+    if args.values:
+        try:
+            values = [float(v.strip()) for v in args.values.split(",")]
+        except ValueError:
+            print(f"Error: invalid --values '{args.values}'. Use comma-separated numbers.")
+            return 1
+    else:
+        if args.test == "cutoff":
+            values = [30.0, 40.0, 50.0, 60.0, 80.0]
+            print(f"Using default ecutwfc values: {values} Ry")
+        else:
+            values = [20.0, 30.0, 40.0, 50.0]
+            print(f"Using default k-point resolutions: {values} Bohr^-1")
+
+    # Parse kgrid for cutoff test
+    kgrid = None
+    if args.kgrid:
+        try:
+            kgrid = [int(n) for n in args.kgrid.lower().replace("x", ",").split(",")]
+            if len(kgrid) != 3:
+                raise ValueError
+        except ValueError:
+            print(f"Error: invalid --kgrid '{args.kgrid}'. Use format NxNyNz (e.g. 4x4x4).")
+            return 1
+
+    try:
+        if args.test == "cutoff":
+            conv = CutoffConvergence(
+                atoms=atoms,
+                output_dir=args.output,
+                values=values,
+                kgrid=kgrid,
+                pseudo_dir=args.pseudo_dir,
+                nprocs=args.nprocs,
+                timeout=args.timeout,
+                accuracy=args.accuracy,
+                threshold_per_atom=args.threshold,
+            )
+        else:  # kpoints
+            conv = KpointConvergence(
+                atoms=atoms,
+                output_dir=args.output,
+                resolutions=values,
+                ecutwfc=args.ecutwfc,
+                pseudo_dir=args.pseudo_dir,
+                nprocs=args.nprocs,
+                timeout=args.timeout,
+                accuracy=args.accuracy,
+                threshold_per_atom=args.threshold,
+            )
+
+        result = conv.run()
+        print(result.summary())
+
+        plot_path = conv.plot(result)
+        if plot_path:
+            print(f"Convergence plot: {plot_path}")
+
+        return 0 if result.converged_value is not None else 1
+
+    except Exception as exc:
+        print(f"Error: convergence test failed: {exc}")
+        return 1
+
+
+def _load_atoms(args: argparse.Namespace):
+    """Load ASE Atoms from args.material / args.structure. Returns None on error."""
+    structure_file = getattr(args, "structure", None)
+    material = getattr(args, "material", None)
+
+    if structure_file:
+        try:
+            from ase.io import read as ase_read
+            return ase_read(structure_file)
+        except Exception as exc:
+            print(f"Error: cannot read structure file '{structure_file}': {exc}")
+            return None
+
+    if material:
+        try:
+            from shalom.mp_client import get_atoms_from_mp
+            return get_atoms_from_mp(material)
+        except ImportError:
+            print("Error: mp-api not installed. Use --structure or install shalom[mp].")
+            return None
+        except Exception as exc:
+            # Try ASE formula builder as fallback
+            try:
+                from ase.build import bulk
+                atoms = bulk(material)
+                print(f"Note: built bulk {material} from ASE (formula fallback).")
+                return atoms
+            except Exception:
+                print(f"Error: cannot resolve material '{material}': {exc}")
+                return None
+
+    print("Error: provide a material spec or --structure file.")
+    return None
+
+
 def main() -> None:
     """Main CLI entry point."""
     parser = build_parser()
@@ -634,6 +1057,12 @@ def main() -> None:
         sys.exit(cmd_run(args))
     elif args.command == "setup-qe":
         sys.exit(cmd_setup_qe(args))
+    elif args.command == "plot":
+        sys.exit(cmd_plot(args))
+    elif args.command == "workflow":
+        sys.exit(cmd_workflow(args))
+    elif args.command == "converge":
+        sys.exit(cmd_converge(args))
     else:
         parser.print_help()
         sys.exit(0)

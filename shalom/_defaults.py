@@ -530,12 +530,12 @@ CONFIGS: dict = {
         },
         "nscf:standard": {
             "control": {"calculation": "nscf", "prefix": "shalom", "outdir": "./tmp"},
-            "system": {"occupations": "tetrahedra"},
+            "system": {"occupations": "tetrahedra_opt", "nosym": True, "noinv": True},
             "electrons": {"conv_thr": 7.35e-7},
         },
         "nscf:precise": {
             "control": {"calculation": "nscf", "prefix": "shalom", "outdir": "./tmp"},
-            "system": {"occupations": "tetrahedra"},
+            "system": {"occupations": "tetrahedra_opt", "nosym": True, "noinv": True},
             "electrons": {"conv_thr": 7.35e-9},
         },
     },

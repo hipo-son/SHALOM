@@ -149,7 +149,9 @@ nscf:standard:
     prefix: shalom
     outdir: ./tmp
   system:
-    occupations: tetrahedra
+    occupations: tetrahedra_opt  # More accurate DOS integration (Blöchl, PRB 49, 16223)
+    nosym: true                  # Use full BZ (required for correct DOS integration)
+    noinv: true                  # Disable time-reversal for uniform k-mesh DOS
   electrons:
     conv_thr: 7.35e-7
 
@@ -159,6 +161,8 @@ nscf:precise:
     prefix: shalom
     outdir: ./tmp
   system:
-    occupations: tetrahedra
+    occupations: tetrahedra_opt
+    nosym: true
+    noinv: true
   electrons:
     conv_thr: 7.35e-9
