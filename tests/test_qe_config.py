@@ -386,3 +386,138 @@ class TestSSSPMetadataSync:
             f"only in YAML={yaml_elements - defaults_elements}, "
             f"only in defaults={defaults_elements - yaml_elements}"
         )
+
+
+# ---------------------------------------------------------------------------
+# get_band_calc_atoms
+# ---------------------------------------------------------------------------
+
+
+class TestGetBandCalcAtoms:
+    from shalom.backends.qe_config import get_band_calc_atoms
+
+    def test_returns_none_for_2d(self):
+        from shalom.backends.qe_config import get_band_calc_atoms
+
+        atoms = bulk("Si", "diamond", a=5.43)
+        result = get_band_calc_atoms(atoms, is_2d=True)
+        assert result is None
+
+    def test_returns_none_without_seekpath(self, monkeypatch):
+        """ImportError for seekpath → None (no crash)."""
+        import sys
+        from shalom.backends.qe_config import get_band_calc_atoms
+
+        monkeypatch.setitem(sys.modules, "seekpath", None)
+        atoms = bulk("Si", "diamond", a=5.43)
+        result = get_band_calc_atoms(atoms, is_2d=False)
+        assert result is None
+
+    def test_returns_ase_atoms_with_seekpath(self, monkeypatch):
+        """Mocked seekpath → Atoms with seekpath's primitive cell."""
+        import sys
+        import types
+        from shalom.backends.qe_config import get_band_calc_atoms
+
+        fake_seekpath = types.ModuleType("seekpath")
+        fake_path_data = {
+            "primitive_types": [14, 14],
+            "primitive_positions": [[0.0, 0.0, 0.0], [0.25, 0.25, 0.25]],
+            "primitive_lattice": [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]],
+        }
+        fake_seekpath.get_path = lambda *a, **kw: fake_path_data
+        monkeypatch.setitem(sys.modules, "seekpath", fake_seekpath)
+
+        atoms = bulk("Si", "diamond", a=5.43)
+        result = get_band_calc_atoms(atoms, is_2d=False)
+        assert result is not None
+        assert len(result) == 2
+        assert list(result.get_atomic_numbers()) == [14, 14]
+
+    def test_returns_none_on_seekpath_exception(self, monkeypatch):
+        """seekpath.get_path raising → None (no crash)."""
+        import sys
+        import types
+        from shalom.backends.qe_config import get_band_calc_atoms
+
+        fake_seekpath = types.ModuleType("seekpath")
+        fake_seekpath.get_path = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("oops"))
+        monkeypatch.setitem(sys.modules, "seekpath", fake_seekpath)
+
+        atoms = bulk("Si", "diamond", a=5.43)
+        result = get_band_calc_atoms(atoms, is_2d=False)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# generate_band_kpath
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateBandKpath:
+    def _si(self):
+        return bulk("Si", "diamond", a=5.43)
+
+    def test_returns_kpath_config(self):
+        from shalom.backends.qe_config import generate_band_kpath, QEKPointsConfig
+
+        cfg = generate_band_kpath(self._si())
+        assert isinstance(cfg, QEKPointsConfig)
+        assert cfg.mode == "crystal_b"
+
+    def test_kpath_labels_contains_gamma(self):
+        from shalom.backends.qe_config import generate_band_kpath
+
+        cfg = generate_band_kpath(self._si())
+        all_labels = list(cfg.kpath_labels.values())
+        # Gamma should appear at least once in any reasonable k-path
+        assert any("G" in lbl or "Gamma" in lbl or "GAMMA" in lbl for lbl in all_labels)
+
+    def test_kpath_points_populated(self):
+        from shalom.backends.qe_config import generate_band_kpath
+
+        cfg = generate_band_kpath(self._si())
+        assert len(cfg.kpath_points) > 0
+        for coords, npts in cfg.kpath_points:
+            assert len(coords) == 3
+            assert isinstance(npts, int) and npts >= 1
+
+    def test_2d_forces_kz_zero(self):
+        from shalom.backends.qe_config import generate_band_kpath
+
+        atoms = bulk("Si", "diamond", a=5.43)
+        cfg = generate_band_kpath(atoms, is_2d=True)
+        for coords, _ in cfg.kpath_points:
+            assert coords[2] == pytest.approx(0.0)
+
+    def test_last_point_npts_one(self):
+        from shalom.backends.qe_config import generate_band_kpath
+
+        cfg = generate_band_kpath(self._si())
+        _, last_npts = cfg.kpath_points[-1]
+        assert last_npts == 1
+
+    def test_fallback_on_seekpath_importerror(self, monkeypatch):
+        """When seekpath and ASE bandpath both fail, hardcoded table still works."""
+        import sys
+        from shalom.backends.qe_config import generate_band_kpath, QEKPointsConfig
+
+        monkeypatch.setitem(sys.modules, "seekpath", None)
+        # Also cripple ASE bandpath by patching cell.bandpath to raise
+        from unittest.mock import patch
+
+        with patch("ase.cell.Cell.bandpath", side_effect=Exception("no bandpath")):
+            cfg = generate_band_kpath(self._si())
+        assert isinstance(cfg, QEKPointsConfig)
+        assert len(cfg.kpath_points) > 0
+
+    def test_npoints_applied_to_intermediate(self):
+        """Non-terminal, non-break-end points must have npts == npoints."""
+        from shalom.backends.qe_config import generate_band_kpath
+
+        npoints = 55
+        cfg = generate_band_kpath(self._si(), npoints=npoints)
+        # The last point always has npts=1; intermediate non-break points should be npoints
+        intermediate_npts = [npts for _, npts in cfg.kpath_points[:-1] if npts != 1]
+        if intermediate_npts:
+            assert all(n == npoints for n in intermediate_npts)

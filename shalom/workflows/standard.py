@@ -110,6 +110,9 @@ class StandardWorkflow:
         self.dos_emin = dos_emin
         self.dos_emax = dos_emax
         self.dos_deltaE = dos_deltaE
+        # Cached after run(): seekpath primitive cell and pre-computed kpath
+        self._calc_atoms: Optional["Atoms"] = None
+        self._kpath_cfg: Optional[Any] = None
 
     # ------------------------------------------------------------------
     # Entry point
@@ -148,23 +151,34 @@ class StandardWorkflow:
         else:
             logger.info("[1/5] vc-relax SKIPPED")
 
+        # Convert to seekpath standardized primitive cell so that the k-path
+        # coordinates returned by seekpath (crystal_b frame) match the cell
+        # written to QE CELL_PARAMETERS. SCF, bands and NSCF must all share
+        # the same cell for the charge-density transfer to be valid.
+        from shalom.backends.qe_config import get_band_calc_atoms, generate_band_kpath
+        calc_atoms = get_band_calc_atoms(current_atoms, is_2d=self.is_2d) or current_atoms
+        self._calc_atoms = calc_atoms
+        self._kpath_cfg = generate_band_kpath(
+            calc_atoms, npoints=self.npoints_kpath, is_2d=self.is_2d
+        )
+
         # ------------------------------------------------------------------
         # Step 2: scf
         # ------------------------------------------------------------------
         logger.info("[2/5] scf")
-        self._run_scf(scf_dir, current_atoms)
+        self._run_scf(scf_dir, calc_atoms)
 
         # ------------------------------------------------------------------
         # Step 3: bands
         # ------------------------------------------------------------------
         logger.info("[3/5] bands")
-        self._run_bands(bands_dir, current_atoms, scf_tmp_dir)
+        self._run_bands(bands_dir, calc_atoms, scf_tmp_dir)
 
         # ------------------------------------------------------------------
         # Step 4: nscf
         # ------------------------------------------------------------------
         logger.info("[4/5] nscf")
-        self._run_nscf(nscf_dir, current_atoms, scf_tmp_dir)
+        self._run_nscf(nscf_dir, calc_atoms, scf_tmp_dir)
 
         # ------------------------------------------------------------------
         # Step 5: dos.x
@@ -184,7 +198,7 @@ class StandardWorkflow:
         dos_png   = self._plot_dos(nscf_dir, fermi)
 
         return {
-            "atoms": current_atoms,
+            "atoms": calc_atoms,
             "fermi_energy": fermi,
             "bands_png": bands_png,
             "dos_png": dos_png,
@@ -262,9 +276,10 @@ class StandardWorkflow:
         # Share scf charge density (absolute path required!)
         config.control["outdir"] = scf_tmp_dir
 
-        # Auto-generate band k-path
-        kpath_config = generate_band_kpath(atoms, npoints=self.npoints_kpath, is_2d=self.is_2d)
-        config.kpoints = kpath_config
+        # Use pre-computed kpath (from run()) or generate on standalone call
+        config.kpoints = self._kpath_cfg or generate_band_kpath(
+            atoms, npoints=self.npoints_kpath, is_2d=self.is_2d
+        )
 
         # Auto-set nbnd
         nbnd = compute_nbnd(atoms, multiplier=1.3)
@@ -358,9 +373,11 @@ class StandardWorkflow:
 
         bs = parse_xml_bands(xml_path, fermi_energy=fermi or 0.0)
 
-        # Attach high-symmetry labels from the generated k-path
-        kpath_cfg = generate_band_kpath(self.atoms, npoints=self.npoints_kpath,
-                                         is_2d=self.is_2d)
+        # Use cached kpath (consistent with calc_atoms used in _run_bands).
+        # Fall back to a fresh generation from self.atoms for standalone calls.
+        kpath_cfg = self._kpath_cfg or generate_band_kpath(
+            self.atoms, npoints=self.npoints_kpath, is_2d=self.is_2d
+        )
         if kpath_cfg.kpath_labels:
             # Build cumulative index mapping
             cumulative_idx = 0

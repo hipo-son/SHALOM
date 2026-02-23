@@ -405,7 +405,64 @@ _FALLBACK_KPATHS: Dict[str, List[Tuple[str, List[float]]]] = {
     "CUB":  [("G", [0.0, 0.0, 0.0]), ("X", [0.5, 0.0, 0.0]),
              ("M", [0.5, 0.5, 0.0]), ("G", [0.0, 0.0, 0.0]),
              ("R", [0.5, 0.5, 0.5])],
+    # Simple tetragonal (a=b≠c)
+    "TET":  [("G", [0.0, 0.0, 0.0]), ("X", [0.5, 0.0, 0.0]),
+             ("M", [0.5, 0.5, 0.0]), ("G", [0.0, 0.0, 0.0]),
+             ("Z", [0.0, 0.0, 0.5]), ("R", [0.5, 0.0, 0.5]),
+             ("A", [0.5, 0.5, 0.5])],
+    # Body-centred tetragonal — BCT1 convention (c/a < 1)
+    "BCT":  [("G", [0.0, 0.0, 0.0]), ("M", [-0.5, 0.5, 0.5]),
+             ("X", [0.0, 0.0, 0.5]), ("G", [0.0, 0.0, 0.0]),
+             ("N", [0.0, 0.5, 0.0])],
+    # Rhombohedral (trigonal)
+    "RHL":  [("G", [0.0, 0.0, 0.0]), ("L", [0.5, 0.0, 0.0]),
+             ("Z", [0.5, 0.5, 0.5]), ("G", [0.0, 0.0, 0.0]),
+             ("F", [0.5, 0.5, 0.0])],
 }
+
+
+def get_band_calc_atoms(atoms: Atoms, is_2d: bool = False) -> Optional[Atoms]:
+    """Return seekpath's standardized primitive cell for band-structure DFT runs.
+
+    Seekpath returns k-coordinates in the reciprocal frame of its own
+    standardized primitive cell.  SCF, bands, and NSCF all share the same
+    charge density in QE and therefore **must** use this same primitive cell so
+    that ``crystal_b`` k-coordinates are interpreted correctly.
+
+    2D materials are excluded because seekpath cannot model vacuum layers.
+
+    Args:
+        atoms: Input structure (any cell; seekpath standardizes internally).
+        is_2d: If ``True``, returns ``None`` immediately — 2D materials keep
+            their vacuum cell and should not be seekpath-standardized.
+
+    Returns:
+        ASE ``Atoms`` of the seekpath primitive cell, or ``None`` if
+        ``is_2d=True``, seekpath is unavailable, or standardization fails.
+    """
+    if is_2d:
+        return None
+    try:
+        import seekpath  # type: ignore[import]
+
+        spg_structure = (
+            atoms.cell[:].tolist(),
+            atoms.get_scaled_positions().tolist(),
+            atoms.get_atomic_numbers().tolist(),
+        )
+        path_data = seekpath.get_path(spg_structure)
+        return Atoms(
+            numbers=list(path_data["primitive_types"]),
+            scaled_positions=list(path_data["primitive_positions"]),
+            cell=path_data["primitive_lattice"],
+            pbc=atoms.pbc,
+        )
+    except ImportError:
+        logger.debug("seekpath not available — get_band_calc_atoms returns None")
+        return None
+    except Exception as exc:
+        logger.warning("get_band_calc_atoms: seekpath failed (%s); returning None", exc)
+        return None
 
 
 def generate_band_kpath(
@@ -415,28 +472,44 @@ def generate_band_kpath(
 ) -> QEKPointsConfig:
     """Generate a high-symmetry k-path for a band-structure (``crystal_b``) run.
 
-    Uses :mod:`seekpath` if available; falls back to a hardcoded table of
-    common Bravais lattice paths (FCC, BCC, HEX, ORC, CUB).
+    Three-tier fallback strategy:
 
-    The returned ``QEKPointsConfig`` has ``mode='crystal_b'`` with
-    ``kpath_points`` and ``kpath_labels`` populated.
+    1. **seekpath** (primary): structure-specific, handles all space groups.
+       Discontinuities (jumps in the Brillouin zone path, e.g. X→U then K→G)
+       are encoded as composite labels ``"X|K"`` at the break point with
+       ``npts=1`` so that no spurious band segment is drawn.  The start of
+       the new segment is added as an unlabelled entry.
+    2. **ASE** ``atoms.cell.bandpath()`` (secondary): covers all 14 Bravais
+       lattice types when seekpath is unavailable.  Comma-separated segments
+       in the ASE path string are treated as discontinuities.
+    3. **Hardcoded table** ``_FALLBACK_KPATHS`` (tertiary): eight common
+       lattice types (CUB, FCC, BCC, HEX, ORC, TET, BCT, RHL).
+
+    The ``atoms`` argument **should** already be the seekpath standardized
+    primitive cell (obtained via :func:`get_band_calc_atoms`) so that the
+    returned crystal-coordinate k-points are consistent with the cell written
+    to ``CELL_PARAMETERS`` in pw.in.
 
     2-D correction:
-        If ``is_2d=True``, all k-point z-coordinates are forced to 0.0 to
-        restrict the path to the in-plane Brillouin zone.
+        If ``is_2d=True``, all k-point z-coordinates are forced to 0.0.
 
     Args:
-        atoms: ASE ``Atoms`` object (should be the primitive cell).
-        npoints: Number of k-points per segment (default 40).  The last point
-            in each segment uses ``npts=1`` per the QE ``crystal_b`` convention.
-        is_2d: Whether the structure is a 2D material.  Enforces kz = 0.
+        atoms: ASE ``Atoms`` object.
+        npoints: k-points per segment (default 40).  Break-point entries and
+            the final endpoint use ``npts=1``.
+        is_2d: Enforce kz = 0 on all k-points.
 
     Returns:
         ``QEKPointsConfig`` with ``mode='crystal_b'`` and path data filled in.
     """
     seg_labels: List[str] = []
     seg_coords: List[List[float]] = []
+    break_indices: set = set()   # indices where npts must be 1 (segment ends)
 
+    # ------------------------------------------------------------------
+    # Tier 1: seekpath
+    # ------------------------------------------------------------------
+    _tier1_ok = False
     try:
         import seekpath  # type: ignore[import]
 
@@ -449,35 +522,101 @@ def generate_band_kpath(
         point_coords: Dict[str, List[float]] = path_data["point_coords"]
         path_segments: List[Tuple[str, str]] = path_data["path"]
 
-        # Flatten path segments into an ordered list of unique waypoints
+        prev_end_lbl: Optional[str] = None
         for start_lbl, end_lbl in path_segments:
-            if not seg_labels or seg_labels[-1] != start_lbl:
+            if prev_end_lbl is None:
+                # First segment — add start point normally
                 seg_labels.append(start_lbl)
                 seg_coords.append(list(point_coords[start_lbl]))
+            elif start_lbl == prev_end_lbl:
+                # Continuous path — previous end already appended; skip duplicate
+                pass
+            else:
+                # Discontinuity: path jumps from prev_end_lbl to start_lbl.
+                # Mark the previous endpoint as a break (npts=1), combine its
+                # label with the new-segment start as "prev|new", then add the
+                # new start as an unlabelled k-point (its coords are needed for
+                # QE to sample the correct direction in the next segment).
+                break_indices.add(len(seg_labels) - 1)
+                seg_labels[-1] = f"{prev_end_lbl}|{start_lbl}"
+                seg_labels.append("")  # unlabelled — coordinates carry direction
+                seg_coords.append(list(point_coords[start_lbl]))
+
             seg_labels.append(end_lbl)
             seg_coords.append(list(point_coords[end_lbl]))
+            prev_end_lbl = end_lbl
+
+        _tier1_ok = True
 
     except ImportError:
-        logger.debug("seekpath not available — using hardcoded k-path fallback")
+        logger.debug("seekpath not available — trying ASE bandpath (Tier 2)")
+    except Exception as exc:
+        logger.warning("seekpath failed (%s) — trying ASE bandpath (Tier 2)", exc)
+
+    # ------------------------------------------------------------------
+    # Tier 2: ASE atoms.cell.bandpath() — covers all 14 Bravais types
+    # ------------------------------------------------------------------
+    if not _tier1_ok:
+        try:
+            bp = atoms.cell.bandpath(npoints=0)
+            path_str: str = bp.path           # e.g. "GXMG,RL" — comma = break
+            special_pts = bp.special_points   # label -> ndarray([x,y,z])
+
+            prev_last_lbl: Optional[str] = None
+            for seg_str in path_str.split(","):
+                if not seg_str:
+                    continue
+                for i, lbl in enumerate(seg_str):
+                    if not seg_labels:
+                        seg_labels.append(lbl)
+                        seg_coords.append(list(special_pts[lbl]))
+                    elif i == 0 and prev_last_lbl is not None:
+                        # Comma discontinuity: combine last label with new start
+                        break_indices.add(len(seg_labels) - 1)
+                        seg_labels[-1] = f"{prev_last_lbl}|{lbl}"
+                        seg_labels.append("")
+                        seg_coords.append(list(special_pts[lbl]))
+                    else:
+                        seg_labels.append(lbl)
+                        seg_coords.append(list(special_pts[lbl]))
+                prev_last_lbl = seg_str[-1]
+
+            _tier1_ok = True  # reuse flag to skip Tier 3
+
+        except Exception as exc2:
+            logger.debug("ASE bandpath failed (%s) — using hardcoded table (Tier 3)", exc2)
+
+    # ------------------------------------------------------------------
+    # Tier 3: hardcoded _FALLBACK_KPATHS table
+    # ------------------------------------------------------------------
+    if not seg_labels:
         lattice_name = _detect_bravais(atoms)
         path_pts = _FALLBACK_KPATHS.get(lattice_name, _FALLBACK_KPATHS["CUB"])
         for lbl, coords in path_pts:
             seg_labels.append(lbl)
             seg_coords.append(list(coords))
 
+    # ------------------------------------------------------------------
     # 2D correction: set kz = 0 for all points
+    # ------------------------------------------------------------------
     if is_2d:
         seg_coords = [[c[0], c[1], 0.0] for c in seg_coords]
 
-    # Build QE crystal_b format: (coords, npts) per point.
-    # The last point gets npts=1 (no continuation segment).
+    # ------------------------------------------------------------------
+    # Build QE crystal_b format
+    # Break-point entries get npts=1 (no band drawn to next segment start).
+    # Unlabelled entries (new-segment starts after a break) also get npoints.
+    # ------------------------------------------------------------------
     kpath_points: List[Tuple[List[float], int]] = []
     kpath_labels: Dict[int, str] = {}
     n = len(seg_coords)
     for i, (coords, lbl) in enumerate(zip(seg_coords, seg_labels)):
-        npts = 1 if i == n - 1 else npoints
+        is_last = (i == n - 1)
+        is_break = (i in break_indices)
+        npts = 1 if (is_last or is_break) else npoints
         kpath_points.append((coords, npts))
-        kpath_labels[i] = lbl
+        if lbl:  # skip unlabelled entries (new-segment starts after a break)
+            kpath_labels[i] = lbl
 
     return QEKPointsConfig(
         mode="crystal_b",

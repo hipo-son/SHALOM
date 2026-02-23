@@ -178,8 +178,13 @@ def _require_matplotlib():
 def _format_label(raw: str) -> str:
     """Convert common k-point label strings to Unicode/LaTeX-friendly form.
 
-    Examples: ``"G"`` → ``"Γ"``, ``"Gamma"`` → ``"Γ"``, ``"X"`` → ``"X"``.
+    Composite labels (e.g. ``"U|K"`` at band-path discontinuities) are split
+    on ``"|"`` and each part is formatted independently, then re-joined.
+
+    Examples: ``"G"`` → ``"Γ"``, ``"Gamma"`` → ``"Γ"``, ``"G|K"`` → ``"Γ|K"``.
     """
+    if "|" in raw:
+        return "|".join(_format_label(p) for p in raw.split("|"))
     mapping = {
         "G": "Γ", "Gamma": "Γ", "GAMMA": "Γ",
         "X": "X", "M": "M", "K": "K", "A": "A", "L": "L", "H": "H",

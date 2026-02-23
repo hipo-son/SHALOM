@@ -36,6 +36,7 @@ from shalom.backends.qe_config import (
     QEKPointsConfig,
     get_qe_preset,
     generate_band_kpath,
+    get_band_calc_atoms,
 )
 from shalom.backends.qe_parser import (
     parse_xml_bands,

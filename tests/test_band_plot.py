@@ -108,3 +108,16 @@ class TestFormatLabel:
     def test_common_labels(self):
         for raw in ("X", "M", "K", "L", "W"):
             assert _format_label(raw) == raw
+
+    # Composite labels (discontinuous band-path break points)
+    def test_pipe_xk_passthrough(self):
+        assert _format_label("X|K") == "X|K"
+
+    def test_pipe_gamma_k(self):
+        assert _format_label("G|K") == "Γ|K"
+
+    def test_pipe_both_mapped(self):
+        assert _format_label("G|G") == "Γ|Γ"
+
+    def test_pipe_gamma_full(self):
+        assert _format_label("Gamma|X") == "Γ|X"
