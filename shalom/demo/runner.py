@@ -1,7 +1,10 @@
 """Demo runner — thin wrapper around Pipeline with rich output callbacks."""
 
+from __future__ import annotations
+
 import logging
 import time
+from typing import Any
 
 from shalom.core.schemas import PipelineResult
 from shalom.demo.console import DemoConsole
@@ -32,6 +35,7 @@ class DemoRunner:
         self.display = DemoConsole(quiet=quiet, no_color=no_color)
         self._t0 = 0.0
 
+        self.llm: Any  # CannedLLMProvider or LLMProvider
         if dry_run:
             from shalom.demo.canned_provider import CannedLLMProvider, CANNED_RESPONSES
             self.llm = CannedLLMProvider(CANNED_RESPONSES)

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 from ase import Atoms
 from ase.build import bulk, surface
 
-from shalom.backends.vasp_config import VASPInputConfig, get_preset, CalculationType, AccuracyLevel
+from shalom.backends.vasp_config import VASPInputConfig
 from shalom.core.schemas import RankedMaterial, MaterialCandidate
 from shalom.agents.simulation_layer import (
     GeometryGenerator,
@@ -391,6 +391,60 @@ class TestGeometryReviewerWithBackend:
 
         assert success is True
         assert call_count == 2
+
+
+    def test_qe_backend_uses_default_filename(self, mock_llm, tmp_path):
+        """QE backend should use pw.in (default), not POSCAR_{name}."""
+        generator = GeometryGenerator(llm_provider=mock_llm)
+
+        mock_backend = MagicMock()
+        mock_backend.name = "qe"
+        mock_backend.write_input.return_value = str(tmp_path / "output")
+
+        reviewer = GeometryReviewer(
+            generator=generator, max_retries=3,
+            backend=mock_backend, dft_config=None,
+        )
+
+        mock_response = MagicMock()
+        mock_response.python_code = "atoms = bulk('Cu', 'fcc', a=3.6)"
+        mock_response.explanation = "Cu bulk"
+        mock_llm.generate_structured_output.return_value = mock_response
+
+        ranked = self._make_ranked_material()
+        success, atoms, path = reviewer.run_creation_loop("test", ranked)
+
+        assert success is True
+        call_kwargs = mock_backend.write_input.call_args
+        # QE backend should NOT receive a filename param (defaults to pw.in)
+        assert "filename" not in (call_kwargs.kwargs or {})
+
+    def test_vasp_backend_uses_poscar_filename(self, mock_llm, tmp_path):
+        """VASP backend should use POSCAR_{name} filename."""
+        generator = GeometryGenerator(llm_provider=mock_llm)
+
+        mock_backend = MagicMock()
+        mock_backend.name = "vasp"
+        mock_backend.write_input.return_value = str(tmp_path / "output")
+
+        reviewer = GeometryReviewer(
+            generator=generator, max_retries=3,
+            backend=mock_backend, dft_config=None,
+        )
+
+        mock_response = MagicMock()
+        mock_response.python_code = "atoms = bulk('Cu', 'fcc', a=3.6)"
+        mock_response.explanation = "Cu bulk"
+        mock_llm.generate_structured_output.return_value = mock_response
+
+        ranked = self._make_ranked_material()
+        success, atoms, path = reviewer.run_creation_loop("test", ranked)
+
+        assert success is True
+        call_kwargs = mock_backend.write_input.call_args
+        # VASP backend should receive a filename param
+        assert "filename" in (call_kwargs.kwargs or {})
+        assert call_kwargs.kwargs["filename"] == "POSCAR_Cu"
 
 
 # ---------------------------------------------------------------------------

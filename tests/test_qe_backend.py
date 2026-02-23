@@ -172,6 +172,24 @@ class TestQEParseOutput:
         assert result.is_converged is False
         assert result.energy is not None
 
+    def test_job_done_with_scf_failure(self, tmp_path):
+        """JOB DONE + convergence NOT achieved → is_converged = False.
+
+        QE vc-relax can print JOB DONE even when SCF failed within
+        an ionic step. The explicit failure signal must take priority.
+        """
+        (tmp_path / "pw.out").write_text(
+            "!    total energy              =     -31.50000000 Ry\n"
+            "     convergence has been achieved in   8 iterations\n"
+            "!    total energy              =     -31.60000000 Ry\n"
+            "     convergence NOT achieved after 100 iterations\n"
+            "     JOB DONE.\n"
+        )
+        backend = QEBackend()
+        result = backend.parse_output(str(tmp_path))
+        assert result.is_converged is False
+        assert result.energy is not None
+
     def test_missing_output_raises(self, tmp_path):
         backend = QEBackend()
         with pytest.raises(FileNotFoundError, match="No pw.x output"):

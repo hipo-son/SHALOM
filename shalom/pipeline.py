@@ -130,6 +130,26 @@ class PipelineConfig(BaseModel):
         default=True,
         description="Save PipelineResult as JSON when entering AWAITING_DFT.",
     )
+    execute: bool = Field(
+        default=False,
+        description="Run DFT via subprocess after input generation.",
+    )
+    nprocs: int = Field(
+        default=1, ge=1,
+        description="MPI process count for DFT execution.",
+    )
+    mpi_command: str = Field(
+        default="mpirun",
+        description="MPI launcher command (mpirun, srun, etc.).",
+    )
+    execution_timeout: int = Field(
+        default=86400,
+        description="DFT execution timeout in seconds.",
+    )
+    max_execution_retries: int = Field(
+        default=3, ge=0, le=10,
+        description="Max error recovery retries during execution.",
+    )
     calc_type: str = Field(
         default="relaxation",
         description=(
@@ -222,12 +242,22 @@ class Pipeline:
                 raise ValueError(
                     f"Invalid step name(s): {invalid}. Valid: {sorted(_VALID_STEPS)}"
                 )
-            return steps
+        else:
+            # Backward compatibility: derive from skip_review
+            if self.config.skip_review:
+                steps = ["design", "simulation"]
+            else:
+                steps = ["design", "simulation", "review"]
 
-        # Backward compatibility: derive from skip_review
-        if self.config.skip_review:
-            return ["design", "simulation"]
-        return ["design", "simulation", "review"]
+        # Auto-insert execution step if --execute enabled
+        if self.config.execute and "execution" not in steps:
+            if "review" in steps:
+                idx = steps.index("review")
+                steps.insert(idx, "execution")
+            else:
+                steps.append("execution")
+
+        return steps
 
     def _validate_step_requirements(self) -> None:
         """Validate that required inputs are provided for the selected steps."""
@@ -249,6 +279,13 @@ class Pipeline:
                 raise ValueError(
                     "input_structure_path is required when skipping 'simulation' "
                     "with 'review' enabled."
+                )
+
+        if "execution" in steps and "simulation" not in steps:
+            if self.config.input_structure_path is None:
+                raise ValueError(
+                    "input_structure_path is required when running 'execution' "
+                    "without 'simulation'."
                 )
 
     def run(self) -> PipelineResult:
@@ -300,6 +337,11 @@ class Pipeline:
         candidates = None
         ranked_material = None
         structure_path: Optional[str] = None
+        atoms: Optional[Any] = None
+        dft_config: Optional[Any] = None
+        exec_wall_time: Optional[float] = None
+        corr_history: Optional[List[Dict[str, Any]]] = None
+        quality_warnings: List[str] = []
 
         # ------------------------------------------------------------------
         # Step 1: Design (Coarse + Fine Selection)
@@ -400,6 +442,10 @@ class Pipeline:
         # ------------------------------------------------------------------
         # Step 2: Simulation (Structure Generation)
         # ------------------------------------------------------------------
+        # Create DFT config (needed for both simulation and execution)
+        if "simulation" in steps or "execution" in steps:
+            dft_config = self._create_dft_config()
+
         if "simulation" in steps:
             logger.info("[Iter %d] Structure Generation...", iteration)
             if ranked_material is None:
@@ -411,8 +457,6 @@ class Pipeline:
                     steps_completed=steps_completed,
                 )
             try:
-                dft_config = self._create_dft_config()
-
                 generator = GeometryGenerator(llm_provider=self.llm)
                 reviewer = GeometryReviewer(
                     generator=generator,
@@ -460,9 +504,94 @@ class Pipeline:
             logger.info("Simulation skipped: using '%s'.", structure_path)
 
         # ------------------------------------------------------------------
+        # Step 2.5: Execution (DFT via subprocess)
+        # ------------------------------------------------------------------
+        if "execution" in steps:
+            logger.info("[Iter %d] Executing DFT...", iteration)
+
+            # Load atoms from file if simulation was skipped
+            if atoms is None and structure_path:
+                import os
+                from ase.io import read as ase_read
+                pw_in_path = os.path.join(structure_path, "pw.in")
+                if os.path.exists(pw_in_path):
+                    loaded = ase_read(pw_in_path)
+                    atoms = loaded[0] if isinstance(loaded, list) else loaded
+
+            from shalom.backends.runner import (
+                ExecutionConfig, ExecutionRunner, execute_with_recovery,
+            )
+            from shalom.backends.qe_error_recovery import QEErrorRecoveryEngine
+
+            exec_config = ExecutionConfig(
+                nprocs=self.config.nprocs,
+                mpi_command=self.config.mpi_command,
+                timeout_seconds=self.config.execution_timeout,
+            )
+            runner = ExecutionRunner(config=exec_config)
+            recovery = QEErrorRecoveryEngine()
+
+            exec_result, dft_result, corr_history = execute_with_recovery(
+                self.backend, runner, recovery,
+                structure_path or "",
+                dft_config,
+                atoms,
+                max_retries=self.config.max_execution_retries,
+            )
+
+            exec_wall_time = exec_result.wall_time_seconds
+            if dft_result is not None:
+                quality_warnings = dft_result.quality_warnings
+
+            if not exec_result.success and (
+                dft_result is None or not dft_result.is_converged
+            ):
+                return PipelineResult(
+                    status=PipelineStatus.FAILED_EXECUTION,
+                    objective=self.objective,
+                    iteration=iteration,
+                    candidates=candidates,
+                    ranked_material=ranked_material,
+                    structure_generated="simulation" in steps,
+                    structure_path=structure_path,
+                    execution_wall_time=exec_wall_time,
+                    correction_history=corr_history,
+                    quality_warnings=quality_warnings,
+                    error_message=exec_result.error_message or "DFT execution failed",
+                    steps_completed=steps_completed,
+                )
+
+            steps_completed.append("execution")
+            self._notify("execution", {
+                "wall_time": exec_wall_time,
+                "correction_history": corr_history,
+            })
+            logger.info(
+                "DFT execution completed in %.1fs (%d corrections).",
+                exec_wall_time, len(corr_history or []),
+            )
+
+        # ------------------------------------------------------------------
         # Step 3: Review
         # ------------------------------------------------------------------
         if "review" not in steps:
+            # If execution ran, return COMPLETED; otherwise AWAITING_DFT
+            if "execution" in steps:
+                logger.info("Execution complete (no review). Returning COMPLETED.")
+                return PipelineResult(
+                    status=PipelineStatus.COMPLETED,
+                    objective=self.objective,
+                    iteration=iteration,
+                    candidates=candidates,
+                    ranked_material=ranked_material,
+                    structure_generated="simulation" in steps,
+                    structure_path=structure_path,
+                    execution_wall_time=exec_wall_time,
+                    correction_history=corr_history,
+                    quality_warnings=quality_warnings,
+                    steps_completed=steps_completed,
+                )
+
             logger.info(
                 "Input files at '%s'. Awaiting DFT execution.", structure_path
             )
@@ -496,6 +625,9 @@ class Pipeline:
                 ranked_material=ranked_material,
                 structure_generated="simulation" in steps,
                 structure_path=structure_path,
+                execution_wall_time=exec_wall_time,
+                correction_history=corr_history,
+                quality_warnings=quality_warnings,
                 error_message=f"Review failed: {e}",
                 steps_completed=steps_completed,
             )
@@ -518,6 +650,9 @@ class Pipeline:
             ranked_material=ranked_material,
             structure_generated="simulation" in steps,
             structure_path=structure_path,
+            execution_wall_time=exec_wall_time,
+            correction_history=corr_history,
+            quality_warnings=quality_warnings,
             review_result=review_result,
             steps_completed=steps_completed,
         )

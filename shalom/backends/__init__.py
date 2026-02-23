@@ -27,11 +27,20 @@ from shalom.backends.vasp_config import (
     get_preset,
 )
 from shalom.backends.error_recovery import ErrorRecoveryEngine, VASPError, Correction
+from shalom.backends.qe_error_recovery import (
+    QEErrorRecoveryEngine, QEError, QECorrection, compute_safe_dt,
+)
 from shalom.backends.qe_config import (
     QECalculationType,
     QEInputConfig,
     QEKPointsConfig,
     get_qe_preset,
+)
+from shalom.backends.runner import (
+    ExecutionConfig,
+    ExecutionResult,
+    ExecutionRunner,
+    execute_with_recovery,
 )
 
 __all__ = [
@@ -39,6 +48,8 @@ __all__ = [
     "CalculationType", "AccuracyLevel", "VASPInputConfig", "KPointsConfig", "get_preset",
     "QECalculationType", "QEInputConfig", "QEKPointsConfig", "get_qe_preset",
     "ErrorRecoveryEngine", "VASPError", "Correction",
+    "QEErrorRecoveryEngine", "QEError", "QECorrection", "compute_safe_dt",
+    "ExecutionConfig", "ExecutionResult", "ExecutionRunner", "execute_with_recovery",
 ]
 
 

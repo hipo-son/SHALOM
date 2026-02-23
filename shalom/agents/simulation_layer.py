@@ -207,7 +207,11 @@ class GeometryReviewer:
                     mat_name = re.sub(r'[^\w\-.]', '_', ranked_material.candidate.material_name)
 
                     if self.backend is not None:
-                        write_params = {"filename": f"POSCAR_{mat_name}"}
+                        # QE uses pw.in (default); VASP uses POSCAR_{name}
+                        if self.backend.name == "qe":
+                            write_params = {}
+                        else:
+                            write_params = {"filename": f"POSCAR_{mat_name}"}
                         if self.dft_config is not None:
                             effective_config = copy.deepcopy(self.dft_config)
                             _apply_structure_hints(self.backend.name, atoms, effective_config)

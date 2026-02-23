@@ -1,6 +1,5 @@
 """Tests for the Pipeline Orchestrator."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -951,3 +950,151 @@ class TestPipelineTiming:
         json_str = result.model_dump_json()
         loaded = PipelineResult.model_validate_json(json_str)
         assert abs(loaded.elapsed_seconds - 12.345) < 0.001
+
+
+# ---------------------------------------------------------------------------
+# Execution step integration
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionStepEnum:
+    """Test EXECUTION step and FAILED_EXECUTION status."""
+
+    def test_execution_step_value(self):
+        assert PipelineStep.EXECUTION.value == "execution"
+
+    def test_failed_execution_status(self):
+        assert PipelineStatus.FAILED_EXECUTION.value == "failed_execution"
+
+    def test_failed_execution_serialization(self):
+        result = PipelineResult(
+            status=PipelineStatus.FAILED_EXECUTION,
+            objective="test",
+            error_message="DFT timed out",
+        )
+        json_str = result.model_dump_json()
+        loaded = PipelineResult.model_validate_json(json_str)
+        assert loaded.status == PipelineStatus.FAILED_EXECUTION
+
+    def test_execution_wall_time_field(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED,
+            objective="test",
+            execution_wall_time=3600.5,
+        )
+        assert result.execution_wall_time == 3600.5
+
+    def test_correction_history_field(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED,
+            objective="test",
+            correction_history=[{"error_type": "QE_SCF_UNCONVERGED", "step": 0}],
+        )
+        assert len(result.correction_history) == 1
+
+    def test_quality_warnings_field(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED,
+            objective="test",
+            quality_warnings=["loosely_relaxed"],
+        )
+        assert "loosely_relaxed" in result.quality_warnings
+
+    def test_quality_warnings_default_empty(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED, objective="test",
+        )
+        assert result.quality_warnings == []
+
+    def test_execution_fields_serialization(self):
+        result = PipelineResult(
+            status=PipelineStatus.COMPLETED,
+            objective="test",
+            execution_wall_time=120.0,
+            correction_history=[{"error": "scf", "step": 0}],
+            quality_warnings=["loosely_relaxed"],
+        )
+        json_str = result.model_dump_json()
+        loaded = PipelineResult.model_validate_json(json_str)
+        assert loaded.execution_wall_time == 120.0
+        assert len(loaded.correction_history) == 1
+        assert loaded.quality_warnings == ["loosely_relaxed"]
+
+
+class TestPipelineExecuteConfig:
+    """Test PipelineConfig execution fields."""
+
+    def test_execute_default_false(self):
+        config = PipelineConfig()
+        assert config.execute is False
+
+    def test_nprocs_default(self):
+        config = PipelineConfig()
+        assert config.nprocs == 1
+
+    def test_execution_timeout_default(self):
+        config = PipelineConfig()
+        assert config.execution_timeout == 86400
+
+    def test_max_execution_retries_default(self):
+        config = PipelineConfig()
+        assert config.max_execution_retries == 3
+
+    def test_execute_flag_true(self):
+        config = PipelineConfig(execute=True, nprocs=4, mpi_command="srun")
+        assert config.execute is True
+        assert config.nprocs == 4
+        assert config.mpi_command == "srun"
+
+
+class TestPipelineResolveStepsWithExecute:
+    """Test _resolve_effective_steps with execute=True."""
+
+    def test_execute_auto_inserts_before_review(self, mock_llm):
+        config = PipelineConfig(execute=True, skip_review=False)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        steps = pipeline._effective_steps
+        assert "execution" in steps
+        assert steps.index("execution") < steps.index("review")
+
+    def test_execute_appends_when_no_review(self, mock_llm):
+        config = PipelineConfig(execute=True, skip_review=True)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        steps = pipeline._effective_steps
+        assert steps[-1] == "execution"
+
+    def test_no_execute_no_execution_step(self, mock_llm):
+        config = PipelineConfig(execute=False)
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        assert "execution" not in pipeline._effective_steps
+
+    def test_explicit_execution_step(self, mock_llm):
+        config = PipelineConfig(
+            steps=["simulation", "execution"],
+            material_name="Si",
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        assert "execution" in pipeline._effective_steps
+
+
+class TestPipelineExecutionValidation:
+    """Test validation for execution step."""
+
+    def test_execution_without_simulation_needs_path(self, mock_llm):
+        config = PipelineConfig(steps=["execution"])
+        with pytest.raises(ValueError, match="input_structure_path"):
+            Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+    def test_execution_without_simulation_with_path(self, mock_llm):
+        config = PipelineConfig(
+            steps=["execution"],
+            input_structure_path="/tmp/calc",
+        )
+        # Should not raise
+        Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+    def test_backward_compat_no_execute(self, mock_llm):
+        """Existing tests unaffected — no execution step unless execute=True."""
+        config = PipelineConfig()
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        assert "execution" not in pipeline._effective_steps

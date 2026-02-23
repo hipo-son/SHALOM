@@ -1,20 +1,15 @@
 """Tests for shalom.backends.vasp_config — presets, POTCAR mapping, structure detection."""
 
-import math
 
 import pytest
 from ase import Atoms
-from ase.build import bulk
 
 from shalom.backends.vasp_config import (
     AccuracyLevel,
     CalculationType,
     DEFAULT_MAGMOM,
-    ENMAX_VALUES,
     HUBBARD_U_VALUES,
-    KPointsConfig,
     MAGNETIC_ELEMENTS,
-    VASP_RECOMMENDED_POTCARS,
     VASPInputConfig,
     compute_encut,
     compute_kpoints_grid,

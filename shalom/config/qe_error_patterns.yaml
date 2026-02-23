@@ -1,0 +1,78 @@
+# Quantum ESPRESSO pw.x error patterns for automatic detection
+# Each entry: pattern (substring match), error type, severity
+# Verified against QE 7.x source code
+# Order matters: more specific patterns must come before general ones.
+
+# --- Correctable errors (progressive recovery possible) ---
+
+- pattern: "convergence NOT achieved"
+  type: "QE_SCF_UNCONVERGED"
+  severity: "correctable"
+  source: "PW/src/electrons.f90"
+
+- pattern: "S matrix not positive definite"
+  type: "QE_S_MATRIX"
+  severity: "correctable"
+  source: "PW/src/s_psi.f90"
+
+- pattern: "bfgs failed after"
+  type: "QE_BFGS_FAILED"
+  severity: "correctable"
+  source: "PW/src/bfgs_module.f90"
+
+- pattern: "The maximum number of steps has been reached."
+  type: "QE_IONIC_NOT_CONVERGED"
+  severity: "correctable"
+  source: "PW/src/bfgs_module.f90"
+
+- pattern: "Error in routine cdiaghg"
+  type: "QE_DIAG_FAILED"
+  severity: "correctable"
+  source: "LAXlib/cdiaghg.f90"
+
+- pattern: "Error in routine rdiaghg"
+  type: "QE_DIAG_FAILED"
+  severity: "correctable"
+  source: "LAXlib/rdiaghg.f90"
+
+- pattern: "eigenvalues not converged"
+  type: "QE_EIGVAL_NOT_CONVERGED"
+  severity: "correctable"
+  source: "PW/src/c_bands.f90"
+
+- pattern: "too many bands are not converged"
+  type: "QE_TOO_MANY_BANDS"
+  severity: "correctable"
+  source: "PW/src/c_bands.f90"
+
+- pattern: "negative or imaginary charge"
+  type: "QE_NEGATIVE_CHARGE"
+  severity: "correctable"
+  source: "PW/src/mix_rho.f90"
+
+- pattern: "charge is wrong"
+  type: "QE_CHARGE_WRONG"
+  severity: "correctable"
+  source: "PW/src/sum_band.f90"
+
+- pattern: "angle between cell vectors is becoming too small"
+  type: "QE_CELL_DISTORTED"
+  severity: "correctable"
+  source: "PW/src/cellmd.f90"
+
+# --- Fatal errors (no automatic recovery) ---
+
+- pattern: "Error in routine readpp"
+  type: "QE_PSEUDO_NOT_FOUND"
+  severity: "fatal"
+  source: "Modules/read_pseudo.f90"
+
+- pattern: "Not enough space allocated"
+  type: "QE_OUT_OF_MEMORY"
+  severity: "fatal"
+  source: "various"
+
+- pattern: "Error in routine davcio"
+  type: "QE_IO_ERROR"
+  severity: "fatal"
+  source: "Modules/io_base.f90"

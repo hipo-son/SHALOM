@@ -1,7 +1,6 @@
 import os
 
 import pytest
-from ase import Atoms
 from ase.build import bulk
 
 from shalom.backends import get_backend, DFTBackend, DFTResult
@@ -10,7 +9,6 @@ from shalom.backends.qe import QEBackend
 from shalom.backends.vasp_config import (
     CalculationType,
     AccuracyLevel,
-    VASPInputConfig,
     get_preset,
 )
 from shalom.agents.review_layer import ReviewAgent

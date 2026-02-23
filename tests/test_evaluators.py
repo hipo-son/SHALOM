@@ -12,7 +12,6 @@ from shalom.agents.design_layer import (
     FineSelector,
 )
 from shalom.agents.evaluators import (
-    DEFAULT_VETO_THRESHOLDS,
     DEFAULT_WEIGHTS,
     SpecialistEvaluator,
     aggregate_scores,
@@ -263,8 +262,6 @@ class TestEvaluateParallel:
         max_concurrent = 2
         concurrent_count = {"value": 0, "peak": 0}
         lock = threading.Lock()
-
-        original_evaluate = SpecialistEvaluator.evaluate
 
         def tracked_evaluate(self, target_objective, candidates):
             with lock:

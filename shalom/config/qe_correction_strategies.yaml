@@ -1,0 +1,136 @@
+# Progressive correction strategies for Quantum ESPRESSO pw.x errors
+# Each error type has an ordered list of escalating fixes.
+# The QEErrorRecoveryEngine tries step 0 first, then step 1, etc.
+#
+# Keys use dot-notation: "namelist.parameter" (e.g., electrons.mixing_beta).
+# This is consistent with QEInputConfig.user_settings and get_merged_namelists().
+#
+# Special meta-keys:
+#   _electron_maxstep_cap: Override electron_maxstep for this step (fast-fail)
+#   _quality_warning: Tag attached to DFTResult.quality_warnings if this step is used
+#   _rollback_geometry: If true, roll back to previous good ionic geometry
+#   _needs_atoms: If true, correction requires atoms object (for compute_safe_dt, etc.)
+
+QE_SCF_UNCONVERGED:
+  # Step 0: Reduce mixing (universally safe)
+  - electrons.mixing_beta: 0.3
+    electrons.electron_maxstep: 150
+  # Step 1: Thomas-Fermi preconditioning — FAST-FAIL: 50-step cap
+  # Effective for metals/slabs; may diverge on insulators/AFM
+  - electrons.mixing_mode: "local-TF"
+    electrons.mixing_beta: 0.3
+    _electron_maxstep_cap: 50
+  # Step 2: CG diagonalization (slow but robust for all system types)
+  - electrons.diagonalization: "cg"
+    electrons.mixing_beta: 0.2
+    electrons.electron_maxstep: 200
+  # Step 3: Aggressive mixing reduction + increased Broyden history
+  - electrons.mixing_beta: 0.1
+    electrons.mixing_ndim: 12
+    electrons.electron_maxstep: 300
+  # Step 4: CG + ultra-conservative mixing (last resort)
+  # NOTE: degauss escalation intentionally omitted — high smearing
+  # destroys ground state, suppresses Jahn-Teller/CDW transitions,
+  # and invalidates phonon/elastic inputs.
+  - electrons.diagonalization: "cg"
+    electrons.mixing_beta: 0.05
+    electrons.mixing_ndim: 16
+    electrons.electron_maxstep: 500
+
+QE_DIAG_FAILED:
+  # Step 0: Switch to CG (robust alternative to Davidson)
+  - electrons.diagonalization: "cg"
+  # Step 1: CG + relaxed initial threshold
+  - electrons.diagonalization: "cg"
+    electrons.diago_thr_init: 1.0e-2
+  # Step 2: CG + reduced mixing
+  - electrons.diagonalization: "cg"
+    electrons.mixing_beta: 0.3
+
+QE_S_MATRIX:
+  # DIAGNOSTIC BRANCHING — strategy depends on min interatomic distance.
+  # The QEErrorRecoveryEngine.diagnose_s_matrix() method determines the path.
+  #
+  # OVERLAP PATH (dist < 0.5 Å): atomic collision during BFGS
+  # Step 0a: Rollback geometry + tighten BFGS trust radius
+  - ions.trust_radius_max: 0.3
+    ions.trust_radius_ini: 0.2
+    _rollback_geometry: true
+  # Step 1a: Rollback + damped MD (avoids BFGS overshooting)
+  - ions.ion_dynamics: "damp"
+    ions.pot_extrapolation: "second_order"
+    _rollback_geometry: true
+    _needs_atoms: true
+  #
+  # BASIS SET PATH (dist >= 0.5 Å): numerical/pseudopotential issue
+  # Step 0b: CG diagonalization (more robust for S-matrix issues)
+  - electrons.diagonalization: "cg"
+  # Step 1b: Reduce Davidson subspace
+  - electrons.diago_david_ndim: 4
+  # Step 2b: Proportional ecutwfc scaling (computed at runtime)
+  # Actual values set by engine: ecutwfc *= 1.3, ecutrho *= 1.3
+
+QE_BFGS_FAILED:
+  # Step 0: Relax force threshold + more steps
+  - control.forc_conv_thr: 5.0e-3
+    control.nstep: 300
+  # Step 1: Switch to damped MD with safe dt for light atoms
+  # dt is auto-computed by compute_safe_dt(atoms): H→5, Li→10, default→20
+  - ions.ion_dynamics: "damp"
+    ions.pot_extrapolation: "second_order"
+    _needs_atoms: true
+  # Step 2: Aggressive relaxation (quality compromise)
+  - control.forc_conv_thr: 1.0e-2
+    control.nstep: 400
+    _quality_warning: "loosely_relaxed"
+
+QE_IONIC_NOT_CONVERGED:
+  # Step 0: More ionic steps
+  - control.nstep: 400
+  # Step 1: Relax threshold + more steps
+  - control.forc_conv_thr: 2.0e-3
+    control.nstep: 500
+  # Step 2: Switch to damped MD
+  - ions.ion_dynamics: "damp"
+    _needs_atoms: true
+
+QE_CELL_DISTORTED:
+  # Step 0: Increase reciprocal-space buffer (QE FAQ recommendation)
+  # Memory cost: ~10-15% in PP tables only (modest)
+  - cell.cell_factor: 2.0
+  # Step 1: Larger buffer + constrain to shape-only changes
+  - cell.cell_factor: 3.0
+    cell.cell_dofree: "shape"
+  # Step 2: Downgrade vc-relax to relax (last resort)
+  # Lattice optimization abandoned — only internal coordinates relaxed.
+  - control.calculation: "relax"
+    _quality_warning: "vc_relax_downgraded"
+
+QE_EIGVAL_NOT_CONVERGED:
+  # Step 0: Increase Davidson subspace
+  - electrons.diago_david_ndim: 8
+  # Step 1: Switch to CG
+  - electrons.diagonalization: "cg"
+
+QE_NEGATIVE_CHARGE:
+  # Step 0: Reduce mixing
+  - electrons.mixing_beta: 0.3
+  # Step 1: Reduce mixing + TF preconditioning
+  - electrons.mixing_beta: 0.1
+    electrons.mixing_mode: "local-TF"
+  # Step 2: Very conservative mixing + reduced Broyden window
+  - electrons.mixing_beta: 0.05
+    electrons.mixing_ndim: 4
+
+QE_TOO_MANY_BANDS:
+  # Step 0: Increase Davidson subspace
+  - electrons.diago_david_ndim: 8
+  # Step 1: Switch to CG
+  - electrons.diagonalization: "cg"
+
+QE_CHARGE_WRONG:
+  # Step 0: Reduce mixing
+  - electrons.mixing_beta: 0.3
+  # Step 1: Increase charge density resolution + reduce mixing
+  - system.ecutrho: 800
+    electrons.mixing_beta: 0.2

@@ -338,3 +338,76 @@ class TestMain:
         assert exc_info.value.code == 0
         mock_basic.assert_called_once()
         assert mock_basic.call_args.kwargs["level"] == logging.DEBUG
+
+
+# ---------------------------------------------------------------------------
+# Execution CLI flag tests
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionFlags:
+    def test_execute_flag_parsed(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "--execute"])
+        assert args.execute is True
+
+    def test_execute_short_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "-x"])
+        assert args.execute is True
+
+    def test_nprocs_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "--nprocs", "4"])
+        assert args.nprocs == 4
+
+    def test_nprocs_short_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "-np", "8"])
+        assert args.nprocs == 8
+
+    def test_timeout_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "--timeout", "7200"])
+        assert args.timeout == 7200
+
+    def test_mpi_command_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "--mpi-command", "srun"])
+        assert args.mpi_command == "srun"
+
+    def test_defaults(self):
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717"])
+        assert args.execute is False
+        assert args.nprocs == 1
+        assert args.timeout == 86400
+        assert args.mpi_command == "mpirun"
+
+    def test_vasp_execute_error(self, capsys):
+        """VASP + --execute → error message."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_run
+        import argparse
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.backend_name = "vasp"
+        mock_result.structure_info = None
+        mock_result.auto_detected = {}
+        mock_result.output_dir = "/tmp"
+        mock_result.files_generated = ["POSCAR"]
+
+        args = argparse.Namespace(
+            material=None, structure="POSCAR", backend="vasp", calc=None,
+            accuracy="standard", set_values=None, output=None,
+            pseudo_dir=None, no_validate=False, force=False,
+            quiet=False, verbose=False, command="run",
+            execute=True, nprocs=1, timeout=86400, mpi_command="mpirun",
+        )
+        with patch("shalom.direct_run.direct_run", return_value=mock_result), \
+             patch("shalom.direct_run.DirectRunConfig"):
+            rc = cmd_run(args)
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "VASP" in captured.out and "not yet supported" in captured.out

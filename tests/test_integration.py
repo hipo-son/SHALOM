@@ -8,13 +8,11 @@ import os
 import textwrap
 
 import pytest
-from ase.build import bulk
 
 from shalom.backends.vasp import VASPBackend
 from shalom.backends.vasp_config import (
     AccuracyLevel,
     CalculationType,
-    VASPInputConfig,
     get_preset,
 )
 from shalom.backends.error_recovery import ErrorRecoveryEngine, VASPError, ErrorSeverity

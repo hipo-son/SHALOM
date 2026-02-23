@@ -164,7 +164,7 @@ A three-step self-correction loop validates the physical soundness of DFT input 
 | Configuration Externalization | Prompt/config to `.md`/`.yaml`, loader with caching + validation + fallback, Pydantic schemas | Complete |
 | QE Backend & Token Compression | QE backend (write/parse), SSSP metadata, MP client, CLI, `compress_error_log`, 676 tests at 95.7% coverage | Complete |
 | Flexible Pipeline & Code Cleanup | `PipelineStep` enum, `synthesize_ranked_material()`, step-selective execution, config serialization, timing, bug fixes | Complete |
-| DFT Execution & Self-Correction | Local QE runner (`subprocess`), `--execute` CLI flag, execution → ReviewAgent auto-loop, error recovery retry (max 3) | In Progress |
+| DFT Execution & Self-Correction | Local QE runner (`subprocess`), `--execute` CLI flag, execution → ReviewAgent auto-loop, error recovery retry (max 3), S-matrix diagnostic, quality warnings, 824 tests at 93.4% coverage | Complete |
 | VASP-Slurm HPC Integration | Slurm job submission/monitoring, VASP execution runner, end-to-end testing with bulk materials | Planned |
 
 #### 1b. arXiv submission + open-source release

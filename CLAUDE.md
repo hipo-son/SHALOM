@@ -7,19 +7,23 @@ SHALOM (System of Hierarchical Agents for Logical Orchestration of Materials) �
 ```
 shalom/
 ├── agents/           # LLM agent layers (Design, Simulation, Review)
-├── backends/         # DFT backends (VASP, QE) + error recovery
+├── backends/         # DFT backends (VASP, QE) + error recovery + execution
 │   ├── _physics.py   # Shared physics constants (AccuracyLevel, MAGMOM, detect_2d, etc.)
 │   ├── _compression.py # Token-aware error log compression (compress_error_log, truncate_to_tokens)
 │   ├── vasp.py       # VASP backend (write_input, parse_output)
 │   ├── vasp_config.py # VASP config (VASPInputConfig, get_preset)
 │   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out)
-│   └── qe_config.py  # QE config (QEInputConfig, get_qe_preset, SSSP metadata)
+│   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, SSSP metadata)
+│   ├── qe_error_recovery.py # QE error recovery (progressive correction, S-matrix diagnostic)
+│   └── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop)
 ├── core/             # LLMProvider, schemas, sandbox
 ├── tools/            # ASE builder utilities
 ├── prompts/          # LLM system prompts (.md files)
 ├── config/           # Physics/DFT settings (.yaml files)
 │   ├── sssp_metadata.yaml  # SSSP Efficiency v1.3.0 pseudopotential metadata
-│   └── qe_presets.yaml     # QE pw.x presets (scf/relax/vc-relax/bands/nscf)
+│   ├── qe_presets.yaml     # QE pw.x presets (scf/relax/vc-relax/bands/nscf)
+│   ├── qe_error_patterns.yaml     # QE error patterns (14 verified against QE 7.x)
+│   └── qe_correction_strategies.yaml  # Progressive correction strategies (10 error types)
 ├── _config_loader.py # load_prompt(), load_config()
 ├── _config_schemas.py # Pydantic validation for YAML configs
 ├── _defaults.py      # Hardcoded fallback values
@@ -50,7 +54,7 @@ shalom/
 4. Use `load_config("new_name")` in consuming code
 
 ### Testing
-- `pytest tests/ -x` — run all tests (676 total)
+- `pytest tests/ -x` — run all tests (824 total)
 - `pytest tests/ --cov=shalom --cov-fail-under=85` — with coverage
 - All existing tests must pass unchanged when refactoring
 - Mock LLM calls with `unittest.mock` (no real API calls in tests)
@@ -84,6 +88,8 @@ python -m shalom run Fe2O3 --backend qe --calc scf         # QE SCF
 python -m shalom run --structure POSCAR --backend vasp      # Local file
 python -m shalom run mp-19717 --set ENCUT=600               # VASP override
 python -m shalom run mp-19717 --backend qe --set ecutwfc=80 # QE override
+python -m shalom run Fe2O3 -b qe --execute                 # QE execute locally
+python -m shalom run Fe2O3 -b qe -x -np 4 --timeout 7200   # QE execute, 4 MPI procs
 ```
 
 ### Git

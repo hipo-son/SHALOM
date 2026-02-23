@@ -230,9 +230,10 @@ class QEBackend:
             try:
                 with open(out_path, "r", encoding="utf-8") as f:
                     full_text = f.read()
+                from shalom.backends.qe_error_recovery import QE_ERROR_PATTERNS
                 result.error_log = compress_error_log(
                     full_text,
-                    important_patterns=[],  # No QE error recovery system yet
+                    important_patterns=[p[0] for p in QE_ERROR_PATTERNS],
                     tail_lines=50,
                 )
             except Exception:
@@ -274,6 +275,11 @@ class QEBackend:
         # Also check for "JOB DONE" as secondary convergence signal
         if "JOB DONE" in text:
             is_converged = True
+
+        # Override: explicit SCF failure takes priority over JOB DONE
+        # (vc-relax can print JOB DONE even when SCF within an ionic step failed)
+        if re.search(r"convergence NOT achieved", text):
+            is_converged = False
 
         # Total force: "Total force =     x.xxxxx"
         for m in re.finditer(r"Total force\s*=\s*([\d.eE+-]+)", text):

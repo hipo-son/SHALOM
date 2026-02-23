@@ -539,4 +539,72 @@ CONFIGS: dict = {
             "electrons": {"conv_thr": 7.35e-9},
         },
     },
+    "qe_error_patterns": [
+        {"pattern": "convergence NOT achieved", "type": "QE_SCF_UNCONVERGED", "severity": "correctable"},
+        {"pattern": "S matrix not positive definite", "type": "QE_S_MATRIX", "severity": "correctable"},
+        {"pattern": "bfgs failed after", "type": "QE_BFGS_FAILED", "severity": "correctable"},
+        {"pattern": "The maximum number of steps has been reached.", "type": "QE_IONIC_NOT_CONVERGED", "severity": "correctable"},
+        {"pattern": "Error in routine cdiaghg", "type": "QE_DIAG_FAILED", "severity": "correctable"},
+        {"pattern": "Error in routine rdiaghg", "type": "QE_DIAG_FAILED", "severity": "correctable"},
+        {"pattern": "eigenvalues not converged", "type": "QE_EIGVAL_NOT_CONVERGED", "severity": "correctable"},
+        {"pattern": "too many bands are not converged", "type": "QE_TOO_MANY_BANDS", "severity": "correctable"},
+        {"pattern": "negative or imaginary charge", "type": "QE_NEGATIVE_CHARGE", "severity": "correctable"},
+        {"pattern": "charge is wrong", "type": "QE_CHARGE_WRONG", "severity": "correctable"},
+        {"pattern": "angle between cell vectors is becoming too small", "type": "QE_CELL_DISTORTED", "severity": "correctable"},
+        {"pattern": "Error in routine readpp", "type": "QE_PSEUDO_NOT_FOUND", "severity": "fatal"},
+        {"pattern": "Not enough space allocated", "type": "QE_OUT_OF_MEMORY", "severity": "fatal"},
+        {"pattern": "Error in routine davcio", "type": "QE_IO_ERROR", "severity": "fatal"},
+    ],
+    "qe_correction_strategies": {
+        "QE_SCF_UNCONVERGED": [
+            {"electrons.mixing_beta": 0.3, "electrons.electron_maxstep": 150},
+            {"electrons.mixing_mode": "local-TF", "electrons.mixing_beta": 0.3, "_electron_maxstep_cap": 50},
+            {"electrons.diagonalization": "cg", "electrons.mixing_beta": 0.2, "electrons.electron_maxstep": 200},
+            {"electrons.mixing_beta": 0.1, "electrons.mixing_ndim": 12, "electrons.electron_maxstep": 300},
+            {"electrons.diagonalization": "cg", "electrons.mixing_beta": 0.05, "electrons.mixing_ndim": 16, "electrons.electron_maxstep": 500},
+        ],
+        "QE_DIAG_FAILED": [
+            {"electrons.diagonalization": "cg"},
+            {"electrons.diagonalization": "cg", "electrons.diago_thr_init": 1.0e-2},
+            {"electrons.diagonalization": "cg", "electrons.mixing_beta": 0.3},
+        ],
+        "QE_S_MATRIX": [
+            {"ions.trust_radius_max": 0.3, "ions.trust_radius_ini": 0.2, "_rollback_geometry": True},
+            {"ions.ion_dynamics": "damp", "ions.pot_extrapolation": "second_order", "_rollback_geometry": True, "_needs_atoms": True},
+            {"electrons.diagonalization": "cg"},
+            {"electrons.diago_david_ndim": 4},
+        ],
+        "QE_BFGS_FAILED": [
+            {"control.forc_conv_thr": 5.0e-3, "control.nstep": 300},
+            {"ions.ion_dynamics": "damp", "ions.pot_extrapolation": "second_order", "_needs_atoms": True},
+            {"control.forc_conv_thr": 1.0e-2, "control.nstep": 400, "_quality_warning": "loosely_relaxed"},
+        ],
+        "QE_IONIC_NOT_CONVERGED": [
+            {"control.nstep": 400},
+            {"control.forc_conv_thr": 2.0e-3, "control.nstep": 500},
+            {"ions.ion_dynamics": "damp", "_needs_atoms": True},
+        ],
+        "QE_CELL_DISTORTED": [
+            {"cell.cell_factor": 2.0},
+            {"cell.cell_factor": 3.0, "cell.cell_dofree": "shape"},
+            {"control.calculation": "relax", "_quality_warning": "vc_relax_downgraded"},
+        ],
+        "QE_EIGVAL_NOT_CONVERGED": [
+            {"electrons.diago_david_ndim": 8},
+            {"electrons.diagonalization": "cg"},
+        ],
+        "QE_NEGATIVE_CHARGE": [
+            {"electrons.mixing_beta": 0.3},
+            {"electrons.mixing_beta": 0.1, "electrons.mixing_mode": "local-TF"},
+            {"electrons.mixing_beta": 0.05, "electrons.mixing_ndim": 4},
+        ],
+        "QE_TOO_MANY_BANDS": [
+            {"electrons.diago_david_ndim": 8},
+            {"electrons.diagonalization": "cg"},
+        ],
+        "QE_CHARGE_WRONG": [
+            {"electrons.mixing_beta": 0.3},
+            {"system.ecutrho": 800, "electrons.mixing_beta": 0.2},
+        ],
+    },
 }

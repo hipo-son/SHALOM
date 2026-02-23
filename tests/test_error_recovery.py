@@ -6,7 +6,6 @@ ionic sloshing, and correction history tracking.
 
 import json
 
-import pytest
 
 from shalom.backends.error_recovery import (
     CORRECTION_STRATEGIES,
@@ -14,7 +13,6 @@ from shalom.backends.error_recovery import (
     ErrorRecoveryEngine,
     ErrorSeverity,
     VASPError,
-    Correction,
     _check_force_oscillation,
 )
 

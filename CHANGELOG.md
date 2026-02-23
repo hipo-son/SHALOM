@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **QE Local Execution** (`--execute` CLI flag, `runner.py`, `qe_error_recovery.py`)
+  - `ExecutionRunner`: subprocess-based pw.x execution with threading.Timer timeout, SIGINT cleanup
+  - `execute_with_recovery()`: automatic error recovery loop with progressive correction escalation
+  - `QEErrorRecoveryEngine`: 14 QE error patterns (verified against QE 7.x), 10 correction strategies
+  - S-matrix diagnostic branching: atomic overlap vs basis-set path (physics-aware)
+  - Light atom dt safety: H→5, Li→10, Be→12 Ry a.u. (prevents explosion in damped dynamics)
+  - Quality warnings: `loosely_relaxed`, `vc_relax_downgraded` tags on `DFTResult`
+  - Per-step iteration caps: local-TF fast-fail (50-step) to avoid divergence on insulators
+  - Pipeline integration: `EXECUTION` step, `FAILED_EXECUTION` status, `quality_warnings` on `PipelineResult`
+  - CLI flags: `--execute/-x`, `--nprocs/-np`, `--timeout`, `--mpi-command`
+  - 148 new tests (824 total, 93.4% coverage)
 - **Flexible Pipeline** (`pipeline.py`)
   - `PipelineStep` enum for step-selective execution (`design`, `simulation`, `review`)
   - `synthesize_ranked_material()` with ASE formula parsing + physics-aware defaults (magnetic, GGA+U)
@@ -58,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All existing tests pass unchanged (zero behavioral change)
 
 ### Fixed
+- `qe.py`: JOB DONE convergence bug — "convergence NOT achieved" now overrides JOB DONE signal
+- `simulation_layer.py`: QE backend now uses default `pw.in` filename instead of `POSCAR_{name}`
 - `design_layer.py`: guard against empty candidates list (IndexError on veto fallback)
 - `evaluators.py`: safe fallback when LLM hallucinates unknown material name (StopIteration → None check)
 - `_physics.py`: `compute_kpoints_grid` guards against empty Atoms / zero-volume cell (LinAlgError)

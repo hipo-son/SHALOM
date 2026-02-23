@@ -178,6 +178,7 @@ class PipelineStep(str, Enum):
 
     DESIGN = "design"
     SIMULATION = "simulation"
+    EXECUTION = "execution"
     REVIEW = "review"
 
 
@@ -189,6 +190,7 @@ class PipelineStatus(str, Enum):
     AWAITING_DFT = "awaiting_dft"
     FAILED_DESIGN = "failed_design"
     FAILED_SIMULATION = "failed_simulation"
+    FAILED_EXECUTION = "failed_execution"
     FAILED_REVIEW = "failed_review"
 
 
@@ -226,6 +228,18 @@ class PipelineResult(BaseModel):
     review_result: Optional[ReviewResult] = Field(
         default=None,
         description="Review of the DFT output, if DFT was executed.",
+    )
+
+    # Execution Layer outputs
+    execution_wall_time: Optional[float] = Field(
+        default=None, description="DFT execution wall-clock time in seconds."
+    )
+    correction_history: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Error recovery correction history from execution."
+    )
+    quality_warnings: List[str] = Field(
+        default_factory=list,
+        description="Physics quality warnings from error recovery (e.g., 'loosely_relaxed').",
     )
 
     # Metadata

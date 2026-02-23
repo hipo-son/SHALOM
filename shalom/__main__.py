@@ -138,6 +138,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable debug logging.",
     )
 
+    # Execution flags
+    run_parser.add_argument(
+        "--execute", "-x",
+        action="store_true",
+        help="Run DFT via subprocess after input generation (QE only).",
+    )
+    run_parser.add_argument(
+        "--nprocs", "-np",
+        type=int,
+        default=1,
+        help="MPI process count for --execute (default: 1).",
+    )
+    run_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=86400,
+        help="Execution timeout in seconds (default: 86400).",
+    )
+    run_parser.add_argument(
+        "--mpi-command",
+        default="mpirun",
+        help="MPI launcher command (default: mpirun).",
+    )
+
     return parser
 
 
@@ -194,6 +218,17 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print(f"Auto:      {result.auto_detected}")
             print(f"Output:    {result.output_dir}/")
             print(f"Files:     {', '.join(result.files_generated)}")
+
+            # Execute DFT if requested
+            if getattr(args, "execute", False):
+                if args.backend == "vasp":
+                    print("\nError: VASP local execution not yet supported.")
+                    print("Run manually: cd {result.output_dir} && mpirun vasp_std")
+                    return 1
+
+                exec_code = _execute_dft(result.output_dir or ".", args)
+                return exec_code
+
             print()
             print("Next steps:")
             if result.backend_name == "vasp":
@@ -206,6 +241,59 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"Error: {result.error}")
 
     return 0 if result.success else 1
+
+
+def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
+    """Execute DFT and display results."""
+    from shalom.backends.qe import QEBackend
+    from shalom.backends.runner import ExecutionConfig, ExecutionRunner, execute_with_recovery
+    from shalom.backends.qe_error_recovery import QEErrorRecoveryEngine
+
+    print(f"\nExecuting QE (nprocs={args.nprocs})...")
+
+    exec_config = ExecutionConfig(
+        nprocs=args.nprocs,
+        mpi_command=args.mpi_command,
+        timeout_seconds=args.timeout,
+    )
+    runner = ExecutionRunner(config=exec_config)
+
+    # Validate prerequisites
+    prereq_errors = runner.validate_prerequisites(output_dir)
+    if prereq_errors:
+        for err in prereq_errors:
+            print(f"  Error: {err}")
+        return 1
+
+    backend = QEBackend()
+    recovery = QEErrorRecoveryEngine()
+
+    exec_result, dft_result, history = execute_with_recovery(
+        backend, runner, recovery, output_dir,
+        config=None, atoms=None, max_retries=3,
+    )
+
+    print(f"Wall time: {exec_result.wall_time_seconds:.1f}s")
+
+    if history:
+        print(f"Corrections: {len(history)}")
+        for entry in history:
+            print(f"  - {entry['error_type']} step {entry['step']}")
+
+    if dft_result is not None and dft_result.is_converged:
+        print("Status:    Converged")
+        if dft_result.energy is not None:
+            print(f"Energy:    {dft_result.energy:.6f} eV")
+        if dft_result.forces_max is not None:
+            print(f"Max force: {dft_result.forces_max:.6f} eV/A")
+        if dft_result.quality_warnings:
+            print(f"Warnings:  {', '.join(dft_result.quality_warnings)}")
+        return 0
+    else:
+        print("Status:    FAILED")
+        if exec_result.error_message:
+            print(f"Error:     {exec_result.error_message}")
+        return 1
 
 
 def main() -> None:

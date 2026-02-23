@@ -49,6 +49,7 @@ class DFTResult:
     ionic_energies: Optional[List[float]] = None
     ionic_forces_max: Optional[List[float]] = None
     error_log: Optional[str] = None  # Compressed log — not for scan_for_errors().
+    quality_warnings: List[str] = field(default_factory=list)
     correction_history: List[Dict[str, Any]] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
 

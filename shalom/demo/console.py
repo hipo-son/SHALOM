@@ -102,7 +102,7 @@ class DemoConsole:
         table.add_column("Status", justify="center")
 
         # Build score lookup
-        scores = {}
+        scores: dict[str, dict[str, float]] = {}
         for ev in details.evaluations:
             for cs in ev.scores:
                 scores.setdefault(cs.material_name, {})[ev.perspective] = cs.score
