@@ -68,84 +68,167 @@ This pipeline is one instantiation of the SHALOM framework. The same core compon
 
 SHALOM abstracts DFT-specific details behind a unified interface so that agents operate on the same schema regardless of the solver. Individual researchers can prototype with Quantum ESPRESSO locally, then scale to VASP on institutional HPC resources without changing agent logic.
 
-## Installation
+## Getting Started
+
+> **Note**: SHALOM is not yet published to PyPI. Install from source via GitHub clone.
+
+### Step 1 — Clone the Repository
+
+Clone into your `Desktop` or `projects` folder to keep things organized:
 
 ```bash
-pip install shalom            # core dependencies
-pip install shalom[all]       # includes pymatgen, mp-api, dev tools, docs, demo
-pip install -e ".[dev]"       # development (tests, linting, type-checking)
+cd ~/Desktop          # or: cd ~/projects
+git clone https://github.com/hipo-son/SHALOM.git
+cd SHALOM
 ```
 
-For HPC clusters with containerized deployments:
+### Step 2 — Create a Python Environment
+
+**Option A: conda (recommended)** — best for managing pymatgen/ASE dependencies:
+
 ```bash
-docker pull ghcr.io/hipo-son/shalom:latest
+conda env create -f environment.yml
+conda activate shalom-env
 ```
 
-## Quick Start
+**Option B: venv** — if you don't have conda:
 
-The example below runs the built-in material discovery pipeline — the first proof-of-concept use case:
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e ".[dev,mp]"
+```
+
+Verify the installation:
+
+```bash
+python -m shalom --help
+```
+
+### Step 3 — Configure API Keys
+
+Copy the template and fill in your keys:
+
+```bash
+cp .env.example .env
+# Edit .env with your keys, then:
+source .env
+```
+
+| Key | Purpose | Where to Get |
+|-----|---------|--------------|
+| `OPENAI_API_KEY` | LLM agents (Design / Review layer) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| `ANTHROPIC_API_KEY` | Alternative to OpenAI | [console.anthropic.com](https://console.anthropic.com/) |
+| `MP_API_KEY` | Fetch structures by MP ID or formula | [next-gen.materialsproject.org/api](https://next-gen.materialsproject.org/api) (free) |
+| `SHALOM_PSEUDO_DIR` | QE pseudopotential directory | Set after running `setup-qe --download` |
+
+Only **one** of `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` is needed. `MP_API_KEY` is required only when looking up structures by MP ID or chemical formula.
+
+### Step 4 — Set Up Quantum ESPRESSO (QE backend only)
+
+Skip this step if you only use the VASP backend.
+
+```bash
+# Linux / WSL2 (Ubuntu/Debian)
+sudo apt install quantum-espresso
+
+# conda
+conda install -c conda-forge qe
+
+# Windows (native) → pw.x is not supported; use WSL2:
+wsl -d Ubuntu-22.04
+sudo apt install quantum-espresso
+```
+
+Download SSSP pseudopotentials for your elements:
+
+```bash
+python -m shalom setup-qe --elements Si,Fe,O --download
+
+# Check overall QE environment
+python -m shalom setup-qe
+```
+
+### Step 5 — Run Your First Calculation
+
+Choose the path that matches what you have available:
+
+```bash
+# Path A — local structure file (no API keys needed)
+python -m shalom run --structure POSCAR --backend vasp
+
+# Path B — Materials Project ID (MP_API_KEY required)
+python -m shalom run mp-19717 --backend vasp
+
+# Path C — chemical formula + QE (MP_API_KEY + QE install required)
+python -m shalom run Si --backend qe --calc scf
+```
+
+Each run creates a timestamped output folder (e.g., `Si_qe_static/`) containing the DFT input files and a **`README.md`** explaining what was generated and how to proceed.
+
+---
+
+## CLI Reference
+
+```bash
+python -m shalom run mp-19717                              # VASP vc-relax (default)
+python -m shalom run Fe2O3 --backend qe --calc scf         # QE SCF
+python -m shalom run --structure POSCAR --backend vasp      # Local structure file
+python -m shalom run mp-19717 --set ENCUT=600               # Override a parameter
+python -m shalom run Fe2O3 --backend qe --set ecutwfc=80    # QE parameter override
+python -m shalom run Si --backend qe --calc scf --execute   # Generate + run pw.x
+python -m shalom run Si --backend qe -x -np 4 --timeout 7200  # 4 MPI procs, 2h timeout
+python -m shalom setup-qe                                   # Check QE environment
+python -m shalom setup-qe --elements Si,Fe --download       # Download pseudopotentials
+```
+
+## Quick Demo
+
+Try the interactive multi-agent demo with rich console output:
+
+```bash
+export OPENAI_API_KEY='sk-...'          # or ANTHROPIC_API_KEY
+
+python -m shalom.demo --dry-run                    # preview (no API calls, $0)
+python -m shalom.demo --scenario smoke_test         # real API (~$0.03)
+python -m shalom.demo --scenario her_catalyst       # multi-agent (~$0.12)
+python -m shalom.demo --list                        # list available scenarios
+```
+
+The demo runs the full pipeline (Design → Simulation) with real-time cost tracking and JSON report generation. Use `--dry-run` for zero-cost offline testing.
+
+## Python API
 
 ```python
 from shalom.core.llm_provider import LLMProvider
 from shalom.agents.design_layer import CoarseSelector, FineSelector
 
-# 1. Initialize an LLM backend
+# Initialize LLM backend (reads OPENAI_API_KEY from environment)
 llm = LLMProvider(provider_type="openai", model_name="gpt-4o")
 objective = "Find a stable 2D transition metal dichalcogenide with bandgap > 1.0eV"
 
-# 2. Design Layer: Coarse Selection
 coarse = CoarseSelector(llm)
 candidates = coarse.select(objective)
 
-# 3. Design Layer: Fine Ranking
 fine = FineSelector(llm)
 winner = fine.rank_and_select(objective, candidates)
-
 print(f"Top Material: {winner.candidate.material_name} (Score: {winner.score})")
 ```
 
-For the full pipeline (Simulation + Review layers) and guidance on building custom agent hierarchies, see the [Documentation](https://shalom.readthedocs.io/en/latest/).
+For the full pipeline (Simulation + Review layers), see the [Documentation](https://shalom.readthedocs.io/en/latest/).
 
-## CLI Usage
+## Known Issues
 
-Generate DFT input files directly from Materials Project IDs or local structure files:
+- **VASP OUTCAR parsing**: 19 tests fail with `pymatgen>=2025.10` due to an upstream `IndexError` in `Outcar.__init__`. `environment.yml` pins `pymatgen<2025.10` to avoid this. QE, agent, and CLI tests are unaffected.
+- **QE on Windows (native)**: `pw.x` requires WSL2. File generation works on native Windows; execution does not.
 
-```bash
-python -m shalom run mp-19717                              # VASP vc-relax (default)
-python -m shalom run Fe2O3 --backend qe --calc scf         # QE SCF
-python -m shalom run --structure POSCAR --backend vasp      # Local file
-python -m shalom run mp-19717 --set ENCUT=600               # Override parameters
-```
+## HPC / Docker
 
-### QE Execution (Local)
-
-Run QE calculations directly from SHALOM:
+For containerized deployments on HPC clusters:
 
 ```bash
-# 1. Check QE setup
-python -m shalom setup-qe --elements Si --download
-
-# 2. Generate + execute
-python -m shalom run Si --backend qe --calc scf --execute
+docker pull ghcr.io/hipo-son/shalom:latest
 ```
-
-Requires `pw.x` on PATH. On Windows, run from inside WSL2.
-
-## Quick Demo
-
-Try the interactive demo with rich console output:
-
-```bash
-pip install -e ".[demo]"                # install with demo dependencies
-export OPENAI_API_KEY='sk-...'          # or ANTHROPIC_API_KEY
-
-python -m shalom.demo --dry-run                    # preview (no API calls, $0)
-python -m shalom.demo --scenario smoke_test         # real API (3 calls, ~$0.03)
-python -m shalom.demo --scenario her_catalyst       # multi-agent (9 calls, ~$0.12)
-python -m shalom.demo --list                        # list all scenarios
-```
-
-The demo runs the full pipeline (Design → Simulation) with real-time cost tracking, multi-agent evaluation matrix display, and JSON report generation. Use `--dry-run` for zero-cost offline testing.
 
 ## Roadmap
 

@@ -76,6 +76,138 @@ class DirectRunResult:
     auto_detected: Optional[Dict[str, Any]] = None
 
 
+def _write_output_readme(
+    output_dir: str,
+    backend_name: str,
+    calc_type: str,
+    structure_info: Optional[Dict[str, Any]],
+    auto_detected: Optional[Dict[str, Any]],
+    files_generated: List[str],
+) -> None:
+    """Write a README.md into the DFT output folder explaining the generated files."""
+    import datetime
+
+    try:
+        import shalom as _shalom_pkg
+        version = getattr(_shalom_pkg, "__version__", "0.1.0")
+    except Exception:
+        version = "0.1.0"
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    info = structure_info or {}
+    formula = info.get("formula", "Unknown")
+    mp_id = info.get("mp_id", "")
+    spacegroup = info.get("space_group", "")
+    e_hull = info.get("energy_above_hull")
+    source = info.get("source", "")
+
+    # Title line
+    title = f"SHALOM DFT Calculation: {formula}"
+    if mp_id:
+        title += f" ({mp_id})"
+
+    lines: List[str] = [
+        f"# {title}",
+        "",
+        f"Generated: {now}  ",
+        f"SHALOM v{version} | Backend: `{backend_name}` | Calc: `{calc_type}`",
+        "",
+    ]
+
+    # Material information
+    lines += ["## Material Information", ""]
+    lines.append(f"- **Formula**: {formula}")
+    if mp_id:
+        lines.append(f"- **MP ID**: [{mp_id}](https://materialsproject.org/materials/{mp_id})")
+    if spacegroup:
+        lines.append(f"- **Spacegroup**: {spacegroup}")
+    if e_hull is not None:
+        lines.append(f"- **E above hull**: {e_hull:.4f} eV/atom")
+    if source and not mp_id:
+        lines.append(f"- **Source**: {source}")
+    lines.append("")
+
+    # Auto-detected parameters
+    if auto_detected:
+        lines += ["## Auto-Detected Parameters", ""]
+        for key, val in auto_detected.items():
+            lines.append(f"- **{key}**: {val}")
+        lines.append("")
+
+    # File descriptions
+    _FILE_DESC: Dict[str, str] = {
+        "POSCAR": "Crystal structure (fractional coordinates, VASP format)",
+        "INCAR": "VASP calculation parameters",
+        "KPOINTS": "k-point mesh for Brillouin zone sampling",
+        "POTCAR.spec": "List of required pseudopotentials — obtain POTCAR files separately",
+        "POTCAR": "Pseudopotential file (PAW, PBE)",
+        "OUTCAR": "VASP output (energy, forces, stress, etc.)",
+        "pw.in": "Quantum ESPRESSO input file (pw.x)",
+        "pw.out": "Quantum ESPRESSO output (after calculation)",
+        "atoms.txt": "ASE-format structure file (human-readable)",
+    }
+    if files_generated:
+        lines += ["## Generated Files", ""]
+        for fname in files_generated:
+            desc = _FILE_DESC.get(fname, "")
+            if desc:
+                lines.append(f"- `{fname}` — {desc}")
+            else:
+                lines.append(f"- `{fname}`")
+        lines.append("")
+
+    # Next steps
+    lines += ["## Next Steps", ""]
+    if backend_name == "vasp":
+        potcar_spec = f"{output_dir}/POTCAR.spec"
+        lines += [
+            f"1. Obtain POTCAR files listed in `{potcar_spec}`",
+            f"2. Run VASP:",
+            f"   ```bash",
+            f"   cd {output_dir}",
+            f"   mpirun -np 4 vasp_std > vasp.log 2>&1",
+            f"   ```",
+        ]
+    else:
+        lines += [
+            "1. Ensure pseudopotentials are available:",
+            "   ```bash",
+            "   python -m shalom setup-qe --elements <ELEMENTS> --download",
+            "   ```",
+            f"2. Run Quantum ESPRESSO:",
+            f"   ```bash",
+            f"   cd {output_dir}",
+            f"   mpirun -np 4 pw.x < pw.in > pw.out 2>&1",
+            f"   ```",
+            "   (On Windows, run from inside WSL2)",
+        ]
+    lines.append("")
+
+    # Reproduce command
+    lines += ["## Reproduce This Run", ""]
+    cmd_parts = ["python -m shalom run"]
+    if mp_id:
+        cmd_parts.append(mp_id)
+    elif source and source != "local file":
+        cmd_parts.append(formula)
+    else:
+        cmd_parts.extend(["--structure", "<your_structure_file>"])
+    cmd_parts.extend(["--backend", backend_name])
+    if calc_type not in ("relaxation", "vc-relax"):
+        cmd_parts.extend(["--calc", calc_type])
+    lines.append("```bash")
+    lines.append(" ".join(cmd_parts))
+    lines.append("```")
+    lines.append("")
+
+    readme_path = os.path.join(output_dir, "README.md")
+    try:
+        with open(readme_path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+    except OSError as exc:
+        logger.warning("Could not write output README.md: %s", exc)
+
+
 def _resolve_calc_type(calc_type: Optional[str], backend_name: str) -> str:
     """Resolve calc_type alias to canonical VASP name."""
     if calc_type is None:
@@ -305,6 +437,16 @@ def direct_run(
 
     # 7. List generated files
     files_generated = sorted(os.listdir(output_dir)) if os.path.isdir(output_dir) else []
+
+    # 8. Write README.md into the output folder
+    _write_output_readme(
+        output_dir=output_dir,
+        backend_name=config.backend_name,
+        calc_type=calc_type,
+        structure_info=structure_info,
+        auto_detected=auto_detected,
+        files_generated=[f for f in files_generated if f != "README.md"],
+    )
 
     return DirectRunResult(
         success=True,

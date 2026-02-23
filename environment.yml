@@ -1,17 +1,37 @@
 name: shalom-env
+# Python 3.11 권장 (pymatgen/ASE 호환성 최적)
+# Python 3.9+ 지원하나, mp-api + emmet-core 조합은 3.10+ 권장
 channels:
   - conda-forge
   - defaults
 dependencies:
   - python=3.11
   - pip
-  - numpy>=1.24.0
-  - ase>=3.22.1
-  - pymatgen>=2023.10.11
-  - pydantic>=2.4.0
-  - pyyaml>=6.0
-  - pytest>=7.0
-  - openai>=1.0.0
+
+  # ── 과학 계산 (Scientific computing) ────────────────────────────────────
+  - numpy>=1.24.0       # 수치 계산
+  - ase>=3.22.1         # Atomic Simulation Environment (구조 처리)
+  - pymatgen>=2023.10.11,<2025.10.0  # 재료 분석 (2025.10+ OUTCAR 버그)
+  - pyyaml>=6.0         # YAML 설정 파일
+
+  # ── 데이터 검증 ──────────────────────────────────────────────────────────
+  - pydantic>=2.4.0     # Pydantic v2 (LLM 응답 스키마 검증)
+
+  # ── LLM 클라이언트 ───────────────────────────────────────────────────────
+  # openai >= 1.40.0 필수: beta.chat.completions.parse (structured outputs)
+  - openai>=1.40.0
   - anthropic>=0.25.0
+
+  # ── 개발 도구 (Development tools) ────────────────────────────────────────
+  - pytest>=7.0
+  - ruff              # 린터
+  - black             # 포맷터
+
+  # ── pip으로만 설치 가능한 패키지 ────────────────────────────────────────
   - pip:
-    - -e .
+    - pytest-cov
+    - pytest-mock
+    - mypy
+    - rich>=13.0        # 콘솔 UI (demo + dev 테스트)
+    - mp-api>=0.39.0    # Materials Project API 클라이언트
+    - -e .              # SHALOM 자체를 editable 모드로 설치
