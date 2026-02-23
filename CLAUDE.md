@@ -70,7 +70,7 @@ shalom/
 - Mock LLM calls with `unittest.mock` (no real API calls in tests)
 - Known: 19 VASP OUTCAR parse tests fail with pymatgen>=2025.10 (upstream `IndexError` in `Outcar.__init__`); QE/agent/CLI tests unaffected
 - QE integration test (`test_si_scf_end_to_end`) requires pw.x; auto-skipped on Windows
-- On Windows/bash, run via: `/c/Users/Sejong/miniconda3/Scripts/conda.exe run -n shalom-env python -m pytest tests/`
+- On Windows/bash with conda: `conda run -n shalom-env python -m pytest tests/`
 
 ### Code Quality
 - `ruff check shalom/` — linting

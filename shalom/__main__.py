@@ -583,7 +583,7 @@ def _print_install_guide_windows(distros: list) -> None:
     print("  All SHALOM commands must be run from within WSL2:")
     print()
     print(f"    {wsl_cmd}")
-    print("    cd /mnt/c/Users/$USER/Desktop/SHALOM")
+    print("    cd /mnt/c/<path-to-SHALOM>          # your SHALOM clone location")
     print()
     print("  Set up Python environment inside Ubuntu:")
     print()
