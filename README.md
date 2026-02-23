@@ -100,6 +100,14 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev,mp]"
 ```
 
+To enable band/DOS plotting (matplotlib + seekpath):
+
+```bash
+pip install -e ".[plotting]"
+# or with everything:
+pip install -e ".[all]"
+```
+
 Verify the installation:
 
 ```bash
@@ -191,6 +199,21 @@ python -m shalom run Si -o ./my_output                     # explicit path (bypa
 # ── QE setup ──────────────────────────────────────────────────────────────────
 python -m shalom setup-qe                                   # Check QE environment
 python -m shalom setup-qe --elements Si,Fe --download       # Download pseudopotentials
+
+# ── Band/DOS plotting (requires pip install shalom[plotting]) ──────────────────
+python -m shalom plot ./03_bands --bands                   # Band structure plot
+python -m shalom plot ./04_nscf --dos                      # DOS plot
+python -m shalom plot ./03_bands --bands --fermi-from ./04_nscf  # NSCF Fermi energy
+python -m shalom plot ./03_bands --bands --emin -8 --emax 6 --title "Si bands"
+
+# ── 5-step QE workflow (vc-relax → scf → bands → nscf → dos.x → plots) ───────
+python -m shalom workflow Si -o ./si_wf -np 4             # Full sequential workflow
+python -m shalom workflow Si --skip-relax -np 4           # Start from SCF (no relax)
+python -m shalom workflow mp-19717 -b qe -np 8 --dos-emin -20  # Custom DOS window
+
+# ── Convergence tests (run cutoff first, then kpoints) ────────────────────────
+python -m shalom converge Si --test cutoff --values 30,40,50,60,80 -np 2
+python -m shalom converge Si --test kpoints --values 20,30,40,50 --ecutwfc 60
 ```
 
 ## Quick Demo
@@ -245,7 +268,7 @@ docker pull ghcr.io/hipo-son/shalom:latest
 
 | Phase | Target | Key Features | Status |
 |-------|--------|-------------|--------|
-| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, token-aware compression | Code complete (835 tests, 95.4% coverage) |
+| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, token-aware compression, band/DOS plotting, convergence tests, 5-step sequential workflow | Code complete (954 tests, 95.4% coverage) |
 | **Phase 2** | Engine expansion | VASP-Slurm HPC, LAMMPS/AIMD integration, Dynamic Recipe Generator, 100+ self-correction benchmarks | Planned |
 | **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) | Planned |
 

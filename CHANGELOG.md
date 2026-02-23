@@ -8,6 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Band/DOS visualisation** (`shalom/plotting/` — optional; `pip install shalom[plotting]`)
+  - `BandStructurePlotter`: band structure plot with high-symmetry tick labels (`Dict[int, str]` index keys), spin-polarised two-colour rendering (royalblue / crimson), Fermi-level shift, energy window clamping, PNG export
+  - `DOSPlotter`: total/spin-polarised DOS with mirrored spin-down convention, integrated DOS overlay, fill shading, Fermi-level vertical line, energy window support
+  - `_format_label()` helper: maps "G"/"Gamma"/"GAMMA" → "Γ", passthrough for unknown labels
+  - matplotlib imported lazily; `ImportError` raised with `pip install shalom[plotting]` hint when absent
+- **QE output parsers** (`shalom/backends/qe_parser.py`)
+  - `parse_xml_bands(xml_path, fermi_energy)`: reads `data-file-schema.xml` (QE 7.x), converts eigenvalues Hartree→eV (`HA_TO_EV = 27.2114`), builds `kpath_distances` from reciprocal-lattice vectors, detects `lsda` spin flag
+  - `parse_dos_file(dos_path)`: parses `pwscf.dos` (dos.x output); auto-detects 3-column (non-spin) vs 4-column (spin-polarised); total DOS = dos_up + dos_down
+  - `find_xml_path(calc_dir, prefix)`: three-location search (`{dir}/{prefix}.save/`, `{dir}/tmp/{prefix}.save/`, glob fallback)
+  - `extract_fermi_energy(pw_out_path)`: regex extraction from `pw.out` (`the Fermi energy is … ev`, case-insensitive)
+  - `compute_nbnd(atoms, multiplier=1.3)`: auto-compute `nbnd` from SSSP z_valence → `max(20, ceil(n_occ × multiplier))`
+  - Constants exported: `HA_TO_EV`, `QE_XML_NS`
+- **Backend-agnostic result dataclasses** (`shalom/backends/base.py`)
+  - `BandStructureData`: eigenvalues (eV), kpath_distances, high_sym_labels `Dict[int, str]`, optional spin_up/spin_down arrays, source tag ("qe"/"vasp")
+  - `DOSData`: energies (eV), dos, integrated_dos, optional dos_up/dos_down, source tag
+- **K-path generation** (`shalom/backends/qe_config.py`)
+  - `generate_band_kpath(atoms, npoints, is_2d)`: seekpath-based high-symmetry path with FCC/BCC/HEX/ORC/CUB fallback; `is_2d=True` forces kz=0 on all k-points; returns `QEKPointsConfig(mode="crystal_b")`
+  - `QEKPointsConfig` extended with `kpath_points: List[Tuple[List[float], int]]` and `kpath_labels: Dict[int, str]`
+- **Convergence workflows** (`shalom/workflows/`)
+  - `ConvergenceWorkflow` ABC (`base.py`): per-atom convergence threshold (1 meV/atom default), sequential/parallel run dispatch, `_find_converged_value()`, `plot()` interface
+  - `CutoffConvergence` (`convergence.py`): sweeps `ecutwfc` values with fixed k-mesh; `ecutrho` maintained at SSSP ratio; convergence plot (energy vs. ecutwfc)
+  - `KpointConvergence` (`convergence.py`): sweeps k-point resolution (Bohr⁻¹ → Monkhorst-Pack grid) with fixed `ecutwfc`; convergence plot (energy vs. k-mesh density)
+  - `ConvergenceResult` / `ConvergenceTestResult` dataclasses with `.summary()` and `.converged_results` property
+- **5-step QE workflow** (`shalom/workflows/standard.py`)
+  - `StandardWorkflow`: orchestrates vc-relax → scf → bands → nscf → dos.x → band/DOS plots in a single call
+  - Absolute `outdir` path sharing between scf, bands, and nscf (HPC-safe)
+  - dos.x input energies in Ry (`EV_TO_RY = 1/13.6057`); dos.x run serial (nprocs=1)
+  - Fermi energy priority: NSCF > SCF (metals may differ by 10–100 meV)
+  - `--skip-relax` flag to restart from existing structure
+  - Returns dict with `bands_png`, `dos_png`, `fermi_energy`, and per-step `calc_dirs`
+- **New CLI subcommands** (`shalom/__main__.py`)
+  - `python -m shalom plot <dir>` — generate band or DOS plot from completed calculation
+  - `python -m shalom workflow <formula>` — run full 5-step pipeline
+  - `python -m shalom converge <formula>` — run cutoff or k-point convergence test
+- **`parse_output_bands()`** method on `QEBackend` — bands/nscf result parsing (convergence via "JOB DONE.", energy=None, forces=None)
+- **nscf preset improvements** (`qe_presets.yaml`, `_defaults.py`)
+  - `occupations: tetrahedra_opt` (replaces `tetrahedra`) for improved DOS integration accuracy
+  - `nosym: true`, `noinv: true` — full BZ sampling required for DOS
+- **`[plotting]` optional dependency extra** (`pyproject.toml`): `matplotlib>=3.5.0`, `seekpath>=2.0.0`
+- **48 new tests** (954 total): `test_qe_parser.py` (26), `test_band_plot.py` (6), `test_dos_plot.py` (6), `test_convergence.py` (13), `test_standard_workflow.py` (9); fixtures: `mock_bands_xml.xml`, `mock_dos.dat`, `mock_dos_spin.dat`
+
 - **`setup-qe` CLI subcommand** (`python -m shalom setup-qe`)
   - QE prerequisite checker: pw.x detection, pseudo_dir validation
   - Per-element SSSP pseudopotential file checking with case-insensitive fallback

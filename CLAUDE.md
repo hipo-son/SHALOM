@@ -10,12 +10,22 @@ shalom/
 ├── backends/         # DFT backends (VASP, QE) + error recovery + execution
 │   ├── _physics.py   # Shared physics constants (AccuracyLevel, MAGMOM, detect_2d, etc.)
 │   ├── _compression.py # Token-aware error log compression (compress_error_log, truncate_to_tokens)
+│   ├── base.py       # Backend-agnostic dataclasses: DFTResult, BandStructureData, DOSData
 │   ├── vasp.py       # VASP backend (write_input, parse_output)
 │   ├── vasp_config.py # VASP config (VASPInputConfig, get_preset)
-│   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out)
-│   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, SSSP metadata)
+│   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out, parse_output_bands)
+│   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, generate_band_kpath, SSSP metadata)
+│   ├── qe_parser.py  # QE output parsers (parse_xml_bands, parse_dos_file, find_xml_path,
+│   │                 #   extract_fermi_energy, compute_nbnd; HA_TO_EV=27.2114, QE_XML_NS)
 │   ├── qe_error_recovery.py # QE error recovery (progressive correction, S-matrix diagnostic)
 │   └── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop)
+├── plotting/         # Matplotlib visualisation (optional: pip install shalom[plotting])
+│   ├── band_plot.py  # BandStructurePlotter — band structure with high-sym labels, spin
+│   └── dos_plot.py   # DOSPlotter — total/spin-polarised DOS with Fermi level marker
+├── workflows/        # High-level multi-step workflows
+│   ├── base.py       # ConvergenceWorkflow ABC, ConvergenceResult, ConvergenceTestResult
+│   ├── convergence.py # CutoffConvergence (ecutwfc sweep), KpointConvergence (k-mesh sweep)
+│   └── standard.py   # StandardWorkflow — 5-step QE pipeline (vc-relax→scf→bands→nscf→dos.x→plot)
 ├── core/             # LLMProvider, schemas, sandbox
 ├── tools/            # ASE builder utilities
 ├── prompts/          # LLM system prompts (.md files)
@@ -29,7 +39,7 @@ shalom/
 ├── _defaults.py      # Hardcoded fallback values
 ├── mp_client.py      # Materials Project API client (optional: pip install mp-api)
 ├── direct_run.py     # Direct material run (structure -> DFT input files)
-├── __main__.py       # CLI: python -m shalom run mp-19717 --backend qe
+├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge
 └── pipeline.py       # End-to-end LLM pipeline orchestrator
 ```
 
@@ -54,7 +64,7 @@ shalom/
 4. Use `load_config("new_name")` in consuming code
 
 ### Testing
-- `pytest tests/ -x` — run all tests (836 total, 95.4% coverage)
+- `pytest tests/ -x` — run all tests (954 total, 95.4% coverage)
 - `pytest tests/ --cov=shalom --cov-fail-under=85` — with coverage
 - All existing tests must pass unchanged when refactoring
 - Mock LLM calls with `unittest.mock` (no real API calls in tests)
@@ -96,6 +106,21 @@ python -m shalom run Si -p silicon_study                    # project sub-folder
 python -m shalom run Si -w /data/runs                      # custom workspace root
 python -m shalom setup-qe                                   # QE environment check
 python -m shalom setup-qe --elements Si,Fe --download       # Download missing pseudos
+
+# ── Band/DOS plotting (from completed QE calculation) ─────────────────────────
+python -m shalom plot ./03_bands --bands                   # Plot band structure
+python -m shalom plot ./04_nscf --dos                      # Plot DOS
+python -m shalom plot ./03_bands --bands --fermi-from ./04_nscf  # Use NSCF Fermi energy
+python -m shalom plot ./03_bands --bands --emin -8 --emax 6 --title "Si"
+
+# ── Sequential 5-step workflow ────────────────────────────────────────────────
+python -m shalom workflow Si -o ./si_wf -np 4             # Full vc-relax→scf→bands→nscf→dos
+python -m shalom workflow Si --skip-relax -np 4           # Skip vc-relax, start from SCF
+python -m shalom workflow mp-19717 -b qe -np 8 --dos-emin -20
+
+# ── Convergence tests (run ecutwfc first, then kpoints) ──────────────────────
+python -m shalom converge Si --test cutoff --values 30,40,50,60,80 -np 2
+python -m shalom converge Si --test kpoints --values 20,30,40,50 --ecutwfc 60
 ```
 
 ### Workspace / Output Directory

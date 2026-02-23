@@ -460,16 +460,56 @@ class Pipeline:
                     steps_completed=steps_completed,
                 )
             try:
-                generator = GeometryGenerator(llm_provider=self.llm)
-                reviewer = GeometryReviewer(
-                    generator=generator,
-                    max_retries=self.config.max_retries,
-                    backend=self.backend,
-                    dft_config=dft_config,
-                )
-                success, atoms, path_or_error = reviewer.run_creation_loop(
-                    self.objective, ranked_material
-                )
+                from shalom.mp_client import is_mp_available, fetch_structure
+                mp_success = False
+
+                if is_mp_available():
+                    try:
+                        logger.info("Attempting MP structure fetch for '%s'", ranked_material.candidate.material_name)
+                        mp_result = fetch_structure(ranked_material.candidate.material_name)
+                        atoms = mp_result.atoms
+                        
+                        import copy
+                        import re
+                        from shalom.tools.ase_builder import ASEBuilder
+                        from shalom.agents.simulation_layer import _apply_structure_hints
+
+                        output_dir = "generated_structures"
+                        mat_name = re.sub(r'[^\w\-.]', '_', ranked_material.candidate.material_name)
+
+                        if self.backend is not None:
+                            if self.backend.name == "qe":
+                                write_params = {}
+                            else:
+                                write_params = {"filename": f"POSCAR_{mat_name}"}
+                            if dft_config is not None:
+                                effective_config = copy.deepcopy(dft_config)
+                                _apply_structure_hints(self.backend.name, atoms, effective_config)
+                                write_params["config"] = effective_config
+                            path_or_error = self.backend.write_input(
+                                atoms, output_dir, **write_params
+                            )
+                        else:
+                            path_or_error = ASEBuilder.save_poscar(
+                                atoms, filename=f"POSCAR_{mat_name}", directory=output_dir
+                            )
+                        success = True
+                        mp_success = True
+                        logger.info("Successfully fetched structure from Materials Project.")
+                    except Exception as mp_e:
+                        logger.warning("MP structure fetch failed: %s. Falling back to AI Geometry Generator.", mp_e)
+
+                if not mp_success:
+                    generator = GeometryGenerator(llm_provider=self.llm)
+                    reviewer = GeometryReviewer(
+                        generator=generator,
+                        max_retries=self.config.max_retries,
+                        backend=self.backend,
+                        dft_config=dft_config,
+                    )
+                    success, atoms, path_or_error = reviewer.run_creation_loop(
+                        self.objective, ranked_material
+                    )
             except Exception as e:
                 logger.error("Structure generation failed: %s", e)
                 return PipelineResult(
