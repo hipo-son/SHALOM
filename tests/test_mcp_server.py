@@ -6,13 +6,10 @@ Each tool function is tested by mocking the SHALOM library calls it wraps.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from ase import Atoms
 from ase.build import bulk
 
 
@@ -168,6 +165,14 @@ class TestGenerateDftInput:
 
         assert result["success"] is False
         assert "No structure" in result["error"]
+        # Actionable guidance in error message
+        assert "MP ID" in result["error"] or "structure_file" in result["error"]
+
+    def test_invalid_backend(self):
+        mod = _import_mcp_server()
+        result = mod.generate_dft_input(material="Si", backend="lammps")
+        assert result["success"] is False
+        assert "Invalid backend" in result["error"]
 
 
 # ===========================================================================
@@ -185,7 +190,7 @@ class TestRunWorkflow:
             "calc_dirs": {"01_relax": "/tmp/wf/01_relax"},
         }
 
-        with patch.object(mod, "_load_atoms", return_value=bulk("Si")), \
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "materials_project")), \
              patch("shalom.workflows.standard.StandardWorkflow") as MockWF:
             MockWF.return_value.run.return_value = mock_wf_result
             result = mod.run_workflow(
@@ -197,6 +202,39 @@ class TestRunWorkflow:
         assert result["success"] is True
         assert result["fermi_energy_eV"] == 6.48
         assert result["bands_png"] == "/tmp/wf/bands.png"
+        assert "warning" not in result  # MP source → no fallback warning
+
+    def test_run_with_new_params(self):
+        """New params (mpi_command, pw_executable, etc.) are passed to StandardWorkflow."""
+        mod = _import_mcp_server()
+
+        mock_wf_result = {
+            "fermi_energy": 5.0,
+            "bands_png": None,
+            "dos_png": None,
+            "calc_dirs": {},
+        }
+
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "structure_file")), \
+             patch("shalom.workflows.standard.StandardWorkflow") as MockWF:
+            MockWF.return_value.run.return_value = mock_wf_result
+            result = mod.run_workflow(
+                material="Si",
+                output_dir="/tmp/wf",
+                mpi_command="srun",
+                pw_executable="/opt/qe/pw.x",
+                dos_executable="/opt/qe/dos.x",
+                npoints_kpath=60,
+                dos_deltaE=0.005,
+            )
+
+        assert result["success"] is True
+        call_kwargs = MockWF.call_args[1]
+        assert call_kwargs["mpi_command"] == "srun"
+        assert call_kwargs["pw_executable"] == "/opt/qe/pw.x"
+        assert call_kwargs["dos_executable"] == "/opt/qe/dos.x"
+        assert call_kwargs["npoints_kpath"] == 60
+        assert call_kwargs["dos_deltaE"] == 0.005
 
     def test_run_bad_material(self):
         mod = _import_mcp_server()
@@ -207,6 +245,26 @@ class TestRunWorkflow:
 
         assert result["success"] is False
         assert "Cannot resolve" in result["error"]
+
+    def test_ase_bulk_fallback_warning(self):
+        """ASE bulk fallback should include a warning."""
+        mod = _import_mcp_server()
+
+        mock_wf_result = {
+            "fermi_energy": 6.0,
+            "bands_png": None,
+            "dos_png": None,
+            "calc_dirs": {},
+        }
+
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "ase_bulk_fallback")), \
+             patch("shalom.workflows.standard.StandardWorkflow") as MockWF:
+            MockWF.return_value.run.return_value = mock_wf_result
+            result = mod.run_workflow(material="Si", output_dir="/tmp/wf")
+
+        assert result["success"] is True
+        assert "warning" in result
+        assert "ASE bulk" in result["warning"]
 
 
 # ===========================================================================
@@ -285,6 +343,14 @@ class TestParseDftOutput:
 
         assert result["success"] is False
         assert "pw.out" in result["error"]
+        # Actionable guidance
+        assert "execute_dft" in result["error"] or "run_workflow" in result["error"]
+
+    def test_invalid_backend(self):
+        mod = _import_mcp_server()
+        result = mod.parse_dft_output("/tmp/calc", backend="lammps")
+        assert result["success"] is False
+        assert "Invalid backend" in result["error"]
 
 
 # ===========================================================================
@@ -376,7 +442,7 @@ class TestRunConvergence:
         mock_result.converged_value = 50.0
         mock_result.summary.return_value = "Converged at 50 Ry"
 
-        with patch.object(mod, "_load_atoms", return_value=bulk("Si")), \
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "materials_project")), \
              patch("shalom.workflows.convergence.CutoffConvergence") as MockConv:
             MockConv.return_value.run.return_value = mock_result
             MockConv.return_value.plot.return_value = "/tmp/conv.png"
@@ -389,11 +455,77 @@ class TestRunConvergence:
         assert result["success"] is True
         assert result["converged"] is True
         assert result["converged_value"] == 50.0
+        assert "warning" not in result
+
+    def test_cutoff_with_kgrid_and_mpi(self):
+        """kgrid and mpi_command are forwarded to CutoffConvergence."""
+        mod = _import_mcp_server()
+
+        mock_result = MagicMock()
+        mock_result.converged_value = 60.0
+        mock_result.summary.return_value = "Converged at 60 Ry"
+
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "structure_file")), \
+             patch("shalom.workflows.convergence.CutoffConvergence") as MockConv:
+            MockConv.return_value.run.return_value = mock_result
+            MockConv.return_value.plot.return_value = None
+            result = mod.run_convergence(
+                material="Si",
+                test_type="cutoff",
+                kgrid="4,4,4",
+                mpi_command="srun",
+            )
+
+        assert result["success"] is True
+        call_kwargs = MockConv.call_args[1]
+        assert call_kwargs["kgrid"] == [4, 4, 4]
+        assert call_kwargs["mpi_command"] == "srun"
+
+    def test_kpoints_with_mpi(self):
+        """mpi_command is forwarded to KpointConvergence."""
+        mod = _import_mcp_server()
+
+        mock_result = MagicMock()
+        mock_result.converged_value = 40.0
+        mock_result.summary.return_value = "Converged at 40"
+
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "materials_project")), \
+             patch("shalom.workflows.convergence.KpointConvergence") as MockConv:
+            MockConv.return_value.run.return_value = mock_result
+            MockConv.return_value.plot.return_value = None
+            result = mod.run_convergence(
+                material="Si",
+                test_type="kpoints",
+                ecutwfc=60.0,
+                mpi_command="srun",
+            )
+
+        assert result["success"] is True
+        call_kwargs = MockConv.call_args[1]
+        assert call_kwargs["mpi_command"] == "srun"
+
+    def test_ase_bulk_fallback_warning(self):
+        """ASE bulk fallback adds warning to convergence result."""
+        mod = _import_mcp_server()
+
+        mock_result = MagicMock()
+        mock_result.converged_value = 50.0
+        mock_result.summary.return_value = "Converged at 50 Ry"
+
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "ase_bulk_fallback")), \
+             patch("shalom.workflows.convergence.CutoffConvergence") as MockConv:
+            MockConv.return_value.run.return_value = mock_result
+            MockConv.return_value.plot.return_value = None
+            result = mod.run_convergence(material="Si", test_type="cutoff")
+
+        assert result["success"] is True
+        assert "warning" in result
+        assert "ASE bulk" in result["warning"]
 
     def test_invalid_test_type(self):
         mod = _import_mcp_server()
 
-        with patch.object(mod, "_load_atoms", return_value=bulk("Si")):
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "materials_project")):
             result = mod.run_convergence(
                 material="Si", test_type="invalid",
             )
@@ -565,8 +697,9 @@ class TestLoadAtoms:
         poscar = tmp_path / "POSCAR"
         si.write(str(poscar), format="vasp")
 
-        atoms = mod._load_atoms(structure_file=str(poscar))
+        atoms, source = mod._load_atoms(structure_file=str(poscar))
         assert len(atoms) == len(si)
+        assert source == "structure_file"
 
     def test_from_mp(self):
         mod = _import_mcp_server()
@@ -577,17 +710,19 @@ class TestLoadAtoms:
 
         with patch("shalom.mp_client.is_mp_available", return_value=True), \
              patch("shalom.mp_client.fetch_structure", return_value=mock_result):
-            atoms = mod._load_atoms(material="mp-149")
+            atoms, source = mod._load_atoms(material="mp-149")
 
         assert len(atoms) == len(si)
+        assert source == "materials_project"
 
     def test_from_ase_bulk_fallback(self):
         mod = _import_mcp_server()
 
         with patch("shalom.mp_client.is_mp_available", return_value=False):
-            atoms = mod._load_atoms(material="Si")
+            atoms, source = mod._load_atoms(material="Si")
 
         assert len(atoms) > 0
+        assert source == "ase_bulk_fallback"
 
     def test_empty_raises(self):
         mod = _import_mcp_server()

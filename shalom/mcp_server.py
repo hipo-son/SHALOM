@@ -60,16 +60,20 @@ mcp = FastMCP("shalom", json_response=True)
 def _load_atoms(
     material: str = "",
     structure_file: Optional[str] = None,
-) -> Any:
+) -> tuple:
     """Load ASE Atoms from a material spec or structure file.
 
     Priority: structure_file > MP ID/formula > ASE bulk fallback.
+
+    Returns:
+        ``(atoms, source)`` where *source* is one of ``"structure_file"``,
+        ``"materials_project"``, or ``"ase_bulk_fallback"``.
     """
     from ase import Atoms  # noqa: F811
 
     if structure_file:
         from ase.io import read as ase_read
-        return ase_read(structure_file)
+        return ase_read(structure_file), "structure_file"
 
     if not material:
         raise ValueError(
@@ -82,7 +86,7 @@ def _load_atoms(
 
         if is_mp_available():
             result = fetch_structure(material)
-            return result.atoms
+            return result.atoms, "materials_project"
     except Exception as mp_exc:
         logger.info("MP fetch failed for '%s': %s. Trying ASE bulk.", material, mp_exc)
 
@@ -91,7 +95,7 @@ def _load_atoms(
         from ase.build import bulk
         atoms = bulk(material)
         logger.info("Built bulk %s from ASE.", material)
-        return atoms
+        return atoms, "ase_bulk_fallback"
     except Exception:
         raise ValueError(
             f"Cannot resolve material '{material}'. "
@@ -195,6 +199,11 @@ def generate_dft_input(
         pseudo_dir: QE pseudopotential directory (default: $SHALOM_PSEUDO_DIR).
         structure_file: Path to local structure file (POSCAR, CIF, etc.).
     """
+    if backend not in ("qe", "vasp"):
+        return {
+            "success": False,
+            "error": f"Invalid backend '{backend}'. Use 'qe' or 'vasp'.",
+        }
     try:
         from shalom.direct_run import direct_run, DirectRunConfig
 
@@ -216,8 +225,22 @@ def generate_dft_input(
             "auto_detected": result.auto_detected,
             "error": result.error,
         }
+    except FileNotFoundError as exc:
+        return {
+            "success": False,
+            "error": (
+                f"File not found: {exc}. "
+                "Check that the structure_file path is correct."
+            ),
+        }
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        return {
+            "success": False,
+            "error": (
+                f"{exc}. Provide an MP ID (mp-19717), chemical formula (Si), "
+                "or a valid structure_file path."
+            ),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -230,13 +253,18 @@ def run_workflow(
     output_dir: str = "./shalom_workflow",
     pseudo_dir: Optional[str] = None,
     nprocs: int = 1,
+    mpi_command: str = "mpirun",
+    pw_executable: str = "pw.x",
+    dos_executable: str = "dos.x",
     accuracy: str = "standard",
     skip_relax: bool = False,
     is_2d: bool = False,
     timeout: int = 7200,
+    npoints_kpath: int = 40,
     structure_file: Optional[str] = None,
     dos_emin: float = -20.0,
     dos_emax: float = 10.0,
+    dos_deltaE: float = 0.01,
 ) -> dict:
     """Run the full 5-step QE workflow: vc-relax → scf → bands → nscf → dos.
 
@@ -249,16 +277,21 @@ def run_workflow(
         output_dir: Output directory for all workflow steps.
         pseudo_dir: QE pseudopotential directory (default: $SHALOM_PSEUDO_DIR).
         nprocs: Number of MPI processes for parallel execution.
+        mpi_command: MPI launcher command (mpirun, srun, etc.).
+        pw_executable: Path or name of the pw.x binary.
+        dos_executable: Path or name of the dos.x binary.
         accuracy: Accuracy preset — 'standard' or 'precise'.
         skip_relax: Skip the vc-relax step (use input structure as-is).
         is_2d: Treat as 2D material (kz=0 k-path, 2D isolation flags).
         timeout: Per-step timeout in seconds.
+        npoints_kpath: Number of k-points per segment on the band path.
         structure_file: Path to local structure file (POSCAR, CIF, etc.).
         dos_emin: DOS energy window minimum in eV.
         dos_emax: DOS energy window maximum in eV.
+        dos_deltaE: DOS energy step size in eV.
     """
     try:
-        atoms = _load_atoms(material, structure_file)
+        atoms, source = _load_atoms(material, structure_file)
 
         from shalom.workflows.standard import StandardWorkflow
 
@@ -267,22 +300,42 @@ def run_workflow(
             output_dir=output_dir,
             pseudo_dir=pseudo_dir,
             nprocs=nprocs,
+            mpi_command=mpi_command,
+            pw_executable=pw_executable,
+            dos_executable=dos_executable,
             accuracy=accuracy,
             skip_relax=skip_relax,
             is_2d=is_2d,
             timeout=timeout,
+            npoints_kpath=npoints_kpath,
             dos_emin=dos_emin,
             dos_emax=dos_emax,
+            dos_deltaE=dos_deltaE,
         )
         result = wf.run()
 
-        return {
+        response: Dict[str, Any] = {
             "success": True,
             "output_dir": output_dir,
             "fermi_energy_eV": result.get("fermi_energy"),
             "bands_png": result.get("bands_png"),
             "dos_png": result.get("dos_png"),
             "calc_dirs": result.get("calc_dirs", {}),
+        }
+        if source == "ase_bulk_fallback":
+            response["warning"] = (
+                f"Structure for '{material}' was built from ASE bulk (idealized). "
+                "For accurate results, use an MP ID or provide a structure file."
+            )
+        return response
+    except FileNotFoundError as exc:
+        return {
+            "success": False,
+            "error": (
+                f"File not found: {exc}. "
+                "Check that pw.x/dos.x are installed and pseudo_dir is set. "
+                "Run check_qe_setup to diagnose."
+            ),
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
@@ -381,6 +434,11 @@ def parse_dft_output(calc_dir: str, backend: str = "qe") -> dict:
         calc_dir: Directory containing DFT output files.
         backend: DFT backend — 'qe' or 'vasp'.
     """
+    if backend not in ("qe", "vasp"):
+        return {
+            "success": False,
+            "error": f"Invalid backend '{backend}'. Use 'qe' or 'vasp'.",
+        }
     try:
         from shalom.backends import get_backend
 
@@ -401,6 +459,16 @@ def parse_dft_output(calc_dir: str, backend: str = "qe") -> dict:
             response["quality_warnings"] = result.quality_warnings
 
         return response
+    except FileNotFoundError as exc:
+        expected = "pw.out" if backend == "qe" else "OUTCAR or vasprun.xml"
+        return {
+            "success": False,
+            "error": (
+                f"Output file not found: {exc}. "
+                f"Ensure {expected} exists in '{calc_dir}'. "
+                "Run the DFT calculation first with execute_dft or run_workflow."
+            ),
+        }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -551,8 +619,10 @@ def run_convergence(
     output_dir: str = "./convergence_test",
     values: Optional[str] = None,
     ecutwfc: Optional[float] = None,
+    kgrid: Optional[str] = None,
     pseudo_dir: Optional[str] = None,
     nprocs: int = 1,
+    mpi_command: str = "mpirun",
     timeout: int = 3600,
     accuracy: str = "standard",
     threshold: float = 1e-3,
@@ -572,15 +642,19 @@ def run_convergence(
             Kpoints: resolutions in 1/Bohr (e.g. "20,30,40,50").
             Uses sensible defaults if not provided.
         ecutwfc: Fixed ecutwfc for k-point test (required for test_type='kpoints').
+        kgrid: Fixed Monkhorst-Pack k-grid for cutoff test (e.g. "4,4,4").
+            Controls the k-point grid during ecutwfc sweep to isolate the
+            cutoff variable. If not set, uses the default from the QE preset.
         pseudo_dir: QE pseudopotential directory.
         nprocs: Number of MPI processes.
+        mpi_command: MPI launcher command (mpirun, srun, etc.).
         timeout: Per-step timeout in seconds.
         accuracy: Accuracy preset — 'standard' or 'precise'.
         threshold: Convergence threshold in eV/atom.
         structure_file: Path to local structure file.
     """
     try:
-        atoms = _load_atoms(material, structure_file)
+        atoms, source = _load_atoms(material, structure_file)
 
         # Parse values
         if values:
@@ -590,6 +664,11 @@ def run_convergence(
         else:
             value_list = [20.0, 30.0, 40.0, 50.0]
 
+        # Parse kgrid
+        parsed_kgrid: Optional[List[int]] = None
+        if kgrid:
+            parsed_kgrid = [int(v.strip()) for v in kgrid.split(",")]
+
         if test_type == "cutoff":
             from shalom.workflows.convergence import CutoffConvergence
 
@@ -597,8 +676,10 @@ def run_convergence(
                 atoms=atoms,
                 output_dir=output_dir,
                 values=value_list,
+                kgrid=parsed_kgrid,
                 pseudo_dir=pseudo_dir,
                 nprocs=nprocs,
+                mpi_command=mpi_command,
                 timeout=timeout,
                 accuracy=accuracy,
                 threshold_per_atom=threshold,
@@ -613,6 +694,7 @@ def run_convergence(
                 ecutwfc=ecutwfc,
                 pseudo_dir=pseudo_dir,
                 nprocs=nprocs,
+                mpi_command=mpi_command,
                 timeout=timeout,
                 accuracy=accuracy,
                 threshold_per_atom=threshold,
@@ -620,7 +702,10 @@ def run_convergence(
         else:
             return {
                 "success": False,
-                "error": f"Invalid test_type: '{test_type}'. Use 'cutoff' or 'kpoints'.",
+                "error": (
+                    f"Invalid test_type: '{test_type}'. "
+                    "Use 'cutoff' (ecutwfc sweep) or 'kpoints' (k-mesh sweep)."
+                ),
             }
 
         result = conv.run()
@@ -638,6 +723,12 @@ def run_convergence(
                 response["plot_path"] = plot_path
         except Exception:
             pass
+
+        if source == "ase_bulk_fallback":
+            response["warning"] = (
+                f"Structure for '{material}' was built from ASE bulk (idealized). "
+                "For accurate convergence tests, use an MP ID or structure file."
+            )
 
         return response
     except Exception as exc:

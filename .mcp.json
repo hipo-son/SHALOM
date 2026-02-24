@@ -6,7 +6,10 @@
       "env": {
         "SHALOM_PSEUDO_DIR": "${SHALOM_PSEUDO_DIR}",
         "MP_API_KEY": "${MP_API_KEY}",
-        "SHALOM_LLM_BASE_URL": "${SHALOM_LLM_BASE_URL}"
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "SHALOM_LLM_BASE_URL": "${SHALOM_LLM_BASE_URL}",
+        "SHALOM_AUDIT_LOG": "${SHALOM_AUDIT_LOG}"
       }
     }
   }
