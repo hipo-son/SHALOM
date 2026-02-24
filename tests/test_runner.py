@@ -84,6 +84,34 @@ class TestBuildCommand:
         cmd = ExecutionRunner.build_command(config)
         assert cmd == ["mpirun", "-np", "2", "/opt/qe/bin/pw.x"]
 
+    def test_root_adds_allow_run_as_root(self):
+        """Open MPI ≥5 root execution → --allow-run-as-root flag added."""
+        import shalom.backends.runner as runner_mod
+
+        config = ExecutionConfig(nprocs=4, mpi_command="mpirun")
+        with patch.object(runner_mod.os, "getuid", create=True, return_value=0):
+            cmd = ExecutionRunner.build_command(config)
+        assert "--allow-run-as-root" in cmd
+        assert cmd == ["mpirun", "--allow-run-as-root", "-np", "4", "pw.x"]
+
+    def test_non_root_no_allow_flag(self):
+        """Non-root user → no --allow-run-as-root flag."""
+        import shalom.backends.runner as runner_mod
+
+        config = ExecutionConfig(nprocs=4, mpi_command="mpirun")
+        with patch.object(runner_mod.os, "getuid", create=True, return_value=1000):
+            cmd = ExecutionRunner.build_command(config)
+        assert "--allow-run-as-root" not in cmd
+
+    def test_no_getuid_skips_root_check(self):
+        """Windows (no getuid) → no crash, no root flag."""
+        config = ExecutionConfig(nprocs=4, mpi_command="mpirun")
+        # On Windows, os.getuid doesn't exist; the code uses hasattr check
+        # Just verify that calling build_command doesn't crash
+        cmd = ExecutionRunner.build_command(config)
+        assert "mpirun" in cmd
+        assert "-np" in cmd
+
 
 # =========================================================================
 # TestPrerequisiteValidation

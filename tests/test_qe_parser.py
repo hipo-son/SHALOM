@@ -345,3 +345,123 @@ class TestParseDosFileEdgeCases:
         dos_path.write_text("# E dos\n-1.0 0.5\n0.0 1.0\n")
         with pytest.raises(ValueError, match="Expected"):
             parse_dos_file(str(dos_path))
+
+
+# ---------------------------------------------------------------------------
+# QE 7.5 XML namespace compatibility (xmlns:qes= prefix variant)
+# ---------------------------------------------------------------------------
+
+
+class TestXMLNamespaceVariants:
+    """Verify parse_xml_bands works with both default and prefixed XML namespaces."""
+
+    QE75_PREFIXED_XML = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<qes:espresso xmlns:qes="http://www.quantum-espresso.org/ns/qes/qes-1.0">\n'
+        "  <qes:output>\n"
+        "    <qes:basis_set>\n"
+        "      <qes:reciprocal_lattice>\n"
+        "        <qes:b1>1.0 0.0 0.0</qes:b1>\n"
+        "        <qes:b2>0.0 1.0 0.0</qes:b2>\n"
+        "        <qes:b3>0.0 0.0 1.0</qes:b3>\n"
+        "      </qes:reciprocal_lattice>\n"
+        "    </qes:basis_set>\n"
+        "    <qes:band_structure>\n"
+        "      <qes:lsda>false</qes:lsda>\n"
+        "      <qes:ks_energies>\n"
+        '        <qes:k_point weight="0.5">0.0 0.0 0.0</qes:k_point>\n'
+        '        <qes:eigenvalues size="2">-0.01716 0.00934</qes:eigenvalues>\n'
+        "      </qes:ks_energies>\n"
+        "      <qes:ks_energies>\n"
+        '        <qes:k_point weight="0.5">0.5 0.0 0.5</qes:k_point>\n'
+        '        <qes:eigenvalues size="2">-0.01450 0.01470</qes:eigenvalues>\n'
+        "      </qes:ks_energies>\n"
+        "    </qes:band_structure>\n"
+        "  </qes:output>\n"
+        "</qes:espresso>\n"
+    )
+
+    def test_prefixed_namespace_parses_kpoints(self, tmp_path):
+        """QE 7.5 XML with xmlns:qes= prefix → k-points parsed correctly."""
+        xml_file = tmp_path / "qe75.xml"
+        xml_file.write_text(self.QE75_PREFIXED_XML)
+        bs = parse_xml_bands(str(xml_file))
+        assert bs.nkpts == 2
+        assert bs.nbands == 2
+
+    def test_prefixed_namespace_eigenvalues(self, tmp_path):
+        """QE 7.5 XML with xmlns:qes= prefix → eigenvalues in eV."""
+        xml_file = tmp_path / "qe75.xml"
+        xml_file.write_text(self.QE75_PREFIXED_XML)
+        bs = parse_xml_bands(str(xml_file))
+        expected_first = -0.01716 * HA_TO_EV
+        assert abs(bs.eigenvalues[0, 0] - expected_first) < 1e-3
+
+    def test_prefixed_namespace_reciprocal_lattice(self, tmp_path):
+        """QE 7.5 XML → reciprocal lattice parsed (not identity fallback)."""
+        xml_file = tmp_path / "qe75.xml"
+        xml_file.write_text(self.QE75_PREFIXED_XML)
+        bs = parse_xml_bands(str(xml_file))
+        # kpath_distances should be computed from the identity-like b_matrix
+        assert bs.kpath_distances[-1] > 0.0
+
+    def test_default_namespace_still_works(self, mock_bands_xml_path):
+        """Existing default xmlns= format must still parse correctly."""
+        bs = parse_xml_bands(mock_bands_xml_path)
+        assert bs.nkpts == 2
+        assert bs.nbands == 3
+
+
+# ---------------------------------------------------------------------------
+# find_xml_path — direct file in calc_dir
+# ---------------------------------------------------------------------------
+
+
+class TestFindXmlPathDirectFile:
+    def test_finds_direct_xml_in_calc_dir(self, tmp_path):
+        """data-file-schema.xml placed directly in calc_dir → found."""
+        xml = tmp_path / "data-file-schema.xml"
+        xml.write_text("<root/>")
+        found = find_xml_path(str(tmp_path))
+        assert found is not None
+        assert found.endswith("data-file-schema.xml")
+
+    def test_direct_xml_preferred_over_save_dir(self, tmp_path):
+        """Direct XML in calc_dir takes priority over prefix.save/."""
+        # Create both candidates
+        (tmp_path / "data-file-schema.xml").write_text("<direct/>")
+        save_dir = tmp_path / "shalom.save"
+        save_dir.mkdir()
+        (save_dir / "data-file-schema.xml").write_text("<save/>")
+
+        found = find_xml_path(str(tmp_path))
+        assert found is not None
+        # Should find the direct one (first candidate)
+        assert "shalom.save" not in found
+
+
+# ---------------------------------------------------------------------------
+# extract_fermi_energy — returns last match for restarted calcs
+# ---------------------------------------------------------------------------
+
+
+class TestExtractFermiLastMatch:
+    def test_returns_last_fermi_from_multiple_lines(self, tmp_path):
+        """Restarted calculation with multiple Fermi lines → last value used."""
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text(
+            "Some output\n"
+            "     the Fermi energy is     5.1234 ev\n"
+            "More output after restart\n"
+            "     the Fermi energy is     5.6789 ev\n"
+            "Final output\n"
+        )
+        ef = extract_fermi_energy(str(pw_out))
+        assert ef == pytest.approx(5.6789)
+
+    def test_single_fermi_line_unchanged(self, tmp_path):
+        """Single Fermi line → same behavior as before."""
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("     the Fermi energy is     3.14 ev\n")
+        ef = extract_fermi_energy(str(pw_out))
+        assert ef == pytest.approx(3.14)

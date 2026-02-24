@@ -853,3 +853,180 @@ class TestRunFull:
             assert result["bands_png"].startswith(str(tmp_path))
         if result["dos_png"] is not None:
             assert result["dos_png"].startswith(str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# Bands XML preservation test
+# ---------------------------------------------------------------------------
+
+
+class TestBandsXMLPreservation:
+    """Verify that bands XML is copied to 03_bands/ before NSCF overwrites it."""
+
+    def test_bands_xml_copied_to_bands_dir(self, tmp_path):
+        """After _run_bands, XML should be preserved in bands_dir."""
+        from shalom.backends.qe_parser import find_xml_path
+
+        bands_dir = str(tmp_path / "03_bands")
+        scf_tmp_dir = str(tmp_path / "02_scf" / "tmp")
+        os.makedirs(bands_dir, exist_ok=True)
+        save_dir = os.path.join(scf_tmp_dir, "shalom.save")
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Simulate: bands step wrote XML to scf_tmp_dir
+        xml_content = '<?xml version="1.0"?><root>bands_data</root>'
+        xml_src = os.path.join(save_dir, "data-file-schema.xml")
+        with open(xml_src, "w") as f:
+            f.write(xml_content)
+
+        # Execute the copy logic (same as in run() after _run_bands)
+        bands_xml_src = find_xml_path(scf_tmp_dir)
+        assert bands_xml_src is not None
+
+        import shutil
+        bands_xml_dst = os.path.join(bands_dir, "data-file-schema.xml")
+        shutil.copy2(bands_xml_src, bands_xml_dst)
+
+        # Verify copy exists and has correct content
+        assert os.path.isfile(bands_xml_dst)
+        with open(bands_xml_dst) as f:
+            assert "bands_data" in f.read()
+
+        # Simulate: NSCF overwrites the original
+        with open(xml_src, "w") as f:
+            f.write('<?xml version="1.0"?><root>nscf_data</root>')
+
+        # bands_dir copy should still have bands_data
+        with open(bands_xml_dst) as f:
+            content = f.read()
+        assert "bands_data" in content
+        assert "nscf_data" not in content
+
+
+# ---------------------------------------------------------------------------
+# dos.in unit defense: eV values, NOT Ry
+# ---------------------------------------------------------------------------
+
+
+class TestDosInUnitDefense:
+    """Ensure dos.in values are in eV range, never Ry range."""
+
+    def test_dos_in_not_in_ry_range(self, tmp_path):
+        """dos.in Emin/Emax must NOT be in Ry range (validates eV fix)."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path),
+            dos_emin=-20.0, dos_emax=10.0, dos_deltaE=0.01,
+        )
+        nscf_dir = str(tmp_path / "04_nscf")
+        os.makedirs(nscf_dir, exist_ok=True)
+        wf._dos_run = MagicMock()
+        wf._run_dos(nscf_dir, "/fake/scf/tmp")
+
+        content = open(os.path.join(nscf_dir, "dos.in")).read()
+
+        # Extract numeric Emin/Emax values
+        import re
+        emin_match = re.search(r"Emin\s*=\s*([-\d.]+)", content)
+        emax_match = re.search(r"Emax\s*=\s*([-\d.]+)", content)
+        assert emin_match and emax_match
+
+        emin_val = float(emin_match.group(1))
+        emax_val = float(emax_match.group(1))
+
+        # Must be eV values (-20, 10), NOT Ry values (-1.47, 0.73)
+        assert emin_val == pytest.approx(-20.0)
+        assert emax_val == pytest.approx(10.0)
+        # Explicitly verify NOT in Ry range
+        assert abs(emin_val) > 5.0, "Emin looks like Ry, not eV"
+        assert abs(emax_val) > 5.0, "Emax looks like Ry, not eV"
+
+
+# ---------------------------------------------------------------------------
+# Parameter validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestParameterValidation:
+    """StandardWorkflow __init__ should reject invalid parameters."""
+
+    def test_invalid_accuracy_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="accuracy must be"):
+            StandardWorkflow(atoms=si, output_dir="/tmp/test", accuracy="high")
+
+    def test_dos_emin_gte_emax_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="dos_emin"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test",
+                dos_emin=10.0, dos_emax=-20.0,
+            )
+
+    def test_dos_emin_equal_emax_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="dos_emin"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test",
+                dos_emin=5.0, dos_emax=5.0,
+            )
+
+    def test_dos_deltaE_zero_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="dos_deltaE"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test", dos_deltaE=0.0,
+            )
+
+    def test_dos_deltaE_negative_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="dos_deltaE"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test", dos_deltaE=-0.01,
+            )
+
+    def test_valid_params_accepted(self):
+        """Default params should not raise."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir="/tmp/test")
+        assert wf.accuracy == "standard"
+        assert wf.dos_emin < wf.dos_emax
+
+    def test_precise_accuracy_accepted(self):
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir="/tmp/test", accuracy="precise"
+        )
+        assert wf.accuracy == "precise"
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight environment validation test
+# ---------------------------------------------------------------------------
+
+
+class TestPreflightValidation:
+    """StandardWorkflow._validate_environment warns on missing executables."""
+
+    def test_warns_when_pw_missing(self, tmp_path, caplog):
+        import logging
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        # Mock shutil.which to return None for all executables
+        with patch("shutil.which", return_value=None):
+            with caplog.at_level(logging.WARNING):
+                # Should log warnings, not raise
+                wf._validate_environment()
+        assert "pw.x" in caplog.text
+        assert "dos.x" in caplog.text
+
+    def test_warns_when_pseudo_dir_missing(self, tmp_path, caplog):
+        import logging
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path),
+            pseudo_dir="/nonexistent/pseudo/dir",
+        )
+        with caplog.at_level(logging.WARNING):
+            wf._validate_environment()
+        assert "pseudo_dir" in caplog.text

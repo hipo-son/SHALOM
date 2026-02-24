@@ -90,9 +90,9 @@ class StandardWorkflow:
         npoints_kpath: Number of k-points per segment on the band path.
         is_2d: If ``True``, enforce ``kz = 0`` on the band k-path and set
             QE 2D isolation flags for all steps.
-        dos_emin: DOS energy window minimum in eV (converted to Ry internally).
-        dos_emax: DOS energy window maximum in eV (converted to Ry internally).
-        dos_deltaE: DOS energy step in eV (converted to Ry internally).
+        dos_emin: DOS energy window minimum in eV (dos.x expects eV directly).
+        dos_emax: DOS energy window maximum in eV (dos.x expects eV directly).
+        dos_deltaE: DOS energy step in eV (dos.x expects eV directly).
     """
 
     def __init__(
@@ -122,10 +122,20 @@ class StandardWorkflow:
         self.pw_executable = pw_executable
         self.dos_executable = dos_executable
         self.timeout = timeout
+        if accuracy not in ("standard", "precise"):
+            raise ValueError(
+                f"accuracy must be 'standard' or 'precise', got '{accuracy}'"
+            )
         self.accuracy = accuracy
         self.skip_relax = skip_relax
         self.npoints_kpath = npoints_kpath
         self.is_2d = is_2d
+        if dos_emin >= dos_emax:
+            raise ValueError(
+                f"dos_emin ({dos_emin}) must be < dos_emax ({dos_emax})"
+            )
+        if dos_deltaE <= 0:
+            raise ValueError(f"dos_deltaE ({dos_deltaE}) must be > 0")
         self.dos_emin = dos_emin
         self.dos_emax = dos_emax
         self.dos_deltaE = dos_deltaE
@@ -151,6 +161,7 @@ class StandardWorkflow:
             - ``"dos_png"`` — absolute path to the DOS plot, or ``None``.
             - ``"calc_dirs"`` — dict mapping step names to directories.
         """
+        self._validate_environment()
         os.makedirs(self.output_dir, exist_ok=True)
 
         relax_dir = os.path.join(self.output_dir, "01_vc_relax")
@@ -201,8 +212,11 @@ class StandardWorkflow:
             try:
                 _shutil.copy2(bands_xml_src, bands_xml_dst)
                 logger.debug("Copied bands XML to %s", bands_xml_dst)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning(
+                    "Failed to preserve bands XML (%s); "
+                    "band plot may show NSCF data.", exc
+                )
 
         # ------------------------------------------------------------------
         # Step 4: nscf
@@ -220,6 +234,11 @@ class StandardWorkflow:
         # Fermi energy (NSCF preferred)
         # ------------------------------------------------------------------
         fermi = self._get_best_fermi_energy(scf_dir, nscf_dir)
+        if fermi is None:
+            logger.warning(
+                "Fermi energy not found in NSCF or SCF output; "
+                "band/DOS plots will use 0 eV."
+            )
 
         # ------------------------------------------------------------------
         # Plotting
@@ -239,6 +258,25 @@ class StandardWorkflow:
                 "nscf": nscf_dir,
             },
         }
+
+    # ------------------------------------------------------------------
+    # Pre-flight validation
+    # ------------------------------------------------------------------
+
+    def _validate_environment(self) -> None:
+        """Check pw.x, dos.x, and pseudo_dir before starting the pipeline."""
+        import shutil as _shutil
+
+        warnings = []
+        if _shutil.which(self.pw_executable) is None:
+            warnings.append(f"'{self.pw_executable}' not found in PATH.")
+        if _shutil.which(self.dos_executable) is None:
+            warnings.append(f"'{self.dos_executable}' not found in PATH.")
+        if self.pseudo_dir and not os.path.isdir(self.pseudo_dir):
+            warnings.append(f"pseudo_dir does not exist: {self.pseudo_dir}")
+        if warnings:
+            for w in warnings:
+                logger.warning("Pre-flight: %s", w)
 
     # ------------------------------------------------------------------
     # Step implementations
@@ -263,7 +301,10 @@ class StandardWorkflow:
             logger.info("vc-relax: read relaxed structure (%d atoms)", len(relaxed))
             return relaxed
         except Exception as exc:
-            logger.warning("vc-relax: could not read relaxed structure (%s); using input.", exc)
+            logger.warning(
+                "vc-relax: could not parse relaxed structure (%s); "
+                "using UNRELAXED input. Check %s for details.", exc, pw_out
+            )
             return atoms
 
     def _run_scf(self, calc_dir: str, atoms: "Atoms") -> None:
@@ -318,7 +359,7 @@ class StandardWorkflow:
         self._pw_run(calc_dir)
 
     def _run_dos(self, calc_dir: str, scf_tmp_dir: str) -> None:
-        """Write dos.in and run dos.x (all energies in Ry!)."""
+        """Write dos.in and run dos.x (all energies in eV)."""
         os.makedirs(calc_dir, exist_ok=True)
         dos_in_path = os.path.join(calc_dir, "dos.in")
         dos_out_path = os.path.join(calc_dir, "dos.out")
@@ -414,8 +455,12 @@ class StandardWorkflow:
                 bs.kpath_distances = dist
 
         output_path = os.path.join(self.output_dir, "bands.png")
-        plotter = BandStructurePlotter(bs)
-        plotter.plot(output_path=output_path)
+        try:
+            plotter = BandStructurePlotter(bs)
+            plotter.plot(output_path=output_path)
+        except Exception as exc:
+            logger.warning("Band plot failed: %s", exc)
+            return None
         logger.info("Band structure plot saved: %s", output_path)
         return output_path
 
@@ -437,8 +482,12 @@ class StandardWorkflow:
             dos_data.fermi_energy = fermi
 
         output_path = os.path.join(self.output_dir, "dos.png")
-        plotter = DOSPlotter(dos_data)
-        plotter.plot(output_path=output_path)
+        try:
+            plotter = DOSPlotter(dos_data)
+            plotter.plot(output_path=output_path)
+        except Exception as exc:
+            logger.warning("DOS plot failed: %s", exc)
+            return None
         logger.info("DOS plot saved: %s", output_path)
         return output_path
 

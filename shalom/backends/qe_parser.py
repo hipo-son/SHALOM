@@ -11,7 +11,7 @@ Unit conventions
   Conversion: ``1 Ha = 27.2114 eV``.
 * ``pw.out`` stdout reports energies in **Ry**.
   Conversion: ``1 Ry = 13.6057 eV``.
-* ``dos.x`` input namelist (``dos.in``) expects energies in **Ry**.
+* ``dos.x`` input namelist (``dos.in``) expects energies in **eV**.
 * ``pwscf.dos`` output file reports energies in **eV** (dos.x converts).
 
 XML namespace
@@ -129,6 +129,8 @@ def parse_xml_bands(
     recip_elem = root.find(".//qes:reciprocal_lattice", ns)
     if recip_elem is None:
         recip_elem = root.find(".//reciprocal_lattice")
+    if recip_elem is None:
+        recip_elem = root.find(f".//{{{ns['qes']}}}reciprocal_lattice")
     if recip_elem is not None:
         b_vecs: List[List[float]] = []
         for tag in ("b1", "b2", "b3"):
@@ -137,6 +139,18 @@ def parse_xml_bands(
                 b_vecs.append([float(x) for x in vec_elem.text.split()])
         if len(b_vecs) == 3:
             b_matrix = np.array(b_vecs)  # shape (3, 3), rows = b1,b2,b3
+        else:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "reciprocal_lattice incomplete in XML; "
+                "kpath distances may be inaccurate."
+            )
+    else:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "reciprocal_lattice not found in XML; "
+            "kpath distances may be inaccurate."
+        )
 
     # ------------------------------------------------------------------
     # Spin polarisation flag
@@ -338,6 +352,10 @@ def extract_fermi_energy(pw_out_path: str) -> Optional[float]:
 
         the Fermi energy is     X.XXXX ev
 
+    If the file contains multiple Fermi energy lines (e.g. from a restarted
+    calculation), the **last** value is returned as it corresponds to the
+    final converged result.
+
     Args:
         pw_out_path: Path to ``pw.out``.
 
@@ -347,15 +365,16 @@ def extract_fermi_energy(pw_out_path: str) -> Optional[float]:
     if not os.path.isfile(pw_out_path):
         return None
     pattern = re.compile(r"the Fermi energy is\s+([-\d.]+)\s+ev", re.IGNORECASE)
+    last_fermi: Optional[float] = None
     try:
         with open(pw_out_path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 m = pattern.search(line)
                 if m:
-                    return float(m.group(1))
+                    last_fermi = float(m.group(1))
     except OSError:
         return None
-    return None
+    return last_fermi
 
 
 def compute_nbnd(atoms: Any, multiplier: float = 1.3) -> int:
