@@ -94,10 +94,10 @@ strict_optional = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "--cov=shalom --cov-report=xml --cov-fail-under=85 -v"
+addopts = "--cov=shalom --cov-report=xml --cov-fail-under=85 -v -m 'not integration'"
 testpaths = ["tests"]
 markers = [
-    "integration: mark test as requiring external API calls (deselect with '-m \"not integration\"')",
+    "integration: requires pw.x / QE in WSL (slow, ~20min). Run with: pytest -m integration --no-cov",
 ]
 
 [tool.setuptools.package-data]

@@ -64,13 +64,32 @@ shalom/
 4. Use `load_config("new_name")` in consuming code
 
 ### Testing
-- `pytest tests/ -x` — run all tests (1044 passed, 1 skipped; 94.6% coverage)
-- `pytest tests/ --cov=shalom --cov-fail-under=85` — with coverage (85% threshold)
+
+**Quick tests** (mock-based, ~20s, no external deps):
+```bash
+pytest tests/                          # default: 1044 tests, coverage ≥85%
+pytest tests/ -x --no-cov             # fast, stop on first failure
+conda run -n shalom-env python -m pytest tests/   # Windows/bash
+```
+
+**Integration tests** (real pw.x in WSL, ~20min):
+```bash
+# From WSL with QE conda env:
+export SHALOM_PSEUDO_DIR=/root/pseudopotentials
+pytest tests/ -m integration --no-cov -v          # 5 QE integration tests
+```
+
+**Physics validation** (full 5-step workflow, ~30-50min):
+```bash
+python scripts/validate_v1.py --output-dir ./validation_output --nprocs 4
+python scripts/validate_v1.py --skip-relax --nprocs 4   # skip vc-relax
+```
+
+- Default `pytest` excludes integration tests (`addopts = -m 'not integration'`)
 - All existing tests must pass unchanged when refactoring
 - Mock LLM calls with `unittest.mock` (no real API calls in tests)
-- Known: 19 VASP OUTCAR parse tests fail with pymatgen>=2025.10 (upstream `IndexError` in `Outcar.__init__`); QE/agent/CLI tests unaffected
-- QE integration test (`test_si_scf_end_to_end`) requires pw.x; auto-skipped on Windows
-- On Windows/bash with conda: `conda run -n shalom-env python -m pytest tests/`
+- Known: 19 VASP OUTCAR parse tests fail with pymatgen>=2025.10 (upstream `IndexError`)
+- Integration tests require WSL2 + conda-forge QE (`conda create -n qe python=3.12 qe`)
 
 ### Code Quality
 - `ruff check shalom/` — linting

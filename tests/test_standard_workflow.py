@@ -8,17 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from ase.build import bulk
 
-from shalom.workflows.standard import StandardWorkflow, EV_TO_RY
-
-
-# ---------------------------------------------------------------------------
-# Unit constants
-# ---------------------------------------------------------------------------
-
-
-def test_ev_to_ry_constant():
-    """EV_TO_RY should be 1/13.6057 ≈ 0.073499."""
-    assert EV_TO_RY == pytest.approx(1.0 / 13.6057, rel=1e-4)
+from shalom.workflows.standard import StandardWorkflow
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +17,9 @@ def test_ev_to_ry_constant():
 
 
 class TestDosInGeneration:
-    """Verify that dos.in is written with Ry units (not eV)."""
+    """Verify that dos.in is written with eV units."""
 
-    def test_dos_in_emin_in_ry(self, tmp_path):
+    def test_dos_in_emin_in_ev(self, tmp_path):
         si = bulk("Si", "diamond", a=5.43)
         wf = StandardWorkflow(
             atoms=si,
@@ -48,13 +38,9 @@ class TestDosInGeneration:
         assert os.path.isfile(dos_in)
         content = open(dos_in).read()
 
-        # Emin = -20 eV × EV_TO_RY ≈ -1.4698 Ry
-        expected_emin_ry = -20.0 * EV_TO_RY
-        assert f"{expected_emin_ry:.6f}" in content
-
-        # Emax = 10 eV × EV_TO_RY ≈ 0.7349 Ry
-        expected_emax_ry = 10.0 * EV_TO_RY
-        assert f"{expected_emax_ry:.6f}" in content
+        # Emin/Emax written directly in eV (dos.x expects eV)
+        assert "-20.000000" in content
+        assert "10.000000" in content
 
     def test_dos_in_uses_absolute_outdir(self, tmp_path):
         si = bulk("Si", "diamond", a=5.43)

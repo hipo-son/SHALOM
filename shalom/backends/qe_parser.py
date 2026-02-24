@@ -314,6 +314,7 @@ def find_xml_path(calc_dir: str, prefix: str = "shalom") -> Optional[str]:
         Absolute path to ``data-file-schema.xml``, or ``None`` if not found.
     """
     candidates = [
+        os.path.join(calc_dir, "data-file-schema.xml"),
         os.path.join(calc_dir, f"{prefix}.save", "data-file-schema.xml"),
         os.path.join(calc_dir, "tmp", f"{prefix}.save", "data-file-schema.xml"),
     ]

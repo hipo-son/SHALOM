@@ -8,9 +8,7 @@ is shared by all subsequent non-self-consistent calculations.
 
 Energy units in dos.x namelist
 --------------------------------
-The ``dos.x`` namelist (``&DOS``) expects **Emin/Emax/DeltaE in Rydberg**,
-not in eV.  The conversion ``EV_TO_RY = 1.0 / 13.6057`` is applied
-automatically when writing ``dos.in``.
+The ``dos.x`` namelist (``&DOS``) expects **Emin/Emax/DeltaE in eV**.
 
 Fermi energy priority
 ----------------------
@@ -61,7 +59,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-EV_TO_RY: float = 1.0 / 13.6057   # dos.x namelist energies must be in Ry
+# dos.x Emin/Emax/DeltaE are in eV (QE divides by Ry internally).
 
 
 class StandardWorkflow:
@@ -195,6 +193,17 @@ class StandardWorkflow:
         logger.info("[3/5] bands")
         self._run_bands(bands_dir, calc_atoms, scf_tmp_dir)
 
+        # Preserve bands XML before NSCF overwrites it in scf_tmp_dir.
+        bands_xml_src = find_xml_path(scf_tmp_dir)
+        if bands_xml_src and os.path.isfile(bands_xml_src):
+            import shutil as _shutil
+            bands_xml_dst = os.path.join(bands_dir, "data-file-schema.xml")
+            try:
+                _shutil.copy2(bands_xml_src, bands_xml_dst)
+                logger.debug("Copied bands XML to %s", bands_xml_dst)
+            except OSError:
+                pass
+
         # ------------------------------------------------------------------
         # Step 4: nscf
         # ------------------------------------------------------------------
@@ -314,19 +323,14 @@ class StandardWorkflow:
         dos_in_path = os.path.join(calc_dir, "dos.in")
         dos_out_path = os.path.join(calc_dir, "dos.out")
 
-        # Convert to Ry — dos.x namelist requires Ry, NOT eV
-        emin_ry = self.dos_emin * EV_TO_RY
-        emax_ry = self.dos_emax * EV_TO_RY
-        delta_ry = self.dos_deltaE * EV_TO_RY
-
         dos_in_content = (
             "&DOS\n"
             f"  outdir = '{scf_tmp_dir}'\n"
             f"  prefix = 'shalom'\n"
             f"  fildos = 'pwscf.dos'\n"
-            f"  Emin = {emin_ry:.6f}\n"
-            f"  Emax = {emax_ry:.6f}\n"
-            f"  DeltaE = {delta_ry:.8f}\n"
+            f"  Emin = {self.dos_emin:.6f}\n"
+            f"  Emax = {self.dos_emax:.6f}\n"
+            f"  DeltaE = {self.dos_deltaE:.8f}\n"
             "/\n"
         )
 
