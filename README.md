@@ -73,12 +73,10 @@ SHALOM abstracts DFT-specific details behind a unified interface so that agents 
 
 ## Getting Started
 
-> **Note**: SHALOM is not yet published to PyPI — install from source via GitHub clone (see below).
+> **Note**: SHALOM is not yet published to PyPI -- install from source via GitHub clone (see below).
 > `pip install shalom` is planned for a future release.
 
-### Step 1 — Clone the Repository
-
-Clone into your `Desktop` or `projects` folder to keep things organized:
+### Step 1 -- Clone the Repository
 
 ```bash
 cd ~/Desktop          # or: cd ~/projects
@@ -86,28 +84,43 @@ git clone https://github.com/hipo-son/SHALOM.git
 cd SHALOM
 ```
 
-### Step 2 — Create a Python Environment
+### Step 2 -- Create a Python Environment
 
-**Option A: conda (recommended)** — best for managing pymatgen/ASE dependencies:
+**Option A: conda (recommended)**
 
 ```bash
 conda env create -f environment.yml
 conda activate shalom-env
 ```
 
-**Option B: venv** — if you don't have conda:
+**Option B: venv**
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e ".[dev,mp]"
 ```
 
-To enable band/DOS plotting (matplotlib + seekpath):
+Activate the virtual environment:
 
 ```bash
+# Linux / macOS
+source .venv/bin/activate
+
+# Windows (Command Prompt)
+.venv\Scripts\activate
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+```
+
+Then install dependencies:
+
+```bash
+pip install -e ".[dev,mp]"
+
+# Optional: band/DOS plotting
 pip install -e ".[plotting]"
-# or with everything:
+
+# Optional: everything (plotting + MP + MCP)
 pip install -e ".[all]"
 ```
 
@@ -117,68 +130,97 @@ Verify the installation:
 python -m shalom --help
 ```
 
-### Step 3 — Configure API Keys
+### Step 3 -- Run Your First Calculation (No API Keys Needed)
 
-Copy the template and fill in your keys:
+SHALOM can generate DFT input files using built-in ASE structures -- **no API keys required**:
+
+```bash
+# Generate VASP input files for bulk Silicon
+python -m shalom run Si --backend vasp
+
+# Generate QE input files for bulk Silicon
+python -m shalom run Si --backend qe --calc scf
+
+# Generate VASP input files for Fe2O3
+python -m shalom run Fe2O3 --backend vasp
+```
+
+Each command creates an output folder (e.g., `~/Desktop/shalom-runs/Si_vasp_relaxation/`) with:
+- DFT input files (`INCAR`, `POSCAR`, `KPOINTS` for VASP; `pw.in` for QE)
+- A `README.md` explaining what was generated and how to proceed
+
+You can also use a local structure file:
+
+```bash
+python -m shalom run --structure my_structure.cif --backend vasp
+python -m shalom run --structure POSCAR --backend qe --calc scf
+```
+
+### Step 4 -- Configure API Keys (Optional)
+
+API keys unlock additional features but are **not required** for basic usage.
 
 ```bash
 cp .env.example .env
-# Edit .env with your keys, then:
-source .env
 ```
 
-| Key | Purpose | Where to Get |
-|-----|---------|--------------|
-| `OPENAI_API_KEY` | LLM agents (Design / Review layer) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| `ANTHROPIC_API_KEY` | Alternative to OpenAI | [console.anthropic.com](https://console.anthropic.com/) |
-| `MP_API_KEY` | Fetch structures by MP ID or formula | [next-gen.materialsproject.org/api](https://next-gen.materialsproject.org/api) (free) |
-| `SHALOM_PSEUDO_DIR` | QE pseudopotential directory | Set after running `setup-qe --download` |
-| `SHALOM_LLM_BASE_URL` | Local LLM server URL (Ollama, vLLM, etc.) | Optional — bypasses API key requirement |
-| `SHALOM_AUDIT_LOG` | Audit log file path | Optional — e.g. `~/.shalom/audit.log` |
-
-Only **one** of `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` is needed (or use `SHALOM_LLM_BASE_URL` for local models). `MP_API_KEY` is required only when looking up structures by MP ID or chemical formula.
-
-### Step 4 — Set Up Quantum ESPRESSO (QE backend only)
-
-Skip this step if you only use the VASP backend.
+Edit `.env` and uncomment the keys you need:
 
 ```bash
-# Linux / WSL2 (Ubuntu/Debian)
-sudo apt install quantum-espresso
+# Required for Materials Project structure lookup (free):
+export MP_API_KEY='your-mp-api-key-here'
 
-# conda
-conda install -c conda-forge qe
-
-# Windows (native) → pw.x is not supported; use WSL2:
-wsl -d Ubuntu-22.04
-sudo apt install quantum-espresso
+# Required for LLM pipeline (one of these):
+export OPENAI_API_KEY='sk-...'
+# export ANTHROPIC_API_KEY='sk-ant-...'
 ```
 
-Download SSSP pseudopotentials for your elements:
+Then load them: `source .env` (Linux/macOS) or set them in your system environment (Windows).
+
+| Key | Purpose | Required? | Where to Get |
+|-----|---------|-----------|--------------|
+| `MP_API_KEY` | Fetch structures by MP ID or formula | Optional (free) | [next-gen.materialsproject.org/api](https://next-gen.materialsproject.org/api) |
+| `OPENAI_API_KEY` | LLM agents (Design / Review layer) | For `pipeline` only | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| `ANTHROPIC_API_KEY` | Alternative to OpenAI | For `pipeline` only | [console.anthropic.com](https://console.anthropic.com/) |
+| `SHALOM_PSEUDO_DIR` | QE pseudopotential directory | For QE execution | Set after `setup-qe --download` |
+| `SHALOM_LLM_BASE_URL` | Local LLM server URL | Optional | Ollama, vLLM, llama.cpp |
+| `SHALOM_AUDIT_LOG` | Audit log file path | Optional | e.g. `~/.shalom/audit.log` |
+
+With `MP_API_KEY`, you can fetch real structures:
+
+```bash
+python -m shalom run mp-19717 --backend vasp    # Silicon from Materials Project
+python -m shalom run Fe2O3 --backend qe          # Iron oxide (searches MP first)
+```
+
+### Step 5 -- Set Up Quantum ESPRESSO (QE Execution Only)
+
+> Skip this step if you only generate input files or use the VASP backend.
+> File generation works on all platforms; **execution** requires `pw.x`.
+
+```bash
+# Linux (Ubuntu/Debian)
+sudo apt install quantum-espresso
+
+# conda (cross-platform, but not native Windows)
+conda install -c conda-forge qe
+
+# Windows: pw.x requires WSL2
+# Run: python -m shalom setup-qe  (will show Windows-specific instructions)
+```
+
+Download SSSP pseudopotentials:
 
 ```bash
 python -m shalom setup-qe --elements Si,Fe,O --download
-
-# Check overall QE environment
-python -m shalom setup-qe
+python -m shalom setup-qe    # Check environment
 ```
 
-### Step 5 — Run Your First Calculation
-
-Choose the path that matches what you have available:
+Run a calculation end-to-end:
 
 ```bash
-# Path A — local structure file (no API keys needed)
-python -m shalom run --structure POSCAR --backend vasp
-
-# Path B — Materials Project ID (MP_API_KEY required)
-python -m shalom run mp-19717 --backend vasp
-
-# Path C — chemical formula + QE (MP_API_KEY + QE install required)
-python -m shalom run Si --backend qe --calc scf
+python -m shalom run Si --backend qe --calc scf --execute -np 4
 ```
-
-Each run creates a timestamped output folder (e.g., `Si_qe_static/`) containing the DFT input files and a **`README.md`** explaining what was generated and how to proceed.
 
 ---
 
@@ -289,7 +331,7 @@ winner = fine.rank_and_select(objective, candidates)
 print(f"Top Material: {winner.candidate.material_name} (Score: {winner.score})")
 ```
 
-For the full pipeline (Simulation + Review layers), see the [Documentation](https://shalom.readthedocs.io/en/latest/).
+For the full pipeline (Simulation + Review layers), see the [docs/](docs/) folder or the [Master Design Document](docs/master_design_document.md).
 
 ## Known Issues
 
@@ -308,14 +350,15 @@ docker pull ghcr.io/hipo-son/shalom:latest
 
 | Phase | Target | Key Features | Status |
 |-------|--------|-------------|--------|
-| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (10 tools), local LLM support, token-aware compression, band/DOS plotting, convergence tests, 5-step workflow, audit logging | Code complete (1124 tests, 94.6% coverage) |
+| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (10 tools), local LLM support, token-aware compression, band/DOS plotting, convergence tests, 5-step workflow, audit logging | Code complete (1126+ tests, 94.6% coverage) |
 | **Phase 2** | Engine expansion | VASP-Slurm HPC, LAMMPS/AIMD integration, Dynamic Recipe Generator, 100+ self-correction benchmarks | Planned |
 | **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) | Planned |
 
 See the [Master Design Document](docs/master_design_document.md) for detailed milestones and publication strategy.
 
 ## Documentation
-Read the full API reference and tutorials on [ReadTheDocs](https://shalom.readthedocs.io).
+See the [docs/](docs/) folder for architecture details and the [Master Design Document](docs/master_design_document.md) for the full roadmap.
+<!-- ReadTheDocs will be available after RTD project setup: https://shalom.readthedocs.io -->
 
 ## Contributing
 We welcome contributions! Please review our [Contribution Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).

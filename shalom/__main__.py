@@ -127,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help=(
             "Project sub-folder inside the workspace (optional grouping). "
-            "E.g. --project silicon_study → workspace/silicon_study/Si_qe_scf/."
+            "E.g. --project silicon_study ->workspace/silicon_study/Si_qe_scf/."
         ),
     )
     run_parser.add_argument(
@@ -242,7 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 'workflow' subcommand
     workflow_parser = subparsers.add_parser(
         "workflow",
-        help="Run the 5-step sequential QE workflow: vc-relax → scf → bands → nscf → dos.",
+        help="Run the 5-step sequential QE workflow: vc-relax ->scf ->bands ->nscf ->dos.",
         description=(
             "Full sequential QE workflow for a given material. "
             "Produces bands.png and dos.png in the output directory."
@@ -420,7 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Download missing pseudopotentials from SSSP repository.",
     )
 
-    # 'pipeline' subcommand — LLM-driven autonomous pipeline
+    # 'pipeline' subcommand -LLM-driven autonomous pipeline
     pipeline_parser = subparsers.add_parser(
         "pipeline",
         help="Run the LLM-driven autonomous material discovery pipeline.",
@@ -503,7 +503,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-loops",
         type=int,
         default=1,
-        help="Max Design→Sim→Review outer loop iterations (default: 1).",
+        help="Max Design->Sim->Review outer loop iterations (default: 1).",
     )
     pipeline_parser.add_argument(
         "--selector-mode",
@@ -618,7 +618,7 @@ def _detect_wsl_distros() -> list:
             capture_output=True,
             timeout=5,
         )
-        # No distros installed → WSL returns non-zero or outputs help text
+        # No distros installed ->WSL returns non-zero or outputs help text
         if result.returncode != 0:
             return []
         # WSL --list outputs UTF-16-LE with BOM on some builds
@@ -637,12 +637,12 @@ def _detect_wsl_distros() -> list:
 
 def _print_install_guide_windows(distros: list) -> None:
     """Print step-by-step QE installation guide for Windows."""
-    SEP = "─" * 60
+    SEP = "=" * 60
 
     print()
-    print("┌" + "─" * 58 + "┐")
-    print("│  QE Installation Guide — Windows                        │")
-    print("└" + "─" * 58 + "┘")
+    print("+" + "=" * 58 + "+")
+    print("|  QE Installation Guide - Windows                       |")
+    print("+" + "=" * 58 + "+")
     print()
     print("  QE (pw.x) cannot run natively on Windows.")
     print("  You need WSL2 (Windows Subsystem for Linux).")
@@ -651,7 +651,7 @@ def _print_install_guide_windows(distros: list) -> None:
     if not distros:
         # No WSL distro installed yet
         print(f"  {SEP}")
-        print("  Step 1 — Install Ubuntu via WSL2")
+        print("  Step 1 -Install Ubuntu via WSL2")
         print(f"  {SEP}")
         print("  Open PowerShell as Administrator and run:")
         print()
@@ -669,7 +669,7 @@ def _print_install_guide_windows(distros: list) -> None:
 
     print(f"  {SEP}")
     step = "Step 2" if not distros else "Step 1"
-    print(f"  {step} — Install Quantum ESPRESSO inside Ubuntu")
+    print(f"  {step} -Install Quantum ESPRESSO inside Ubuntu")
     print(f"  {SEP}")
     print(f"  In the Ubuntu terminal ({wsl_cmd}):")
     print()
@@ -680,7 +680,7 @@ def _print_install_guide_windows(distros: list) -> None:
 
     print(f"  {SEP}")
     step2 = "Step 3" if not distros else "Step 2"
-    print(f"  {step2} — Run SHALOM from inside Ubuntu")
+    print(f"  {step2} -Run SHALOM from inside Ubuntu")
     print(f"  {SEP}")
     print("  All SHALOM commands must be run from within WSL2:")
     print()
@@ -704,21 +704,21 @@ def _print_install_guide_windows(distros: list) -> None:
 
 def _print_install_guide_linux() -> None:
     """Print QE installation options for Linux/macOS."""
-    SEP = "─" * 60
+    SEP = "=" * 60
     print()
     print(f"  {SEP}")
     print("  QE Installation Options")
     print(f"  {SEP}")
     print()
-    print("  Option A — System package manager (Ubuntu/Debian):")
+    print("  Option A -System package manager (Ubuntu/Debian):")
     print()
     print("    sudo apt update && sudo apt install -y quantum-espresso")
     print()
-    print("  Option B — Conda (cross-platform):")
+    print("  Option B -Conda (cross-platform):")
     print()
     print("    conda install -c conda-forge qe")
     print()
-    print("  Option C — Build from source (latest features):")
+    print("  Option C -Build from source (latest features):")
     print("    https://www.quantum-espresso.org/Doc/user_guide/")
     print()
 
@@ -732,12 +732,12 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
 
     from shalom.backends.qe_config import SSSP_ELEMENTS, get_pseudo_filename
 
-    SEP = "─" * 60
+    SEP = "=" * 60
     issues = 0
     is_windows = platform.system() == "Windows"
 
     print("=" * 60)
-    print("  SHALOM — QE Environment Check")
+    print("  SHALOM -QE Environment Check")
     print("=" * 60)
 
     # 1. Check pw.x
@@ -757,7 +757,7 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
                 print()
                 print(f"  {SEP}")
                 print("  WSL2 is not available on this machine.")
-                print("  Enable it in Windows Features → 'Windows Subsystem for Linux'")
+                print("  Enable it in Windows Features ->'Windows Subsystem for Linux'")
                 print("  then run:  wsl --install -d Ubuntu-22.04")
                 print(f"  {SEP}")
         else:
@@ -777,11 +777,11 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
         print("  Pseudopotential Directory Setup")
         print(f"  {SEP}")
         print()
-        print("  Option A — Auto-download (recommended):")
+        print("  Option A -Auto-download (recommended):")
         print()
         print("    python -m shalom setup-qe --elements Si,Fe,O --download")
         print()
-        print("  Option B — Set an existing directory:")
+        print("  Option B -Set an existing directory:")
         print()
         print(f"    export SHALOM_PSEUDO_DIR=/path/to/pseudos")
         print(f"    python -m shalom setup-qe")
@@ -822,7 +822,7 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
         total = len(elements)
         print()
         if missing:
-            print(f"  Pseudopotentials  {n_ok}/{total} OK — {len(missing)} missing")
+            print(f"  Pseudopotentials  {n_ok}/{total} OK -{len(missing)} missing")
             if len(missing) <= 10:
                 print()
                 for el, upf in missing:
@@ -866,7 +866,7 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
     print()
     print("=" * 60)
     if issues == 0:
-        print("  Status: READY — QE execution is available.")
+        print("  Status: READY -QE execution is available.")
     else:
         print(f"  Status: {issues} issue(s) remaining.")
         print("  Fix the items above, then re-run:")
@@ -1106,7 +1106,7 @@ def cmd_converge(args: argparse.Namespace) -> int:
 
 
 def cmd_pipeline(args: argparse.Namespace) -> int:
-    """Execute the 'pipeline' subcommand — LLM-driven autonomous discovery."""
+    """Execute the 'pipeline' subcommand -LLM-driven autonomous discovery."""
     from shalom.pipeline import Pipeline, PipelineConfig
     from shalom.core.schemas import PipelineStatus
 
@@ -1157,7 +1157,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         base_url=base_url,
     )
 
-    print(f"SHALOM Pipeline — LLM-driven Material Discovery")
+    print(f"SHALOM Pipeline -LLM-driven Material Discovery")
     print(f"  Objective: {args.objective}")
     print(f"  Provider:  {args.provider} ({model})")
     if base_url:

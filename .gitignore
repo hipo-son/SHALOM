@@ -84,25 +84,22 @@ demo_report.json
 # Claude Code local settings
 .claude/
 
-# Local dev scripts and test output files
+# Temporary debug/dev directory (all temp scripts and output go here)
+.tmp/
+
+# Legacy root-level temp files (prefer .tmp/ for new files)
 *.bat
 *_out*.txt
+*_crash.txt
+*_fault.txt
+*_test.txt
+pyver.txt
+where.txt
+pytest_capture.txt
 manual_test*.py
 mock_test*.py
 import_trace*
 test_import*
-pyver.txt
-where.txt
-
-# Crash/fault diagnostic files
-*_crash.txt
-*_fault.txt
-*_test.txt
-pytest_capture.txt
-ase_crash.txt
-ase_fault.txt
-np_fault.txt
-np_test.txt
 
 # QE runtime artifacts
 CRASH

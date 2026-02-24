@@ -365,7 +365,8 @@ def direct_run(
             error="No material specified. Provide an MP ID, formula, or --structure file.",
         )
     else:
-        # Materials Project
+        # Try Materials Project first, then fall back to ASE bulk builder
+        mp_error: Optional[str] = None
         try:
             from shalom.mp_client import fetch_structure
             mp_result = fetch_structure(material_spec)
@@ -379,16 +380,38 @@ def direct_run(
                 "energy_above_hull": mp_result.energy_above_hull,
                 "space_group": mp_result.space_group,
             }
-        except ImportError as e:
-            return DirectRunResult(
-                success=False, backend_name=config.backend_name,
-                error=str(e),
-            )
-        except (EnvironmentError, ValueError) as e:
-            return DirectRunResult(
-                success=False, backend_name=config.backend_name,
-                error=str(e),
-            )
+        except (ImportError, EnvironmentError, ValueError) as e:
+            mp_error = str(e)
+
+        # Fallback: ASE bulk builder (for simple elements/formulas)
+        if atoms is None and mp_error is not None:
+            try:
+                from ase.build import bulk as ase_bulk
+                atoms = ase_bulk(material_spec)
+                formula = atoms.get_chemical_formula(mode="reduce")
+                structure_info = {
+                    "source": "ase_bulk",
+                    "formula": formula,
+                    "note": (
+                        "Built from ASE bulk (idealized structure). "
+                        "For accurate results, use an MP ID or structure file."
+                    ),
+                }
+                logger.info(
+                    "MP unavailable (%s). Built '%s' from ASE bulk.",
+                    mp_error, formula,
+                )
+            except Exception:
+                return DirectRunResult(
+                    success=False, backend_name=config.backend_name,
+                    error=(
+                        f"Could not resolve '{material_spec}'. "
+                        f"Materials Project: {mp_error}. "
+                        "ASE bulk builder also failed. "
+                        "Provide an MP ID (mp-19717), simple element symbol (Si), "
+                        "or a structure file (--structure POSCAR)."
+                    ),
+                )
 
     if atoms is None:
         return DirectRunResult(
