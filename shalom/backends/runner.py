@@ -93,7 +93,12 @@ class ExecutionRunner:
         """
         if config.nprocs <= 1:
             return [config.command]
-        return [config.mpi_command, "-np", str(config.nprocs), config.command]
+        cmd = [config.mpi_command]
+        # Open MPI ≥5 refuses to run as root without explicit opt-in.
+        if hasattr(os, "getuid") and os.getuid() == 0:
+            cmd.append("--allow-run-as-root")
+        cmd.extend(["-np", str(config.nprocs), config.command])
+        return cmd
 
     def validate_prerequisites(self, directory: str) -> List[str]:
         """Check that all prerequisites are met before execution.

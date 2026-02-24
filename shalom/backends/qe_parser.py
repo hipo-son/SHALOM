@@ -93,19 +93,46 @@ def parse_xml_bands(
     root = tree.getroot()
     ns = QE_XML_NS
 
+    # QE XML files may use either a default namespace (xmlns=) where all
+    # child elements inherit the namespace, or a prefixed namespace
+    # (xmlns:qes=) where unprefixed children are in *no* namespace.
+    # Detect which variant we have by testing a common element.
+    _use_ns = root.find(".//qes:band_structure", ns) is not None
+
+    def _find(parent, tag):  # type: ignore[no-untyped-def]
+        """Find element, trying namespaced then bare tag."""
+        if _use_ns:
+            elem = parent.find(f"qes:{tag}", ns)
+            if elem is not None:
+                return elem
+        elem = parent.find(tag)
+        if elem is not None:
+            return elem
+        return parent.find(f".//{{{ns['qes']}}}{tag}")
+
+    def _findall(parent, tag):  # type: ignore[no-untyped-def]
+        """Find all elements, trying namespaced then bare tag."""
+        if _use_ns:
+            elems = parent.findall(f"qes:{tag}", ns)
+            if elems:
+                return elems
+        elems = parent.findall(tag)
+        if elems:
+            return elems
+        return parent.findall(f".//{{{ns['qes']}}}{tag}")
+
     # ------------------------------------------------------------------
     # Reciprocal lattice vectors (needed for Cartesian kpath distances)
     # Stored in Angstrom^-1 in the XML (2π/a units).
     # ------------------------------------------------------------------
     b_matrix = np.eye(3)  # fallback: identity
     recip_elem = root.find(".//qes:reciprocal_lattice", ns)
+    if recip_elem is None:
+        recip_elem = root.find(".//reciprocal_lattice")
     if recip_elem is not None:
         b_vecs: List[List[float]] = []
         for tag in ("b1", "b2", "b3"):
-            vec_elem = recip_elem.find(f"qes:{tag}", ns)
-            if vec_elem is None:
-                # Try without namespace prefix (older QE schemas)
-                vec_elem = recip_elem.find(tag)
+            vec_elem = _find(recip_elem, tag)
             if vec_elem is not None and vec_elem.text:
                 b_vecs.append([float(x) for x in vec_elem.text.split()])
         if len(b_vecs) == 3:
@@ -115,6 +142,8 @@ def parse_xml_bands(
     # Spin polarisation flag
     # ------------------------------------------------------------------
     lsda_elem = root.find(".//qes:lsda", ns)
+    if lsda_elem is None:
+        lsda_elem = root.find(".//lsda")
     is_spin_polarized = False
     if lsda_elem is not None and lsda_elem.text:
         is_spin_polarized = lsda_elem.text.strip().lower() in ("true", "1", ".true.")
@@ -123,6 +152,8 @@ def parse_xml_bands(
     # Collect per-k-point data
     # ------------------------------------------------------------------
     ks_list = root.findall(".//qes:ks_energies", ns)
+    if not ks_list:
+        ks_list = root.findall(".//ks_energies")
     if not ks_list:
         raise ValueError(
             f"No <ks_energies> elements found in {xml_path}. "
@@ -135,17 +166,14 @@ def parse_xml_bands(
 
     for ks in ks_list:
         # k-point coordinates (crystal fractional)
-        kpt_elem = ks.find("qes:k_point", ns)
+        kpt_elem = _find(ks, "k_point")
         if kpt_elem is not None and kpt_elem.text:
             kcoords.append([float(x) for x in kpt_elem.text.split()])
         else:
             kcoords.append([0.0, 0.0, 0.0])
 
         # eigenvalues — stored in Hartree; convert to eV
-        eig_elems = ks.findall("qes:eigenvalues", ns)
-        if not eig_elems:
-            # Fallback: try unqualified tag (very old QE schemas)
-            eig_elems = ks.findall("eigenvalues")
+        eig_elems = _findall(ks, "eigenvalues")
 
         if is_spin_polarized and len(eig_elems) >= 2:
             evals_up.append([float(x) * HA_TO_EV for x in eig_elems[0].text.split()])

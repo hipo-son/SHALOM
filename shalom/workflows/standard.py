@@ -215,7 +215,7 @@ class StandardWorkflow:
         # ------------------------------------------------------------------
         # Plotting
         # ------------------------------------------------------------------
-        bands_png = self._plot_bands(bands_dir, fermi)
+        bands_png = self._plot_bands(bands_dir, fermi, scf_tmp_dir)
         dos_png   = self._plot_dos(nscf_dir, fermi)
 
         return {
@@ -354,7 +354,12 @@ class StandardWorkflow:
     # Plotting
     # ------------------------------------------------------------------
 
-    def _plot_bands(self, bands_dir: str, fermi: Optional[float]) -> Optional[str]:
+    def _plot_bands(
+        self,
+        bands_dir: str,
+        fermi: Optional[float],
+        scf_tmp_dir: Optional[str] = None,
+    ) -> Optional[str]:
         """Parse bands XML and generate band structure plot."""
         try:
             from shalom.plotting.band_plot import BandStructurePlotter
@@ -363,6 +368,8 @@ class StandardWorkflow:
             return None
 
         xml_path = find_xml_path(bands_dir)
+        if xml_path is None and scf_tmp_dir:
+            xml_path = find_xml_path(scf_tmp_dir)
         if xml_path is None:
             logger.warning("bands XML not found in %s; band plot skipped.", bands_dir)
             return None

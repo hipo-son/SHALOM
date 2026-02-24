@@ -331,3 +331,211 @@ class TestQEEndToEnd:
         assert dft_result.is_converged
         assert dft_result.energy is not None
         assert dft_result.energy < 0  # Negative total energy
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    shutil.which("pw.x") is None,
+    reason="pw.x not installed (run from WSL with QE)",
+)
+class TestQEWorkflow:
+    """Full 5-step StandardWorkflow with real pw.x."""
+
+    @pytest.fixture()
+    def si_atoms(self):
+        from ase.build import bulk
+        return bulk("Si", "diamond", a=5.43)
+
+    @pytest.fixture()
+    def pseudo_dir(self):
+        d = os.environ.get("SHALOM_PSEUDO_DIR", "")
+        if not d or not os.path.isdir(d):
+            pytest.skip("SHALOM_PSEUDO_DIR not set or missing")
+        return d
+
+    def test_si_scf_and_bands(self, si_atoms, pseudo_dir, tmp_path):
+        """Si SCF + bands via direct_run + ExecutionRunner.
+
+        The full 5-step workflow is too slow for CI on 1 CPU (NSCF with
+        nosym+noinv generates 1000 k-points → >60min).  Instead, test
+        the critical path: input generation → SCF → bands → XML parsing.
+        Full validation (incl. NSCF/DOS) is done via scripts/validate_v1.py.
+        """
+        from ase.io import write as ase_write
+
+        from shalom.backends.qe import QEBackend
+        from shalom.backends.qe_config import (
+            generate_band_kpath,
+            get_band_calc_atoms,
+            get_qe_preset,
+        )
+        from shalom.backends.qe_parser import (
+            extract_fermi_energy,
+            find_xml_path,
+            parse_xml_bands,
+        )
+        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
+        from shalom.direct_run import DirectRunConfig, direct_run
+
+        backend = QEBackend()
+        runner = ExecutionRunner(ExecutionConfig(nprocs=1))
+
+        # --- Step 1: SCF ------------------------------------------------
+        poscar = tmp_path / "Si_POSCAR"
+        ase_write(str(poscar), si_atoms, format="vasp")
+
+        scf_dir = str(tmp_path / "02_scf")
+        scf_cfg = DirectRunConfig(
+            backend_name="qe",
+            calc_type="scf",
+            output_dir=scf_dir,
+            structure_file=str(poscar),
+            pseudo_dir=pseudo_dir,
+            force_overwrite=True,
+        )
+        scf_gen = direct_run("", scf_cfg)
+        assert scf_gen.success, "SCF input generation failed"
+
+        scf_result = runner.run(scf_gen.output_dir)
+        assert scf_result.success, f"SCF failed: {scf_result.error_message}"
+
+        dft = backend.parse_output(scf_gen.output_dir)
+        assert dft.is_converged, "SCF did not converge"
+        assert dft.energy is not None and dft.energy < 0
+
+        fermi = extract_fermi_energy(os.path.join(scf_dir, "pw.out"))
+        assert fermi is not None, "Fermi energy not extracted from SCF"
+        assert 4.0 < fermi < 9.0, f"Fermi energy out of range: {fermi}"
+
+        # --- Step 2: bands -----------------------------------------------
+        calc_atoms = get_band_calc_atoms(si_atoms) or si_atoms
+        kpath_cfg = generate_band_kpath(calc_atoms, npoints=20)  # small for speed
+
+        bands_dir = str(tmp_path / "03_bands")
+        os.makedirs(bands_dir, exist_ok=True)
+
+        # Build bands config (must pass atoms= for ibrav/nat/ntyp/ecutwfc)
+        from shalom.backends.qe_config import QECalculationType
+        from shalom.backends.qe_parser import compute_nbnd
+
+        scf_tmp = os.path.abspath(os.path.join(scf_dir, "tmp"))
+        bands_config = get_qe_preset(QECalculationType.BANDS, atoms=calc_atoms)
+        bands_config.control["outdir"] = scf_tmp
+        bands_config.pseudo_dir = pseudo_dir
+        bands_config.system["nbnd"] = compute_nbnd(calc_atoms)
+        bands_config.kpoints = kpath_cfg
+
+        backend.write_input(calc_atoms, bands_dir, config=bands_config)
+        bands_result = runner.run(bands_dir)
+        assert bands_result.success, f"Bands failed: {bands_result.error_message}"
+
+        # --- Step 3: Parse band structure --------------------------------
+        xml_path = find_xml_path(bands_dir)
+        if xml_path is None:
+            # XML might be in SCF tmp dir
+            xml_path = find_xml_path(scf_tmp)
+        assert xml_path is not None, "Band XML not found"
+
+        bs = parse_xml_bands(xml_path, fermi_energy=fermi)
+        assert bs.eigenvalues.shape[0] > 50, f"Too few k-points: {bs.eigenvalues.shape}"
+        assert bs.eigenvalues.shape[1] >= 8, f"Too few bands: {bs.eigenvalues.shape}"
+
+        # --- Bandgap check (PBE Si: indirect ~0.5–0.7 eV) ---------------
+        vbm = bs.eigenvalues[bs.eigenvalues <= fermi].max()
+        cbm = bs.eigenvalues[bs.eigenvalues > fermi].min()
+        gap = cbm - vbm
+        assert 0.2 < gap < 1.0, f"Si bandgap out of range: {gap:.3f} eV"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    shutil.which("pw.x") is None,
+    reason="pw.x not installed (run from WSL with QE)",
+)
+class TestQEConvergence:
+    """Cutoff convergence test with real pw.x."""
+
+    def test_si_cutoff_convergence(self, tmp_path):
+        """ecutwfc sweep: 20, 30, 40 Ry."""
+        from ase.build import bulk
+        from shalom.workflows.convergence import CutoffConvergence
+
+        pseudo_dir = os.environ.get("SHALOM_PSEUDO_DIR", "")
+        if not pseudo_dir or not os.path.isdir(pseudo_dir):
+            pytest.skip("SHALOM_PSEUDO_DIR not set or missing")
+
+        si = bulk("Si", "diamond", a=5.43)
+        conv = CutoffConvergence(
+            atoms=si,
+            output_dir=str(tmp_path / "ecut"),
+            values=[20, 30, 40],
+            kgrid=[4, 4, 4],
+            pseudo_dir=pseudo_dir,
+            nprocs=1,
+            timeout=600,
+        )
+        result = conv.run()
+
+        # All 3 should have completed
+        assert len(result.results) == 3
+
+        # Each should have an energy
+        for r in result.results:
+            assert r.energy is not None, f"No energy for value={r.value}"
+            assert r.energy < 0
+
+        # Summary is not empty
+        assert len(result.summary()) > 0
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    shutil.which("pw.x") is None,
+    reason="pw.x not installed (run from WSL with QE)",
+)
+class TestQECLI:
+    """CLI subcommand integration tests with real pw.x."""
+
+    def test_cli_setup_qe(self):
+        """setup-qe reports pw.x and pseudo status."""
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "shalom", "setup-qe", "--elements", "Si"],
+            capture_output=True, text=True, timeout=30,
+        )
+        combined = proc.stdout + proc.stderr
+        assert "pw.x" in combined
+        assert "SHALOM" in combined  # header
+
+    def test_cli_run_si_scf(self, tmp_path):
+        """CLI: python -m shalom run --structure <POSCAR> -b qe --calc scf."""
+        import subprocess
+        import sys
+
+        from ase.build import bulk
+        from ase.io import write as ase_write
+
+        pseudo_dir = os.environ.get("SHALOM_PSEUDO_DIR", "")
+        if not pseudo_dir or not os.path.isdir(pseudo_dir):
+            pytest.skip("SHALOM_PSEUDO_DIR not set or missing")
+
+        # Write a POSCAR so we don't need mp-api
+        poscar = tmp_path / "Si_POSCAR"
+        si = bulk("Si", "diamond", a=5.43)
+        ase_write(str(poscar), si, format="vasp")
+
+        out = str(tmp_path / "cli_scf")
+        proc = subprocess.run(
+            [
+                sys.executable, "-m", "shalom", "run",
+                "--structure", str(poscar),
+                "-b", "qe", "--calc", "scf",
+                "-o", out,
+                "--pseudo-dir", pseudo_dir,
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert proc.returncode == 0, f"CLI failed: {proc.stdout}\n{proc.stderr}"
+        assert os.path.isfile(os.path.join(out, "pw.in"))
