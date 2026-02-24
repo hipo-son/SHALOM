@@ -141,8 +141,8 @@ python -m shalom run Si --backend vasp
 # Generate QE input files for bulk Silicon
 python -m shalom run Si --backend qe --calc scf
 
-# Generate VASP input files for Fe2O3
-python -m shalom run Fe2O3 --backend vasp
+# Other simple elements work too (Fe, Cu, Al, etc.)
+python -m shalom run Fe --backend vasp
 ```
 
 Each command creates an output folder (e.g., `~/Desktop/shalom-runs/Si_vasp_relaxation/`) with:

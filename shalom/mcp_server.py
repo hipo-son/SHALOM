@@ -453,8 +453,12 @@ def parse_dft_output(calc_dir: str, backend: str = "qe") -> dict:
 
         if result.forces_max is not None:
             response["forces_max_eV_A"] = result.forces_max
-        if result.pressure is not None:
-            response["pressure_kbar"] = result.pressure
+        if result.stress_tensor is not None and len(result.stress_tensor) >= 3:
+            # Pressure = negative trace of stress tensor / 3 (Voigt: xx, yy, zz, ...)
+            pressure_kbar = -(
+                result.stress_tensor[0] + result.stress_tensor[1] + result.stress_tensor[2]
+            ) / 3.0
+            response["pressure_kbar"] = pressure_kbar
         if result.quality_warnings:
             response["quality_warnings"] = result.quality_warnings
 

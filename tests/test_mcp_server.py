@@ -323,7 +323,7 @@ class TestParseDftOutput:
         mock_result.is_converged = True
         mock_result.energy = -155.3
         mock_result.forces_max = 0.01
-        mock_result.pressure = None
+        mock_result.stress_tensor = None
         mock_result.quality_warnings = []
 
         with patch("shalom.backends.get_backend") as mock_get:

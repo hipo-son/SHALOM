@@ -1216,55 +1216,43 @@ class TestLoadAtoms:
         assert "cannot read structure" in capsys.readouterr().out
 
     def test_from_mp_material(self):
-        """args.material → get_atoms_from_mp called (create=True for missing function)."""
-        from unittest.mock import patch
+        """args.material -> fetch_structure returns atoms."""
+        from unittest.mock import patch, MagicMock
         from shalom.__main__ import _load_atoms
         from ase.build import bulk
 
         si = bulk("Si", "diamond", a=5.43)
+        mock_result = MagicMock()
+        mock_result.atoms = si
         args = self._make_args(material="mp-149")
-        with patch("shalom.mp_client.get_atoms_from_mp", create=True, return_value=si):
+        with patch("shalom.mp_client.fetch_structure", return_value=mock_result):
             result = _load_atoms(args)
         assert result is si
 
-    def test_mp_import_error_returns_none(self, capsys):
-        """mp-api ImportError → None + error message."""
-        from unittest.mock import patch
-        from shalom.__main__ import _load_atoms
-
-        args = self._make_args(material="mp-149")
-        # The real shalom.mp_client doesn't have get_atoms_from_mp, so the
-        # 'from shalom.mp_client import get_atoms_from_mp' already raises
-        # ImportError — test that branch without patching
-        result = _load_atoms(args)
-        assert result is None
-        out = capsys.readouterr().out
-        assert "mp-api" in out
-
-    def test_mp_fails_fallback_to_ase_bulk(self, capsys):
-        """MP raises Exception, ASE bulk fallback succeeds → returns Atoms."""
+    def test_mp_error_fallback_to_ase_bulk(self, capsys):
+        """MP fetch_structure raises, ASE bulk fallback succeeds."""
         from unittest.mock import patch
         from shalom.__main__ import _load_atoms
         from ase.build import bulk
 
         si = bulk("Si", "diamond", a=5.43)
         args = self._make_args(material="Si")
-        with patch("shalom.mp_client.get_atoms_from_mp", create=True,
-                   side_effect=Exception("MP unavailable")), \
+        with patch("shalom.mp_client.fetch_structure",
+                   side_effect=EnvironmentError("MP_API_KEY not set")), \
              patch("ase.build.bulk", return_value=si):
             result = _load_atoms(args)
         assert result is si
         out = capsys.readouterr().out
-        assert "formula fallback" in out
+        assert "MP unavailable" in out
 
     def test_mp_and_bulk_both_fail_returns_none(self, capsys):
-        """Both MP and bulk fail → None with error."""
+        """Both MP and bulk fail -> None with error."""
         from unittest.mock import patch
         from shalom.__main__ import _load_atoms
 
         args = self._make_args(material="BadFormula")
-        with patch("shalom.mp_client.get_atoms_from_mp", create=True,
-                   side_effect=Exception("MP error")), \
+        with patch("shalom.mp_client.fetch_structure",
+                   side_effect=ValueError("Not found")), \
              patch("ase.build.bulk", side_effect=Exception("bulk error")):
             result = _load_atoms(args)
         assert result is None

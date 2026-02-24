@@ -536,13 +536,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("  3. Local structure file:  python -m shalom run --structure POSCAR")
         return 1
 
-    if args.material and not args.structure:
-        from shalom.mp_client import is_mp_available
-        if not is_mp_available():
-            print("Error: mp-api package not installed (required for MP ID / formula lookup).")
-            print("Install with: pip install 'shalom[mp]'")
-            return 1
-
     user_settings = _parse_set_values(args.set_values)
 
     config = DirectRunConfig(
@@ -585,7 +578,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             if getattr(args, "execute", False):
                 if args.backend == "vasp":
                     print("\nError: VASP local execution not yet supported.")
-                    print("Run manually: cd {result.output_dir} && mpirun vasp_std")
+                    print(f"Run manually: cd {result.output_dir} && mpirun vasp_std")
                     return 1
 
                 exec_code = _execute_dft(result.output_dir or ".", args)
@@ -1221,21 +1214,29 @@ def _load_atoms(args: argparse.Namespace):
             return None
 
     if material:
+        # Try Materials Project first, then ASE bulk fallback
+        mp_error = None
         try:
-            from shalom.mp_client import get_atoms_from_mp
-            return get_atoms_from_mp(material)
-        except ImportError:
-            print("Error: mp-api not installed. Use --structure or install shalom[mp].")
-            return None
-        except Exception as exc:
-            # Try ASE formula builder as fallback
+            from shalom.mp_client import fetch_structure
+            result = fetch_structure(material)
+            return result.atoms
+        except (ImportError, EnvironmentError, ValueError) as exc:
+            mp_error = str(exc)
+
+        # Fallback: ASE bulk builder (simple elements only)
+        if mp_error is not None:
             try:
                 from ase.build import bulk
                 atoms = bulk(material)
-                print(f"Note: built bulk {material} from ASE (formula fallback).")
+                print(f"Note: built bulk {material} from ASE (MP unavailable: {mp_error}).")
                 return atoms
             except Exception:
-                print(f"Error: cannot resolve material '{material}': {exc}")
+                print(
+                    f"Error: cannot resolve '{material}'.\n"
+                    f"  MP: {mp_error}\n"
+                    f"  ASE bulk also failed (only simple elements like Si, Fe, Cu work).\n"
+                    f"  Use --structure FILE or an MP ID (mp-19717)."
+                )
                 return None
 
     print("Error: provide a material spec or --structure file.")
