@@ -71,8 +71,11 @@ docs = [
 demo = [
     "rich>=13.0"
 ]
+mcp = [
+    "mcp[cli]>=1.2.0",  # MCP server for Claude Code integration (requires Python >=3.10)
+]
 all = [
-    "shalom[pymatgen,mp,dev,docs,demo,plotting]"
+    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp]"
 ]
 
 [project.scripts]

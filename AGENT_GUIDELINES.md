@@ -56,3 +56,22 @@ To maintain a scalable and cost-effective framework:
 *   **Context Compression:** Never pass raw, massive log files (`OUTCAR`, `lammps.log`) directly to the LLM. Always use parsers to extract only the relevant physical quantities (Energy, Forces, Bandgap) and the exact error trace.
 *   **Deterministic Output:** Ensure all code generated for the `SafeExecutor` is strictly sandboxed. Do not include commands that attempt network access or write outside the designated scratch directory.
 *   **Testing State:** Treat every generated simulation as a "hypothesis test." If the test (calculation) fails, the agent must propose a new hypothesis (parameter fix) and retry until success or a hard limit is reached.
+
+---
+
+## 🔒 4. Sandbox Security & Audit
+
+### SafeExecutor Constraints
+The `SafeExecutor` (`shalom/core/sandbox.py`) uses a **whitelist-only** approach for builtins. Generated code runs in a restricted namespace where:
+*   **Blocked builtins:** `eval`, `exec`, `compile` (arbitrary code execution), `open` (filesystem access), `breakpoint` (debugger escape), `getattr`/`setattr`/`delattr` (attribute introspection → `__class__` sandbox escape), `globals`/`locals`/`vars` (scope inspection), `type` (metaclass manipulation → `__subclasses__` escape).
+*   **Allowed builtins:** `abs`, `all`, `any`, `bool`, `dict`, `enumerate`, `float`, `hasattr`, `int`, `isinstance`, `len`, `list`, `map`, `max`, `min`, `print`, `range`, `round`, `set`, `sorted`, `str`, `sum`, `tuple`, `zip`, `True`, `False`, `None`.
+*   **Import restriction:** `__import__` is set to `None`. Trusted libraries (ASE, NumPy) are passed explicitly via `local_vars`.
+*   **Timeout:** POSIX uses `signal.SIGALRM`; Windows uses `ThreadPoolExecutor` fallback.
+
+Agents MUST NOT generate code that relies on blocked builtins. Use the allowed utilities and the libraries injected by the framework.
+
+### Audit Logging
+All LLM API calls and pipeline executions are logged when `SHALOM_AUDIT_LOG` is set:
+*   **Events:** `llm_call` (provider, model, base_url, response_model), `pipeline_start` (objective, backend, steps).
+*   **Format:** JSON-line file, one JSON object per line with UTC timestamp.
+*   Audit logging never blocks execution — failures are silently caught.

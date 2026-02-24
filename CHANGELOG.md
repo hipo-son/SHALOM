@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MCP Server — Claude Code Integration** (`shalom/mcp_server.py`)
+  - FastMCP v1.x server exposing 10 DFT tools via Model Context Protocol
+  - 9 deterministic tools (no API key needed): `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`
+  - 1 LLM-driven tool: `run_pipeline` (full multi-agent pipeline; requires API key or `base_url`)
+  - `.mcp.json` project-scoped config for auto-registration in Claude Code
+  - `[mcp]` optional dependency extra: `pip install "shalom[mcp]"`
+  - stdio transport with strict stdout isolation (all logging to stderr)
+- **Local LLM Support** (`shalom/core/llm_provider.py`)
+  - `base_url` parameter for OpenAI-compatible local servers (Ollama, vLLM, llama.cpp, LM Studio)
+  - `SHALOM_LLM_BASE_URL` env var fallback (used by LLMProvider, CLI, MCP)
+  - API key check skipped when `base_url` is set (dummy key `"local"` used)
+  - Anthropic provider also supports `base_url` for self-hosted proxies
+  - CLI: `--base-url` flag on `pipeline` subcommand
+  - MCP: `base_url` parameter on `run_pipeline` tool
+- **Audit Logging** (`shalom/core/audit.py`)
+  - JSON-line file logging activated by `SHALOM_AUDIT_LOG` env var
+  - Records `llm_call` and `pipeline_start` events with UTC timestamps
+  - Lazy-initialized singleton logger, never blocks execution on failure
+  - Integrated into `LLMProvider.generate_structured_output()` and `Pipeline.run()`
+- **SafeExecutor Hardening** (`shalom/core/sandbox.py`)
+  - Whitelist-only builtins: `eval`, `exec`, `compile`, `open`, `breakpoint` explicitly blocked
+  - Attribute introspection blocked: `getattr`, `setattr`, `delattr` (prevents `__class__` escape)
+  - Scope inspection blocked: `globals`, `locals`, `vars`
+  - Metaclass manipulation blocked: `type` (prevents `__subclasses__` escape)
+  - Added safe utilities: `sorted`, `map`, `hasattr`, `isinstance`
+- **LLM Pipeline CLI** (`python -m shalom pipeline`)
+  - Full multi-agent material discovery from the command line
+  - `--provider`, `--model`, `--material`, `--steps`, `--selector-mode`, `--max-loops` flags
+  - `--base-url` for local LLM servers
+- **80 new tests** (1124 total, 94.6% coverage): MCP server tools (54 tests in `test_mcp_server.py`), LLMProvider base_url (4), SafeExecutor hardening (6), audit logging (2), pipeline base_url integration (14)
 - **Materials Project (MP) API Integration Router** (`shalom/pipeline.py`)
   - Added Fast Track routing to bypass AI generation and fetch accurate structures directly via `mp_client.fetch_structure`
   - Seamless fallback logic to `GeometryGenerator` if the requested material is novel or MP search fails

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "shalom": {
+      "command": "python",
+      "args": ["-m", "shalom.mcp_server"],
+      "env": {
+        "SHALOM_PSEUDO_DIR": "${SHALOM_PSEUDO_DIR}",
+        "MP_API_KEY": "${MP_API_KEY}",
+        "SHALOM_LLM_BASE_URL": "${SHALOM_LLM_BASE_URL}"
+      }
+    }
+  }
+}

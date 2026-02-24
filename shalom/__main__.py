@@ -420,6 +420,108 @@ def build_parser() -> argparse.ArgumentParser:
         help="Download missing pseudopotentials from SSSP repository.",
     )
 
+    # 'pipeline' subcommand — LLM-driven autonomous pipeline
+    pipeline_parser = subparsers.add_parser(
+        "pipeline",
+        help="Run the LLM-driven autonomous material discovery pipeline.",
+        description=(
+            "Use LLM agents (OpenAI GPT or Anthropic Claude) to autonomously "
+            "select materials, generate structures, and produce DFT input files. "
+            "Requires an API key: OPENAI_API_KEY or ANTHROPIC_API_KEY."
+        ),
+    )
+    pipeline_parser.add_argument(
+        "objective",
+        help=(
+            "Natural language objective. "
+            "E.g. 'Find a 2D HER catalyst', 'Stable Li-ion cathode material'."
+        ),
+    )
+    pipeline_parser.add_argument(
+        "--backend", "-b",
+        default="qe",
+        choices=["vasp", "qe"],
+        help="DFT backend (default: qe).",
+    )
+    pipeline_parser.add_argument(
+        "--provider",
+        default="openai",
+        choices=["openai", "anthropic"],
+        help="LLM provider (default: openai).",
+    )
+    pipeline_parser.add_argument(
+        "--model",
+        default=None,
+        help="LLM model name (default: gpt-4o for openai, claude-sonnet-4-6 for anthropic).",
+    )
+    pipeline_parser.add_argument(
+        "--material",
+        default=None,
+        help="Skip Design layer and use this material directly (e.g. 'MoS2', 'Fe2O3').",
+    )
+    pipeline_parser.add_argument(
+        "--steps",
+        default=None,
+        help=(
+            "Comma-separated pipeline steps: design,simulation,review. "
+            "Default: design,simulation (generates input files, awaits DFT)."
+        ),
+    )
+    pipeline_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output directory for pipeline results.",
+    )
+    pipeline_parser.add_argument(
+        "--calc", "-c",
+        default="relaxation",
+        help="Calculation type (default: relaxation).",
+    )
+    pipeline_parser.add_argument(
+        "--accuracy", "-a",
+        default="standard",
+        choices=["standard", "precise"],
+    )
+    pipeline_parser.add_argument(
+        "--execute", "-x",
+        action="store_true",
+        help="Execute DFT after input generation (QE only).",
+    )
+    pipeline_parser.add_argument(
+        "--nprocs", "-np",
+        type=int,
+        default=1,
+        help="MPI process count for --execute.",
+    )
+    pipeline_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=86400,
+        help="DFT execution timeout in seconds.",
+    )
+    pipeline_parser.add_argument(
+        "--max-loops",
+        type=int,
+        default=1,
+        help="Max Design→Sim→Review outer loop iterations (default: 1).",
+    )
+    pipeline_parser.add_argument(
+        "--selector-mode",
+        default="simple",
+        choices=["simple", "multi_agent"],
+        help="Fine selector mode (default: simple).",
+    )
+    pipeline_parser.add_argument(
+        "--base-url",
+        default=None,
+        help=(
+            "Custom LLM API base URL for local/self-hosted models. "
+            "E.g. http://localhost:11434/v1 (Ollama), "
+            "http://localhost:8000/v1 (vLLM). "
+            "Falls back to $SHALOM_LLM_BASE_URL env var."
+        ),
+    )
+
     return parser
 
 
@@ -1003,6 +1105,108 @@ def cmd_converge(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_pipeline(args: argparse.Namespace) -> int:
+    """Execute the 'pipeline' subcommand — LLM-driven autonomous discovery."""
+    from shalom.pipeline import Pipeline, PipelineConfig
+    from shalom.core.schemas import PipelineStatus
+
+    # Resolve model name
+    model = args.model
+    if model is None:
+        model = "claude-sonnet-4-6" if args.provider == "anthropic" else "gpt-4o"
+
+    # Resolve base_url (CLI flag > env var)
+    base_url = args.base_url or os.environ.get("SHALOM_LLM_BASE_URL")
+
+    # Check API key (not required when using a local LLM via base_url)
+    key_env = "ANTHROPIC_API_KEY" if args.provider == "anthropic" else "OPENAI_API_KEY"
+    if not os.environ.get(key_env) and not base_url:
+        print(f"Error: {key_env} environment variable not set.")
+        print(f"  Get your API key and set it:")
+        if args.provider == "anthropic":
+            print("    export ANTHROPIC_API_KEY='sk-ant-...'")
+            print("  Get key at: https://console.anthropic.com/")
+        else:
+            print("    export OPENAI_API_KEY='sk-...'")
+            print("  Get key at: https://platform.openai.com/api-keys")
+        print()
+        print("  Or use a local LLM server:")
+        print("    python -m shalom pipeline 'objective' --base-url http://localhost:11434/v1")
+        return 1
+
+    # Parse steps
+    steps = None
+    if args.steps:
+        steps = [s.strip() for s in args.steps.split(",")]
+
+    # Build config
+    config = PipelineConfig(
+        backend_name=args.backend,
+        provider_type=args.provider,
+        model_name=model,
+        output_dir=args.output or "",
+        calc_type=args.calc,
+        accuracy=args.accuracy,
+        execute=args.execute,
+        nprocs=args.nprocs,
+        execution_timeout=args.timeout,
+        max_outer_loops=args.max_loops,
+        selector_mode=args.selector_mode,
+        steps=steps,
+        material_name=args.material,
+        base_url=base_url,
+    )
+
+    print(f"SHALOM Pipeline — LLM-driven Material Discovery")
+    print(f"  Objective: {args.objective}")
+    print(f"  Provider:  {args.provider} ({model})")
+    if base_url:
+        print(f"  Base URL:  {base_url}")
+    print(f"  Backend:   {args.backend}")
+    if args.material:
+        print(f"  Material:  {args.material} (Design layer skipped)")
+    print()
+
+    try:
+        pipeline = Pipeline(objective=args.objective, config=config)
+        result = pipeline.run()
+    except Exception as exc:
+        print(f"Error: pipeline failed: {exc}")
+        return 1
+
+    # Display results
+    print(f"Status:   {result.status.value}")
+    if result.ranked_material:
+        mat = result.ranked_material.candidate.material_name
+        score = result.ranked_material.score
+        print(f"Material: {mat} (score={score:.2f})")
+    if result.structure_path:
+        print(f"Output:   {result.structure_path}")
+    if result.execution_wall_time is not None:
+        print(f"DFT time: {result.execution_wall_time:.1f}s")
+    if result.quality_warnings:
+        print(f"Warnings: {', '.join(result.quality_warnings)}")
+    if result.error_message:
+        print(f"Error:    {result.error_message}")
+    if result.elapsed_seconds is not None:
+        print(f"Elapsed:  {result.elapsed_seconds:.1f}s")
+
+    print()
+    print(f"Steps completed: {' -> '.join(result.steps_completed)}")
+
+    if result.status == PipelineStatus.AWAITING_DFT:
+        print()
+        print("Next: Run DFT on the generated input files, then use:")
+        print(f"  Pipeline.resume_from_dft(result)  # Python API")
+
+    success = result.status in (
+        PipelineStatus.COMPLETED,
+        PipelineStatus.COMPLETED_DESIGN,
+        PipelineStatus.AWAITING_DFT,
+    )
+    return 0 if success else 1
+
+
 def _load_atoms(args: argparse.Namespace):
     """Load ASE Atoms from args.material / args.structure. Returns None on error."""
     structure_file = getattr(args, "structure", None)
@@ -1063,6 +1267,8 @@ def main() -> None:
         sys.exit(cmd_workflow(args))
     elif args.command == "converge":
         sys.exit(cmd_converge(args))
+    elif args.command == "pipeline":
+        sys.exit(cmd_pipeline(args))
     else:
         parser.print_help()
         sys.exit(0)

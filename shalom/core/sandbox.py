@@ -25,6 +25,8 @@ class SafeExecutor:
 
     # Whitelisted built-in functions for the secure execution environment.
     # ``__import__`` is explicitly set to None to block dynamic imports.
+    # Dangerous builtins (eval, exec, compile, open, breakpoint) are
+    # intentionally excluded to prevent sandbox escape.
     WHITELISTED_LOCALS: Dict[str, Any] = {
         "__builtins__": {
             "__import__": None,
@@ -35,14 +37,19 @@ class SafeExecutor:
             "dict": dict,
             "enumerate": enumerate,
             "float": float,
+            "hasattr": hasattr,
             "int": int,
+            "isinstance": isinstance,
             "len": len,
             "list": list,
+            "map": map,
             "max": max,
             "min": min,
+            "print": print,
             "range": range,
             "round": round,
             "set": set,
+            "sorted": sorted,
             "str": str,
             "sum": sum,
             "tuple": tuple,
@@ -50,7 +57,13 @@ class SafeExecutor:
             "True": True,
             "False": False,
             "None": None,
-            "print": print,
+            # Dangerous builtins explicitly blocked:
+            # eval, exec, compile  — arbitrary code execution
+            # open                 — filesystem access
+            # breakpoint           — debugger escape
+            # getattr, setattr, delattr — attribute introspection (sandbox escape via __class__)
+            # globals, locals, vars — scope inspection
+            # type                 — metaclass manipulation (__subclasses__ escape)
         }
     }
 

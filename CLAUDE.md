@@ -26,7 +26,11 @@ shalom/
 │   ├── base.py       # ConvergenceWorkflow ABC, ConvergenceResult, ConvergenceTestResult
 │   ├── convergence.py # CutoffConvergence (ecutwfc sweep), KpointConvergence (k-mesh sweep)
 │   └── standard.py   # StandardWorkflow — 5-step QE pipeline (vc-relax→scf→bands→nscf→dos.x→plot)
-├── core/             # LLMProvider, schemas, sandbox
+├── core/             # Core infrastructure
+│   ├── llm_provider.py  # LLMProvider — OpenAI/Anthropic + local LLM (base_url) support
+│   ├── schemas.py       # Pydantic schemas (MaterialCandidate, PipelineResult, etc.)
+│   ├── sandbox.py       # SafeExecutor — hardened sandbox with whitelist-only builtins
+│   └── audit.py         # Audit logging (JSON-line, opt-in via $SHALOM_AUDIT_LOG)
 ├── tools/            # ASE builder utilities
 ├── prompts/          # LLM system prompts (.md files)
 ├── config/           # Physics/DFT settings (.yaml files)
@@ -39,8 +43,9 @@ shalom/
 ├── _defaults.py      # Hardcoded fallback values
 ├── mp_client.py      # Materials Project API client (optional: pip install mp-api)
 ├── direct_run.py     # Direct material run (structure -> DFT input files)
-├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge
-└── pipeline.py       # End-to-end LLM pipeline orchestrator
+├── mcp_server.py     # MCP server for Claude Code integration (10 tools)
+├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/pipeline
+└── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
 ```
 
 ## Key Conventions
@@ -67,7 +72,7 @@ shalom/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: 1044 tests, coverage ≥85%
+pytest tests/                          # default: 1124 tests, coverage ≥85%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```
@@ -141,7 +146,76 @@ python -m shalom workflow mp-19717 -b qe -np 8 --dos-emin -20
 # ── Convergence tests (run ecutwfc first, then kpoints) ──────────────────────
 python -m shalom converge Si --test cutoff --values 30,40,50,60,80 -np 2
 python -m shalom converge Si --test kpoints --values 20,30,40,50 --ecutwfc 60
+
+# ── LLM-driven autonomous pipeline ──────────────────────────────────────────
+python -m shalom pipeline "Find a 2D HER catalyst"              # Full pipeline (OpenAI)
+python -m shalom pipeline "Stable cathode" --provider anthropic  # Use Claude
+python -m shalom pipeline "MoS2 band structure" --material MoS2  # Skip Design layer
+python -m shalom pipeline "Find catalyst" -b qe -x -np 4        # Execute DFT too
+
+# ── Local LLM (no API key needed) ─────────────────────────────────────────
+python -m shalom pipeline "Find HER catalyst" --base-url http://localhost:11434/v1  # Ollama
+python -m shalom pipeline "MoS2 bands" --base-url http://localhost:8000/v1          # vLLM
+export SHALOM_LLM_BASE_URL=http://localhost:11434/v1  # Or set via env var
 ```
+
+### MCP Server (Claude Code Integration)
+SHALOM can be used as an MCP tool server for Claude Code, enabling natural
+language interaction with DFT workflows using your Claude subscription (no API key needed
+for deterministic tools).
+
+```bash
+# Install MCP support
+pip install "shalom[mcp]"
+
+# Register in Claude Code (one-time setup)
+claude mcp add shalom -- python -m shalom.mcp_server
+
+# Or use project-scoped .mcp.json (already in repo root)
+# Claude Code auto-detects this file when opening the project.
+
+# Verify connection inside Claude Code
+/mcp
+```
+
+After setup, tell Claude Code things like:
+- "Si의 SCF 계산 입력 파일을 만들어줘"
+- "mp-1040425 그래핀 밴드 구조 계산해줘"
+- "QE 환경이 설정되어 있는지 확인해줘"
+
+**10 MCP tools** (9 deterministic + 1 LLM-driven):
+
+| Tool | Description | Requires API Key? |
+|------|-------------|:-----------------:|
+| `search_material` | Materials Project search by MP ID or formula | No |
+| `generate_dft_input` | Generate QE/VASP input files | No |
+| `run_workflow` | 5-step QE workflow (vc-relax→scf→bands→nscf→dos) | No |
+| `execute_dft` | Execute pw.x with error recovery | No |
+| `parse_dft_output` | Parse QE/VASP output files | No |
+| `plot_bands` | Band structure plot | No |
+| `plot_dos` | Density of states plot | No |
+| `run_convergence` | Cutoff/k-point convergence test | No |
+| `check_qe_setup` | Verify QE environment | No |
+| `run_pipeline` | Full multi-agent LLM pipeline | Yes (or `base_url`) |
+
+The `run_pipeline` tool supports `base_url` for local LLM servers (Ollama, vLLM, etc.)
+as an alternative to external API keys.
+
+### Local LLM Support
+- `LLMProvider` accepts `base_url` parameter for OpenAI-compatible local servers
+- Env var fallback: `SHALOM_LLM_BASE_URL` (used by CLI, MCP, and Python API)
+- When `base_url` is set, API key check is skipped (dummy key `"local"` used)
+- Compatible servers: Ollama (`localhost:11434/v1`), vLLM (`localhost:8000/v1`), llama.cpp, LM Studio
+- Anthropic provider also supports `base_url` for self-hosted proxies
+
+### Security & Audit
+- **SafeExecutor sandbox**: whitelist-only builtins (eval/exec/compile/open/breakpoint blocked)
+  - `getattr`, `setattr`, `delattr`, `globals`, `locals`, `vars`, `type` also blocked
+  - Override with `SHALOM_ALLOW_UNSAFE_EXEC=1` for development
+- **Audit logging**: opt-in via `SHALOM_AUDIT_LOG` env var (JSON-line format)
+  - Records `llm_call`, `pipeline_start` events with timestamps
+  - Example: `export SHALOM_AUDIT_LOG=~/.shalom/audit.log`
+  - Module: `shalom/core/audit.py` — never blocks execution on failure
 
 ### Workspace / Output Directory
 - Default root: `~/Desktop/shalom-runs/` (Desktop present) or `~/shalom-runs/`

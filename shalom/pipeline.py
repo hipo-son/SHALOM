@@ -172,6 +172,14 @@ class PipelineConfig(BaseModel):
         default=None,
         description="QE namelist overrides (e.g., {'system.ecutwfc': 80}).",
     )
+    base_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Custom LLM API base URL for local/self-hosted models "
+            "(e.g. http://localhost:11434/v1 for Ollama). "
+            "Falls back to $SHALOM_LLM_BASE_URL env var."
+        ),
+    )
 
     # --- Flexible pipeline step configuration ---
     steps: Optional[List[str]] = Field(
@@ -231,6 +239,7 @@ class Pipeline:
         self.llm = llm_provider or LLMProvider(
             provider_type=self.config.provider_type,
             model_name=self.config.model_name,
+            base_url=self.config.base_url,
         )
         self.backend = get_backend(self.config.backend_name)
 
@@ -297,6 +306,19 @@ class Pipeline:
         Returns:
             PipelineResult containing all intermediate outputs and final status.
         """
+        # Audit log pipeline start
+        try:
+            from shalom.core.audit import log_event
+            log_event("pipeline_start", {
+                "objective": self.objective,
+                "backend": self.config.backend_name,
+                "provider": self.config.provider_type,
+                "model": self.config.model_name,
+                "steps": self._effective_steps,
+            })
+        except Exception:
+            pass
+
         start_time = time.monotonic()
         previous_feedback = ""
         config_snapshot = self.config.model_dump()

@@ -27,7 +27,7 @@ Thank you for your interest in contributing to SHALOM! We welcome contributions 
 - **Code Style**: We strictly enforce `black` for formatting and `ruff` for linting.
 - **Type Hinting**: All code must include Python type hints, checked using `mypy`.
 - **Docstrings**: We use the *Google Style* for docstrings (in English) across all classes and methods.
-- **Tests**: All new features and bug fixes must include tests. High test coverage (>85%) is expected. We use `pytest`.
+- **Tests**: All new features and bug fixes must include tests. High test coverage (>85%) is expected. We use `pytest`. Current baseline: 1124 tests.
 
 ## Adding New Components
 
@@ -57,6 +57,18 @@ Thank you for your interest in contributing to SHALOM! We welcome contributions 
 3. Add the variable to `_DEFAULT_PROMPTS` dict in `evaluators.py`.
 4. Add weight + veto_threshold in `config/evaluator_weights.yaml` + `_defaults.py`.
 5. Add to `create_default_evaluators()` factory in `evaluators.py`.
+
+### New MCP Tool
+1. Add a new `@mcp.tool()` function in `shalom/mcp_server.py`.
+2. Wrap existing SHALOM library functions — do not add new logic in the tool itself.
+3. Return structured `dict` with `"success"` key. Catch exceptions and return `{"success": False, "error": "..."}`.
+4. **Never use `print()`** — stdout is reserved for JSON-RPC protocol (use `logging` to stderr).
+5. Add tests in `tests/test_mcp_server.py` (mock internal dependencies, test input/output contract).
+
+### Security Considerations
+- **SafeExecutor**: whitelist-only builtins. When adding new builtins, justify in PR description.
+- **Audit logging**: security-sensitive operations (LLM calls, DFT execution) should call `log_event()` from `shalom/core/audit.py`.
+- **Never commit** API keys, `.env` files, or audit logs.
 
 ## Pull Request Workflow
 

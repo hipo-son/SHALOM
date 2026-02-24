@@ -23,16 +23,30 @@ class LLMProvider:
         provider_type: str = "openai",
         model_name: str = "gpt-4o",
         usage_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        base_url: Optional[str] = None,
     ):
         self.provider_type = provider_type.lower()
         self.model_name = model_name
         self.usage_callback = usage_callback
+        self.base_url = base_url or os.environ.get("SHALOM_LLM_BASE_URL")
 
         self.client: Union[openai.OpenAI, Anthropic]
         if self.provider_type == "openai":
-            self.client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            client_kwargs: Dict[str, Any] = {}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+                # Local LLM servers (Ollama, vLLM, etc.) don't need a real API key
+                client_kwargs["api_key"] = os.environ.get("OPENAI_API_KEY") or "local"
+            else:
+                client_kwargs["api_key"] = os.environ.get("OPENAI_API_KEY")
+            self.client = openai.OpenAI(**client_kwargs)
         elif self.provider_type == "anthropic":
-            self.client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+            anthropic_kwargs: Dict[str, Any] = {
+                "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+            }
+            if self.base_url:
+                anthropic_kwargs["base_url"] = self.base_url
+            self.client = Anthropic(**anthropic_kwargs)
         else:
             raise ValueError(f"Unsupported provider: {provider_type}")
 
@@ -104,6 +118,18 @@ class LLMProvider:
         except FileNotFoundError:
             logger.warning("AGENT_GUIDELINES.md not found. Proceeding with raw system prompt.")
             injected_system_prompt = system_prompt
+
+        # Audit log the LLM call
+        try:
+            from shalom.core.audit import log_event
+            log_event("llm_call", {
+                "provider": self.provider_type,
+                "model": self.model_name,
+                "base_url": self.base_url,
+                "response_model": response_model.__name__,
+            })
+        except Exception:
+            pass  # Audit logging must never block execution
 
         if self.provider_type == "openai":
             return self._call_openai_structured(injected_system_prompt, user_prompt, response_model, seed)
