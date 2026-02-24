@@ -33,6 +33,13 @@ DFT simulation to result evaluation.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Tutorials
+
+   tutorials/01_basic_material_search
+   tutorials/02_custom_agent_pipeline
+
+.. toctree::
+   :maxdepth: 1
    :caption: Design Documents
 
    master_design_document
