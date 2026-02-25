@@ -623,6 +623,103 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory for displaced structures or plots.",
     )
 
+    # analyze electronic
+    electronic_parser = analyze_sub.add_parser(
+        "electronic",
+        help="Analyze electronic band structure (band gap, effective mass, DOS@Ef).",
+    )
+    electronic_parser.add_argument(
+        "--bands-xml",
+        default=None,
+        metavar="PATH",
+        help="Path to QE data-file-schema.xml with band eigenvalues.",
+    )
+    electronic_parser.add_argument(
+        "--calc-dir",
+        default=None,
+        metavar="DIR",
+        help="QE bands calculation directory (auto-finds XML).",
+    )
+    electronic_parser.add_argument(
+        "--dos-file",
+        default=None,
+        metavar="PATH",
+        help="Path to pwscf.dos file for DOS-at-Fermi analysis.",
+    )
+    electronic_parser.add_argument(
+        "--fermi-energy",
+        type=float,
+        default=None,
+        help="Fermi energy in eV (auto-detected from XML/pw.out if omitted).",
+    )
+
+    # analyze xrd
+    xrd_parser = analyze_sub.add_parser(
+        "xrd",
+        help="Calculate powder X-ray diffraction pattern from a crystal structure.",
+    )
+    xrd_parser.add_argument(
+        "--structure",
+        required=True,
+        help="Path to structure file (POSCAR, CIF, etc.).",
+    )
+    xrd_parser.add_argument(
+        "--wavelength",
+        default="CuKa",
+        help="X-ray wavelength label (default: CuKa). Options: CuKa, MoKa, CoKa, etc.",
+    )
+    xrd_parser.add_argument(
+        "--theta-min",
+        type=float,
+        default=0.0,
+        help="Minimum 2-theta angle in degrees (default: 0).",
+    )
+    xrd_parser.add_argument(
+        "--theta-max",
+        type=float,
+        default=90.0,
+        help="Maximum 2-theta angle in degrees (default: 90).",
+    )
+    xrd_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output PNG path for XRD pattern plot.",
+    )
+
+    # analyze symmetry
+    symmetry_parser = analyze_sub.add_parser(
+        "symmetry",
+        help="Analyze crystal symmetry (space group, point group, Wyckoff positions).",
+    )
+    symmetry_parser.add_argument(
+        "--structure",
+        required=True,
+        help="Path to structure file (POSCAR, CIF, etc.).",
+    )
+    symmetry_parser.add_argument(
+        "--symprec",
+        type=float,
+        default=1e-5,
+        help="Symmetry tolerance in Angstrom (default: 1e-5).",
+    )
+
+    # analyze magnetic
+    magnetic_parser = analyze_sub.add_parser(
+        "magnetic",
+        help="Analyze magnetic properties from QE pw.out (site moments, Lowdin charges).",
+    )
+    magnetic_parser.add_argument(
+        "--pw-out",
+        required=True,
+        metavar="PATH",
+        help="Path to QE pw.out file.",
+    )
+    magnetic_parser.add_argument(
+        "--structure",
+        default=None,
+        help="Path to structure file for element identification (optional).",
+    )
+
     return parser
 
 
@@ -1393,15 +1490,28 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
 def cmd_analyze(args: argparse.Namespace) -> int:
     """Execute the 'analyze' subcommand."""
     if not getattr(args, "analyze_type", None):
-        print("Error: specify an analysis type. Available: elastic, phonon")
+        print("Error: specify an analysis type.")
+        print("  Available: elastic, phonon, electronic, xrd, symmetry, magnetic")
+        print()
         print("  python -m shalom analyze elastic --tensor '[[...]]'")
         print("  python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 ...")
+        print("  python -m shalom analyze electronic --bands-xml <path>")
+        print("  python -m shalom analyze xrd --structure POSCAR")
+        print("  python -m shalom analyze symmetry --structure POSCAR")
+        print("  python -m shalom analyze magnetic --pw-out pw.out")
         return 1
 
-    if args.analyze_type == "elastic":
-        return _cmd_analyze_elastic(args)
-    if args.analyze_type == "phonon":
-        return _cmd_analyze_phonon(args)
+    handlers = {
+        "elastic": _cmd_analyze_elastic,
+        "phonon": _cmd_analyze_phonon,
+        "electronic": _cmd_analyze_electronic,
+        "xrd": _cmd_analyze_xrd,
+        "symmetry": _cmd_analyze_symmetry,
+        "magnetic": _cmd_analyze_magnetic,
+    }
+    handler = handlers.get(args.analyze_type)
+    if handler:
+        return handler(args)
 
     print(f"Error: unknown analysis type '{args.analyze_type}'.")
     return 1
@@ -1625,6 +1735,284 @@ def _cmd_analyze_phonon(args: argparse.Namespace) -> int:
         except ImportError:
             print("  Note: matplotlib not installed, skipping plots.")
 
+    return 0
+
+
+def _cmd_analyze_electronic(args: argparse.Namespace) -> int:
+    """Run electronic band structure analysis."""
+    from shalom.analysis.electronic import is_electronic_available, analyze_band_structure
+
+    if not is_electronic_available():
+        print("Error: numpy not available (should not happen).")
+        return 1
+
+    # Resolve bands XML
+    xml_path = args.bands_xml
+    if not xml_path and args.calc_dir:
+        from shalom.backends.qe_parser import find_xml_path
+        xml_path = find_xml_path(args.calc_dir)
+        if xml_path is None:
+            print(f"Error: data-file-schema.xml not found in {args.calc_dir}")
+            return 1
+
+    if not xml_path:
+        print("Error: provide --bands-xml or --calc-dir.")
+        return 1
+
+    try:
+        from shalom.backends.qe_parser import parse_xml_bands, extract_fermi_energy
+
+        fermi = args.fermi_energy
+        if fermi is None:
+            # Try extracting from pw.out in same dir
+            pw_out = os.path.join(os.path.dirname(xml_path), "pw.out")
+            fermi = extract_fermi_energy(pw_out)
+
+        band_data = parse_xml_bands(xml_path, fermi_energy=fermi)
+
+        dos_data = None
+        if args.dos_file:
+            from shalom.backends.qe_parser import parse_dos_file
+            dos_data = parse_dos_file(args.dos_file)
+            if fermi is not None:
+                dos_data.fermi_energy = fermi
+
+        result = analyze_band_structure(band_data, dos_data=dos_data)
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    # Display
+    print("=" * 50)
+    print("  Electronic Structure Analysis")
+    print("=" * 50)
+    print()
+    if result.is_metal:
+        print("  Classification:    Metal")
+        if result.dos_at_fermi is not None:
+            print(f"  DOS at Fermi:      {result.dos_at_fermi:.4f} states/eV")
+    else:
+        gap_type = "direct" if result.is_direct else "indirect"
+        print(f"  Classification:    Semiconductor/Insulator ({gap_type} gap)")
+        if result.bandgap_eV is not None:
+            print(f"  Band gap:          {result.bandgap_eV:.4f} eV")
+        if result.vbm_energy is not None:
+            print(f"  VBM energy:        {result.vbm_energy:.4f} eV")
+        if result.cbm_energy is not None:
+            print(f"  CBM energy:        {result.cbm_energy:.4f} eV")
+    if result.effective_mass_electron is not None:
+        print(f"  Effective mass (e): {result.effective_mass_electron:.4f} m_e")
+    if result.effective_mass_hole is not None:
+        print(f"  Effective mass (h): {result.effective_mass_hole:.4f} m_e")
+    print(f"  Occupied bands:    {result.n_occupied_bands}")
+    print()
+    print("=" * 50)
+    return 0
+
+
+def _cmd_analyze_xrd(args: argparse.Namespace) -> int:
+    """Run XRD pattern calculation."""
+    from shalom.analysis.xrd import is_xrd_available, calculate_xrd
+
+    if not is_xrd_available():
+        print("Error: pymatgen not installed.")
+        print("  Install with: pip install 'shalom[analysis]'")
+        return 1
+
+    try:
+        from ase.io import read as ase_read
+        atoms = ase_read(args.structure)
+    except Exception as exc:
+        print(f"Error: cannot read structure '{args.structure}': {exc}")
+        return 1
+
+    try:
+        result = calculate_xrd(
+            atoms,
+            wavelength=args.wavelength,
+            two_theta_range=(args.theta_min, args.theta_max),
+        )
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    # Display
+    print("=" * 50)
+    print("  X-Ray Diffraction Pattern")
+    print("=" * 50)
+    print()
+    print(f"  Formula:       {atoms.get_chemical_formula()}")
+    print(f"  Wavelength:    {result.wavelength}", end="")
+    if result.wavelength_angstrom:
+        print(f" ({result.wavelength_angstrom:.4f} A)")
+    else:
+        print()
+    print(f"  2-theta range: ({args.theta_min:.0f}, {args.theta_max:.0f}) deg")
+    print(f"  Peaks found:   {result.n_peaks}")
+    print()
+
+    # Top peaks table
+    if result.n_peaks > 0:
+        import numpy as np
+        sorted_idx = np.argsort(result.intensities)[::-1]
+        n_show = min(10, result.n_peaks)
+        print(f"  Top {n_show} peaks:")
+        print(f"  {'2-theta':>10s}  {'Intensity':>10s}  {'d-spacing':>10s}  {'(hkl)':<12s}")
+        print(f"  {'-' * 10}  {'-' * 10}  {'-' * 10}  {'-' * 12}")
+        for i in range(n_show):
+            idx = sorted_idx[i]
+            tt = result.two_theta[idx]
+            inten = result.intensities[idx]
+            d = result.d_spacings[idx]
+            hkl = result.hkl_indices[idx] if idx < len(result.hkl_indices) else (0, 0, 0)
+            print(f"  {tt:10.3f}  {inten:10.2f}  {d:10.4f}  ({hkl[0]},{hkl[1]},{hkl[2]})")
+    print()
+    print("=" * 50)
+
+    # Plot if output requested
+    if args.output:
+        try:
+            from shalom.plotting.xrd_plot import XRDPlotter
+            plotter = XRDPlotter(result)
+            plotter.plot(output_path=args.output)
+            print(f"  Plot saved: {args.output}")
+        except ImportError:
+            print("  Note: matplotlib not installed, skipping plot.")
+
+    return 0
+
+
+def _cmd_analyze_symmetry(args: argparse.Namespace) -> int:
+    """Run symmetry analysis."""
+    from shalom.analysis.symmetry import is_spglib_available, analyze_symmetry
+
+    if not is_spglib_available():
+        print("Error: spglib not installed.")
+        print("  Install with: pip install 'shalom[symmetry]'")
+        return 1
+
+    try:
+        from ase.io import read as ase_read
+        atoms = ase_read(args.structure)
+    except Exception as exc:
+        print(f"Error: cannot read structure '{args.structure}': {exc}")
+        return 1
+
+    try:
+        result = analyze_symmetry(atoms, symprec=args.symprec)
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    # Display
+    print("=" * 50)
+    print("  Crystal Symmetry Analysis")
+    print("=" * 50)
+    print()
+    print(f"  Formula:        {atoms.get_chemical_formula()}")
+    print(f"  Space group:    {result.space_group_symbol} (#{result.space_group_number})")
+    print(f"  Point group:    {result.point_group}")
+    print(f"  Crystal system: {result.crystal_system}")
+    print(f"  Lattice type:   {result.lattice_type}")
+    print(f"  Hall symbol:    {result.hall_symbol}")
+    print(f"  Symmetry ops:   {result.n_operations}")
+    print(f"  Is primitive:   {result.is_primitive}")
+    if result.wyckoff_letters:
+        wyckoff_str = ", ".join(result.wyckoff_letters)
+        print(f"  Wyckoff:        {wyckoff_str}")
+    print()
+    print("=" * 50)
+    return 0
+
+
+def _cmd_analyze_magnetic(args: argparse.Namespace) -> int:
+    """Run magnetic analysis from QE pw.out."""
+    from shalom.analysis.magnetic import (
+        extract_site_magnetization,
+        extract_lowdin_charges,
+        analyze_magnetism,
+    )
+
+    pw_out = args.pw_out
+    if not os.path.isfile(pw_out):
+        print(f"Error: pw.out not found: {pw_out}")
+        return 1
+
+    # Site magnetizations
+    site_mags = extract_site_magnetization(pw_out)
+    lowdin = extract_lowdin_charges(pw_out)
+
+    print("=" * 50)
+    print("  Magnetic / Charge Analysis")
+    print("=" * 50)
+    print()
+
+    if site_mags is not None:
+        print(f"  Site magnetizations ({len(site_mags)} atoms):")
+        for i, m in enumerate(site_mags):
+            print(f"    Atom {i + 1:3d}:  {m:+.4f} Bohr mag")
+        print()
+    else:
+        print("  No site magnetization data found in pw.out.")
+        print()
+
+    if lowdin is not None:
+        total_charges = lowdin.get("total_charges", [])
+        spd = lowdin.get("spd_charges", [])
+        print(f"  Lowdin charges ({len(total_charges)} atoms):")
+        for i, tc in enumerate(total_charges):
+            spd_str = ""
+            if i < len(spd) and spd[i]:
+                parts = [f"{k}={v:.3f}" for k, v in spd[i].items()]
+                spd_str = "  " + ", ".join(parts)
+            print(f"    Atom {i + 1:3d}:  total={tc:.4f}{spd_str}")
+        print()
+    else:
+        print("  No Lowdin charge data found.")
+        print()
+
+    # Full analysis if structure is provided
+    if args.structure:
+        try:
+            from ase.io import read as ase_read
+            atoms = ase_read(args.structure)
+
+            from shalom.backends.base import DFTResult
+
+            # Try to extract total magnetization from pw.out
+            import re
+            total_mag = None
+            try:
+                with open(pw_out, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+                m = re.findall(
+                    r"total magnetization\s+=\s+([-\d.]+)\s+Bohr mag/cell", text
+                )
+                if m:
+                    total_mag = float(m[-1])
+            except OSError:
+                pass
+
+            dft_result = DFTResult(magnetization=total_mag, is_converged=True)
+            result = analyze_magnetism(dft_result, atoms, pw_out_path=pw_out)
+
+            print("  Total magnetization: ", end="")
+            if result.total_magnetization is not None:
+                print(f"{result.total_magnetization:.4f} Bohr mag/cell")
+            else:
+                print("N/A")
+            print(f"  Is magnetic:         {result.is_magnetic}")
+            print(f"  Spin polarized:      {result.is_spin_polarized}")
+            if result.magnetic_elements:
+                print(f"  Magnetic elements:   {', '.join(result.magnetic_elements)}")
+            if result.dominant_moment_element:
+                print(f"  Dominant element:    {result.dominant_moment_element}")
+            print()
+        except Exception as exc:
+            print(f"  Warning: full analysis failed: {exc}")
+            print()
+
+    print("=" * 50)
     return 0
 
 

@@ -1165,6 +1165,316 @@ def analyze_phonon_properties(
 
 
 # ---------------------------------------------------------------------------
+# Tool 13: analyze_electronic_structure
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def analyze_electronic_structure(
+    bands_xml_path: str = "",
+    calc_dir: str = "",
+    dos_file_path: str = "",
+    fermi_energy: Optional[float] = None,
+) -> dict:
+    """Analyze electronic band structure from QE calculation results.
+
+    Computes band gap, VBM/CBM, effective masses, metallicity, and DOS
+    at Fermi level. No additional dependencies beyond numpy.
+
+    Args:
+        bands_xml_path: Path to QE data-file-schema.xml with band eigenvalues.
+        calc_dir: QE bands calculation directory (auto-finds XML if bands_xml_path
+            is empty).
+        dos_file_path: Optional path to pwscf.dos for DOS-at-Fermi analysis.
+        fermi_energy: Fermi energy in eV. Auto-detected from XML/pw.out if omitted.
+    """
+    try:
+        from shalom.analysis.electronic import analyze_band_structure
+        from shalom.backends.qe_parser import (
+            find_xml_path, parse_xml_bands, extract_fermi_energy,
+        )
+
+        xml_path = bands_xml_path
+        if not xml_path and calc_dir:
+            xml_path = find_xml_path(calc_dir)
+            if xml_path is None:
+                return {
+                    "success": False,
+                    "error": f"data-file-schema.xml not found in {calc_dir}",
+                }
+
+        if not xml_path:
+            return {
+                "success": False,
+                "error": "Provide bands_xml_path or calc_dir.",
+            }
+
+        fermi = fermi_energy
+        if fermi is None:
+            pw_out = os.path.join(os.path.dirname(xml_path), "pw.out")
+            fermi = extract_fermi_energy(pw_out)
+
+        band_data = parse_xml_bands(xml_path, fermi_energy=fermi)
+
+        dos_data = None
+        if dos_file_path:
+            from shalom.backends.qe_parser import parse_dos_file
+            dos_data = parse_dos_file(dos_file_path)
+            if fermi is not None:
+                dos_data.fermi_energy = fermi
+
+        result = analyze_band_structure(band_data, dos_data=dos_data)
+
+        response: Dict[str, Any] = {
+            "success": True,
+            "is_metal": result.is_metal,
+            "bandgap_eV": result.bandgap_eV,
+            "is_direct_gap": result.is_direct,
+            "n_occupied_bands": result.n_occupied_bands,
+        }
+        if result.vbm_energy is not None:
+            response["vbm_energy_eV"] = result.vbm_energy
+        if result.cbm_energy is not None:
+            response["cbm_energy_eV"] = result.cbm_energy
+        if result.effective_mass_electron is not None:
+            response["effective_mass_electron_me"] = result.effective_mass_electron
+        if result.effective_mass_hole is not None:
+            response["effective_mass_hole_me"] = result.effective_mass_hole
+        if result.dos_at_fermi is not None:
+            response["dos_at_fermi_states_per_eV"] = result.dos_at_fermi
+
+        return response
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool 14: analyze_xrd_pattern
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def analyze_xrd_pattern(
+    structure_file: str,
+    wavelength: str = "CuKa",
+    theta_min: float = 0.0,
+    theta_max: float = 90.0,
+    output_plot: str = "",
+) -> dict:
+    """Calculate powder X-ray diffraction pattern for a crystal structure.
+
+    Computes peak positions (2-theta), intensities, Miller indices, and
+    d-spacings. Requires pymatgen.
+
+    Args:
+        structure_file: Path to structure file (POSCAR, CIF, etc.).
+        wavelength: X-ray source label (CuKa, MoKa, CoKa, etc.).
+        theta_min: Minimum 2-theta in degrees.
+        theta_max: Maximum 2-theta in degrees.
+        output_plot: Optional path to save XRD pattern plot (PNG).
+    """
+    try:
+        from shalom.analysis.xrd import is_xrd_available, calculate_xrd
+
+        if not is_xrd_available():
+            return {
+                "success": False,
+                "error": (
+                    "pymatgen not installed. "
+                    "Install with: pip install 'shalom[analysis]'"
+                ),
+            }
+
+        from ase.io import read as ase_read
+        atoms = ase_read(structure_file)
+
+        result = calculate_xrd(
+            atoms,
+            wavelength=wavelength,
+            two_theta_range=(theta_min, theta_max),
+        )
+
+        import numpy as np
+        sorted_idx = np.argsort(result.intensities)[::-1]
+        n_show = min(10, result.n_peaks)
+
+        top_peaks = []
+        for i in range(n_show):
+            idx = sorted_idx[i]
+            hkl = result.hkl_indices[idx] if idx < len(result.hkl_indices) else (0, 0, 0)
+            top_peaks.append({
+                "two_theta_deg": round(float(result.two_theta[idx]), 3),
+                "intensity": round(float(result.intensities[idx]), 2),
+                "d_spacing_A": round(float(result.d_spacings[idx]), 4),
+                "hkl": list(hkl),
+            })
+
+        response: Dict[str, Any] = {
+            "success": True,
+            "formula": atoms.get_chemical_formula(),
+            "wavelength": wavelength,
+            "wavelength_angstrom": result.wavelength_angstrom,
+            "n_peaks": result.n_peaks,
+            "top_peaks": top_peaks,
+        }
+
+        if output_plot:
+            try:
+                from shalom.plotting.xrd_plot import XRDPlotter
+                plotter = XRDPlotter(result)
+                plotter.plot(output_path=output_plot)
+                response["plot_path"] = output_plot
+            except ImportError:
+                response["plot_warning"] = "matplotlib not installed for plotting"
+
+        return response
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool 15: analyze_symmetry_properties
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def analyze_symmetry_properties(
+    structure_file: str,
+    symprec: str = "1e-5",
+) -> dict:
+    """Analyze the crystal symmetry of a structure using spglib.
+
+    Determines space group, point group, crystal system, Wyckoff positions,
+    lattice type, and number of symmetry operations.
+
+    Requires spglib: ``pip install 'shalom[symmetry]'``
+
+    Args:
+        structure_file: Path to structure file (POSCAR, CIF, etc.).
+        symprec: Symmetry tolerance in Angstrom (default: "1e-5").
+            Larger values allow more distortion.
+    """
+    try:
+        from shalom.analysis.symmetry import is_spglib_available, analyze_symmetry
+
+        if not is_spglib_available():
+            return {
+                "success": False,
+                "error": (
+                    "spglib not installed. "
+                    "Install with: pip install 'shalom[symmetry]'"
+                ),
+            }
+
+        from ase.io import read as ase_read
+        atoms = ase_read(structure_file)
+
+        result = analyze_symmetry(atoms, symprec=float(symprec))
+
+        return {
+            "success": True,
+            "formula": atoms.get_chemical_formula(),
+            "space_group_number": result.space_group_number,
+            "space_group_symbol": result.space_group_symbol,
+            "point_group": result.point_group,
+            "crystal_system": result.crystal_system,
+            "lattice_type": result.lattice_type,
+            "hall_symbol": result.hall_symbol,
+            "n_symmetry_operations": result.n_operations,
+            "is_primitive": result.is_primitive,
+            "wyckoff_letters": result.wyckoff_letters,
+            "equivalent_atoms": result.equivalent_atoms,
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool 16: analyze_magnetic_properties
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def analyze_magnetic_properties(
+    pw_out_path: str,
+    structure_file: str = "",
+) -> dict:
+    """Analyze magnetic properties from a QE pw.out file.
+
+    Extracts site magnetizations, Lowdin charges, and classifies magnetic
+    behaviour per element. No additional dependencies required.
+
+    Args:
+        pw_out_path: Path to QE pw.out file.
+        structure_file: Optional structure file for per-element analysis.
+            If provided, identifies which elements carry magnetic moments.
+    """
+    try:
+        from shalom.analysis.magnetic import (
+            extract_site_magnetization,
+            extract_lowdin_charges,
+            analyze_magnetism,
+        )
+
+        site_mags = extract_site_magnetization(pw_out_path)
+        lowdin = extract_lowdin_charges(pw_out_path)
+
+        response: Dict[str, Any] = {"success": True}
+
+        if site_mags is not None:
+            response["site_magnetizations_bohr_mag"] = [
+                round(m, 4) for m in site_mags
+            ]
+            response["n_atoms"] = len(site_mags)
+        else:
+            response["site_magnetizations_bohr_mag"] = None
+
+        if lowdin is not None:
+            response["lowdin_total_charges"] = [
+                round(c, 4) for c in lowdin.get("total_charges", [])
+            ]
+            response["lowdin_spd_charges"] = lowdin.get("spd_charges", [])
+        else:
+            response["lowdin_total_charges"] = None
+
+        # Full analysis with structure
+        if structure_file:
+            import re
+
+            from ase.io import read as ase_read
+            atoms = ase_read(structure_file)
+
+            # Extract total magnetization
+            total_mag = None
+            try:
+                with open(pw_out_path, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+                m = re.findall(
+                    r"total magnetization\s+=\s+([-\d.]+)\s+Bohr mag/cell", text
+                )
+                if m:
+                    total_mag = float(m[-1])
+            except OSError:
+                pass
+
+            from shalom.backends.base import DFTResult
+            dft_result = DFTResult(magnetization=total_mag, is_converged=True)
+            result = analyze_magnetism(dft_result, atoms, pw_out_path=pw_out_path)
+
+            response.update({
+                "total_magnetization_bohr_mag": result.total_magnetization,
+                "is_magnetic": result.is_magnetic,
+                "is_spin_polarized": result.is_spin_polarized,
+                "magnetic_elements": result.magnetic_elements,
+                "dominant_moment_element": result.dominant_moment_element,
+            })
+
+        return response
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

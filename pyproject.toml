@@ -80,8 +80,11 @@ analysis = [
 phonon = [
     "phonopy>=2.20",  # phonon band structure, DOS, thermal properties
 ]
+symmetry = [
+    "spglib>=2.0",  # crystal symmetry analysis (space group, Wyckoff, etc.)
+]
 all = [
-    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp,analysis,phonon]"
+    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp,analysis,phonon,symmetry]"
 ]
 
 [project.scripts]
