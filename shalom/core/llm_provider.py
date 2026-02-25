@@ -1,5 +1,6 @@
 import logging
 import os
+from functools import lru_cache
 from typing import Any, Callable, Dict, Optional, Type, TypeVar, Union, cast
 
 import openai
@@ -9,6 +10,21 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _load_agent_guidelines() -> Optional[str]:
+    """Load AGENT_GUIDELINES.md once, cache for process lifetime."""
+    guidelines_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "AGENT_GUIDELINES.md",
+    )
+    try:
+        with open(guidelines_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning("AGENT_GUIDELINES.md not found. Proceeding with raw system prompt.")
+        return None
 
 
 class LLMProvider:
@@ -106,17 +122,11 @@ class LLMProvider:
             Anthropic API does not support the ``seed`` parameter; it is
             silently ignored for reproducibility intent only.
         """
-        # Inject central domain guidelines into the system prompt
-        guidelines_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "AGENT_GUIDELINES.md"
-        )
-        try:
-            with open(guidelines_path, "r", encoding="utf-8") as f:
-                guidelines = f.read()
+        # Inject central domain guidelines into the system prompt (cached)
+        guidelines = _load_agent_guidelines()
+        if guidelines:
             injected_system_prompt = f"{guidelines}\n\n=== TASK SPECIFIC INSTRUCTIONS ===\n{system_prompt}"
-        except FileNotFoundError:
-            logger.warning("AGENT_GUIDELINES.md not found. Proceeding with raw system prompt.")
+        else:
             injected_system_prompt = system_prompt
 
         # Audit log the LLM call

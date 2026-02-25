@@ -2,11 +2,17 @@
 
 Provides heuristic token estimation and smart truncation that preserves
 error-relevant lines (keywords, warnings) while respecting a token budget.
+
+Also provides :func:`postprocess_parse_result`, a shared post-processing
+helper called by both VASP and QE ``parse_output()`` methods.
 """
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
+
+if TYPE_CHECKING:
+    from shalom.backends.base import DFTResult
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +37,28 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(len(text) / CHARS_PER_TOKEN))
 
 
+_CACHED_VASP_PATTERNS: Optional[List[str]] = None
+
+
 def _load_vasp_patterns() -> List[str]:
-    """Load VASP error patterns from error_patterns.yaml (single source of truth)."""
+    """Load VASP error patterns from error_patterns.yaml (single source of truth).
+
+    Results are cached after the first successful load.
+    """
+    global _CACHED_VASP_PATTERNS
+    if _CACHED_VASP_PATTERNS is not None:
+        return _CACHED_VASP_PATTERNS
     try:
         from shalom._config_loader import load_config
         patterns_cfg = load_config("error_patterns")
-        return [p["pattern"] for p in patterns_cfg]  # type: ignore[index]
+        _CACHED_VASP_PATTERNS = [p["pattern"] for p in patterns_cfg]  # type: ignore[index]
     except Exception as e:
         logger.warning("Failed to load error_patterns config: %s. Using minimal fallback.", e)
-        return [
+        _CACHED_VASP_PATTERNS = [
             "ZBRENT", "BRMIX", "EDDDAV", "NELM",
             "WARNING", "ERROR", "VERY BAD NEWS",
         ]
+    return _CACHED_VASP_PATTERNS
 
 
 def compress_error_log(
@@ -155,3 +171,36 @@ def truncate_list(data: Optional[List], max_items: int) -> Optional[List]:
     if len(data) <= max_items:
         return data
     return data[-max_items:]
+
+
+def postprocess_parse_result(
+    result: DFTResult,
+    output_path: str,
+    important_patterns: Optional[Sequence[str]] = None,
+    max_ionic_items: int = 50,
+) -> None:
+    """Attach compressed error log and truncate ionic history on a DFTResult.
+
+    Shared post-processing called by both VASP and QE ``parse_output()``.
+    Modifies *result* in-place.
+
+    Args:
+        result: DFTResult to post-process.
+        output_path: Path to the DFT output file (OUTCAR or pw.out).
+        important_patterns: Error keywords to preserve in compression.
+            Defaults to VASP patterns if None.
+        max_ionic_items: Maximum ionic history entries to keep.
+    """
+    if not result.is_converged:
+        try:
+            with open(output_path, "r", encoding="utf-8") as f:
+                full_text = f.read()
+            result.error_log = compress_error_log(
+                full_text,
+                important_patterns=important_patterns,
+            )
+        except Exception:
+            logger.debug("Error log extraction failed for %s", output_path)
+
+    result.ionic_energies = truncate_list(result.ionic_energies, max_ionic_items)
+    result.ionic_forces_max = truncate_list(result.ionic_forces_max, max_ionic_items)

@@ -9,6 +9,7 @@ Physical references:
 - Hubbard U: Dudarev scheme, Wang et al. PRB 73, 195107 (2006), PBE-fitted.
 - Metallic elements: periodic table classification for ISMEAR selection.
 - K-point grid: VASPKIT convention (N_i = max(1, round(|b_i| * kpr / 2pi))).
+- Unit conversions: Rydberg/Hartree/eV (single source of truth for all backends).
 """
 
 from __future__ import annotations
@@ -108,8 +109,6 @@ def detect_2d(atoms: Atoms, vacuum_threshold: float = 5.0) -> bool:
     if len(atoms) == 0:
         return False
     cell = atoms.get_cell()
-    if len(cell) < 3 or len(cell[2]) < 3:
-        return False
     c_height = cell[2][2]
     if c_height <= 0:
         return False
@@ -153,3 +152,13 @@ def compute_kpoints_grid(
     if is_2d:
         grid[2] = 1
     return grid
+
+
+# ---------------------------------------------------------------------------
+# Unit conversion constants (single source of truth)
+# ---------------------------------------------------------------------------
+
+RY_TO_EV: float = 13.6057                      # Rydberg → eV
+HA_TO_EV: float = 27.2114                      # Hartree → eV
+EV_TO_RY: float = 1.0 / RY_TO_EV              # eV → Rydberg
+RY_PER_BOHR_TO_EV_PER_ANG: float = 25.7112    # force unit: Ry/Bohr → eV/Ang

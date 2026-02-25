@@ -33,15 +33,8 @@ if TYPE_CHECKING:
     import numpy as np
     from ase import Atoms
 
+from shalom.backends._physics import HA_TO_EV, RY_TO_EV, EV_TO_RY
 from shalom.backends.base import BandStructureData, DOSData
-
-# ---------------------------------------------------------------------------
-# Unit conversion constants
-# ---------------------------------------------------------------------------
-
-HA_TO_EV: float = 27.2114    # Hartree → eV  (QE 7.x XML eigenvalue unit)
-RY_TO_EV: float = 13.6057    # Rydberg → eV  (pw.out stdout unit)
-EV_TO_RY: float = 1.0 / RY_TO_EV
 
 # QE XML namespace for ElementTree queries.
 QE_XML_NS: Dict[str, str] = {

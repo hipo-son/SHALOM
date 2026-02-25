@@ -8,17 +8,18 @@ SHALOM (System of Hierarchical Agents for Logical Orchestration of Materials) �
 shalom/
 ├── agents/           # LLM agent layers (Design, Simulation, Review)
 ├── backends/         # DFT backends (VASP, QE) + error recovery + execution
-│   ├── _physics.py   # Shared physics constants (AccuracyLevel, MAGMOM, detect_2d, etc.)
-│   ├── _compression.py # Token-aware error log compression (compress_error_log, truncate_to_tokens)
+│   ├── _physics.py   # Shared physics constants (AccuracyLevel, MAGMOM, detect_2d, unit conversions)
+│   ├── _compression.py # Token-aware error log compression + postprocess_parse_result helper
 │   ├── base.py       # Backend-agnostic dataclasses: DFTResult, BandStructureData, DOSData
 │   ├── vasp.py       # VASP backend (write_input, parse_output)
 │   ├── vasp_config.py # VASP config (VASPInputConfig, get_preset)
 │   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out, parse_output_bands)
 │   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, generate_band_kpath, SSSP metadata)
 │   ├── qe_parser.py  # QE output parsers (parse_xml_bands, parse_dos_file, find_xml_path,
-│   │                 #   extract_fermi_energy, compute_nbnd; HA_TO_EV=27.2114, QE_XML_NS)
+│   │                 #   extract_fermi_energy, compute_nbnd, QE_XML_NS)
 │   ├── qe_error_recovery.py # QE error recovery (progressive correction, S-matrix diagnostic)
-│   └── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop)
+│   ├── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop, create_runner)
+│   └── slurm.py      # Slurm HPC job submission/monitoring (SlurmConfig, SlurmRunner)
 ├── plotting/         # Matplotlib visualisation (optional: pip install shalom[plotting])
 │   ├── band_plot.py  # BandStructurePlotter — band structure with high-sym labels, spin
 │   └── dos_plot.py   # DOSPlotter — total/spin-polarised DOS with Fermi level marker
@@ -72,7 +73,7 @@ shalom/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: 1124 tests, coverage ≥85%
+pytest tests/                          # default: 1189 tests, coverage ≥85%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```
@@ -103,6 +104,7 @@ python scripts/validate_v1.py --skip-relax --nprocs 4   # skip vc-relax
 - Target: Python 3.9+
 
 ### Physics Constants
+- Unit conversions: `_physics.py` is single source of truth (RY_TO_EV, HA_TO_EV, EV_TO_RY, etc.)
 - POTCAR mappings: PBE_54 dataset (version metadata in YAML)
 - SSSP pseudopotentials: SSSP Efficiency v1.3.0 (PBE), per-element ecutwfc/ecutrho/z_valence
 - Hubbard U: Dudarev scheme, Wang et al. PRB 73 (2006), PBE-fitted only
@@ -146,6 +148,11 @@ python -m shalom workflow mp-19717 -b qe -np 8 --dos-emin -20
 # ── Convergence tests (run ecutwfc first, then kpoints) ──────────────────────
 python -m shalom converge Si --test cutoff --values 30,40,50,60,80 -np 2
 python -m shalom converge Si --test kpoints --values 20,30,40,50 --ecutwfc 60
+
+# ── Slurm HPC execution ──────────────────────────────────────────────────────
+python -m shalom run Si -b qe -x --slurm --partition=compute --account=mat_sci
+python -m shalom workflow Si -o ./si_wf --slurm --nodes=4 --ntasks-per-node=32
+python -m shalom converge Si --test cutoff --values 30,40,50 --slurm --walltime=02:00:00
 
 # ── LLM-driven autonomous pipeline ──────────────────────────────────────────
 python -m shalom pipeline "Find a 2D HER catalyst"              # Full pipeline (OpenAI)

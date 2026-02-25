@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional
 
 from ase import Atoms
 
-from shalom.backends._compression import compress_error_log, truncate_list
+from shalom.backends._compression import postprocess_parse_result
+from shalom.backends._physics import RY_TO_EV, RY_PER_BOHR_TO_EV_PER_ANG
 from shalom.backends.base import DFTResult, compute_forces_max
 from shalom.backends.qe_config import (
     QEInputConfig,
@@ -25,10 +26,6 @@ from shalom.backends.qe_config import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Unit conversions
-RY_TO_EV = 13.6057
-RY_PER_BOHR_TO_EV_PER_ANG = 25.7112  # 13.6057 eV/Ry * 1.8897 Bohr/Ang
 
 # Atomic masses (amu) — subset covering common elements.
 # Used only for ATOMIC_SPECIES card (masses don't affect pw.x results,
@@ -233,24 +230,12 @@ class QEBackend:
 
         result = self._parse_pw_output(out_path)
 
-        # Smart Context Compression: attach error log for unconverged QE runs
-        if not result.is_converged:
-            try:
-                with open(out_path, "r", encoding="utf-8") as f:
-                    full_text = f.read()
-                from shalom.backends.qe_error_recovery import QE_ERROR_PATTERNS
-                result.error_log = compress_error_log(
-                    full_text,
-                    important_patterns=[p[0] for p in QE_ERROR_PATTERNS],
-                    tail_lines=50,
-                )
-            except Exception:
-                logger.debug("Error log extraction failed for %s", out_path)
-
-        # Cap ionic history lists
-        result.ionic_energies = truncate_list(result.ionic_energies, 50)
-        result.ionic_forces_max = truncate_list(result.ionic_forces_max, 50)
-
+        # Shared post-processing: error log compression + ionic history cap
+        from shalom.backends.qe_error_recovery import QE_ERROR_PATTERNS
+        postprocess_parse_result(
+            result, out_path,
+            important_patterns=[p[0] for p in QE_ERROR_PATTERNS],
+        )
         return result
 
     def _parse_pw_output(self, filepath: str) -> DFTResult:

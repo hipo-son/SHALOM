@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from ase import Atoms
 from ase.io import write
 
-from shalom.backends._compression import compress_error_log, truncate_list
+from shalom.backends._compression import postprocess_parse_result
 from shalom.backends.base import DFTResult, compute_forces_max
 from shalom.backends.vasp_config import (
     VASPInputConfig,
@@ -251,19 +251,8 @@ class VASPBackend:
         else:
             result = self._parse_regex(outcar_path)
 
-        # Smart Context Compression: keyword-aware + tail truncation
-        if not result.is_converged:
-            try:
-                with open(outcar_path, "r", encoding="utf-8") as f:
-                    full_text = f.read()
-                result.error_log = compress_error_log(full_text)
-            except Exception:
-                logger.debug("Error log extraction failed for %s", outcar_path)
-
-        # Cap ionic history lists (prevent unbounded growth in long relaxations)
-        result.ionic_energies = truncate_list(result.ionic_energies, 50)
-        result.ionic_forces_max = truncate_list(result.ionic_forces_max, 50)
-
+        # Shared post-processing: error log compression + ionic history cap
+        postprocess_parse_result(result, outcar_path)
         return result
 
     def _parse_with_pymatgen(self, directory: str) -> DFTResult:

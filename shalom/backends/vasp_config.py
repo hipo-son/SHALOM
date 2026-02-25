@@ -278,7 +278,7 @@ def detect_and_apply_structure_hints(
     # 3b. Slab detection (vacuum > 5A but not 2D monolayer)
     if not config.is_2d:
         _cell = atoms.get_cell()
-        if len(_cell) >= 3 and len(_cell[2]) >= 3 and _cell[2][2] > 0:
+        if _cell[2][2] > 0:
             _z_pos = atoms.positions[:, 2]
             _slab_thickness = _z_pos.max() - _z_pos.min()
             _vacuum = _cell[2][2] - _slab_thickness

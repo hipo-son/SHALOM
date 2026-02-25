@@ -33,16 +33,14 @@ from shalom.backends._physics import (
     DEFAULT_MAGMOM,
     HUBBARD_U_VALUES,
     ANION_ELEMENTS,
+    RY_TO_EV,
+    EV_TO_RY,
     _is_pure_metal,
     detect_2d,
     compute_kpoints_grid,
 )
 
 logger = logging.getLogger(__name__)
-
-# Unit conversion: 1 Ry = 13.6057 eV
-RY_TO_EV = 13.6057
-EV_TO_RY = 1.0 / RY_TO_EV
 
 
 # ---------------------------------------------------------------------------
