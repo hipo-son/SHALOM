@@ -153,6 +153,24 @@ class PipelineConfig(BaseModel):
         default=3, ge=0, le=10,
         description="Max error recovery retries during execution.",
     )
+    slurm_partition: Optional[str] = Field(
+        default=None,
+        description="Slurm partition. If set, jobs are submitted via sbatch.",
+    )
+    slurm_account: Optional[str] = Field(
+        default=None, description="Slurm account/allocation name.",
+    )
+    slurm_nodes: int = Field(default=1, ge=1, description="Slurm nodes.")
+    slurm_ntasks_per_node: int = Field(
+        default=1, ge=1, description="MPI tasks per Slurm node.",
+    )
+    slurm_walltime: str = Field(
+        default="24:00:00", description="Slurm wall-time limit (HH:MM:SS).",
+    )
+    slurm_module_loads: List[str] = Field(
+        default_factory=list,
+        description="Modules to load in the Slurm job script.",
+    )
     calc_type: str = Field(
         default="relaxation",
         description=(
@@ -584,7 +602,7 @@ class Pipeline:
                     atoms = loaded[0] if isinstance(loaded, list) else loaded
 
             from shalom.backends.runner import (
-                ExecutionConfig, ExecutionRunner, execute_with_recovery,
+                ExecutionConfig, execute_with_recovery, create_runner,
             )
             from shalom.backends.qe_error_recovery import QEErrorRecoveryEngine
 
@@ -593,7 +611,21 @@ class Pipeline:
                 mpi_command=self.config.mpi_command,
                 timeout_seconds=self.config.execution_timeout,
             )
-            runner = ExecutionRunner(config=exec_config)
+
+            # Build SlurmConfig from pipeline config if partition is set
+            slurm_config = None
+            if self.config.slurm_partition is not None:
+                from shalom.backends.slurm import SlurmConfig
+                slurm_config = SlurmConfig(
+                    partition=self.config.slurm_partition,
+                    account=self.config.slurm_account,
+                    nodes=self.config.slurm_nodes,
+                    ntasks_per_node=self.config.slurm_ntasks_per_node,
+                    walltime=self.config.slurm_walltime,
+                    module_loads=self.config.slurm_module_loads,
+                )
+
+            runner = create_runner(exec_config, slurm_config)
             recovery = QEErrorRecoveryEngine()
 
             exec_result, dft_result, corr_history = execute_with_recovery(

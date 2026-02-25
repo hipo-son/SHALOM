@@ -52,7 +52,9 @@ from shalom.backends.runner import (
     ExecutionResult,
     ExecutionRunner,
     execute_with_recovery,
+    create_runner,
 )
+from shalom.backends.slurm import SlurmConfig, SlurmRunner
 
 __all__ = [
     "DFTBackend", "DFTResult", "BandStructureData", "DOSData",
@@ -65,6 +67,8 @@ __all__ = [
     "ErrorRecoveryEngine", "VASPError", "Correction",
     "QEErrorRecoveryEngine", "QEError", "QECorrection", "compute_safe_dt",
     "ExecutionConfig", "ExecutionResult", "ExecutionRunner", "execute_with_recovery",
+    "create_runner",
+    "SlurmConfig", "SlurmRunner",
 ]
 
 

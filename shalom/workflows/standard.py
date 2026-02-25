@@ -52,7 +52,7 @@ from shalom.backends.qe_parser import (
     parse_dos_file,
     parse_xml_bands,
 )
-from shalom.backends.runner import ExecutionConfig, ExecutionRunner
+from shalom.backends.runner import ExecutionConfig, create_runner
 
 if TYPE_CHECKING:
     from ase import Atoms
@@ -114,6 +114,7 @@ class StandardWorkflow:
         dos_emax: float = 10.0,
         dos_deltaE: float = 0.01,
         wsl: bool = False,
+        slurm_config: Optional[Any] = None,
     ) -> None:
         self.atoms = atoms
         self.output_dir = os.path.abspath(output_dir)
@@ -124,6 +125,7 @@ class StandardWorkflow:
         self.dos_executable = dos_executable
         self.timeout = timeout
         self.wsl = wsl
+        self.slurm_config = slurm_config
         if accuracy not in ("standard", "precise"):
             raise ValueError(
                 f"accuracy must be 'standard' or 'precise', got '{accuracy}'"
@@ -508,7 +510,7 @@ class StandardWorkflow:
             timeout_seconds=self.timeout,
             wsl=self.wsl,
         )
-        runner = ExecutionRunner(exec_config)
+        runner = create_runner(exec_config, self.slurm_config)
         result = runner.run(calc_dir)
         if not result.success:
             raise RuntimeError(
@@ -526,7 +528,7 @@ class StandardWorkflow:
             timeout_seconds=300,
             wsl=self.wsl,
         )
-        runner = ExecutionRunner(exec_config)
+        runner = create_runner(exec_config, self.slurm_config)
         result = runner.run(calc_dir)
         if not result.success:
             logger.warning(

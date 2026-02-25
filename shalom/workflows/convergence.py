@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from shalom.workflows.base import ConvergenceResult, ConvergenceWorkflow
 
@@ -97,6 +97,7 @@ class CutoffConvergence(ConvergenceWorkflow):
         parallel: bool = False,
         threshold_per_atom: float = 1e-3,
         wsl: bool = False,
+        slurm_config: Optional[Any] = None,
     ) -> None:
         super().__init__(
             atoms=atoms,
@@ -109,6 +110,7 @@ class CutoffConvergence(ConvergenceWorkflow):
             parallel=parallel,
             threshold_per_atom=threshold_per_atom,
             wsl=wsl,
+            slurm_config=slurm_config,
         )
         self._values_list = sorted(values)
         self.kgrid = kgrid
@@ -124,7 +126,7 @@ class CutoffConvergence(ConvergenceWorkflow):
             QECalculationType, QEKPointsConfig, get_qe_preset, compute_ecutrho,
         )
         from shalom.backends._physics import AccuracyLevel, compute_kpoints_grid
-        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
+        from shalom.backends.runner import ExecutionConfig, create_runner
 
         try:
             acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
@@ -158,7 +160,7 @@ class CutoffConvergence(ConvergenceWorkflow):
                 timeout_seconds=self.timeout,
                 wsl=self.wsl,
             )
-            runner = ExecutionRunner(exec_config)
+            runner = create_runner(exec_config, self.slurm_config)
             exec_result = runner.run(calc_dir)
 
             result = backend.parse_output(calc_dir)
@@ -228,6 +230,7 @@ class KpointConvergence(ConvergenceWorkflow):
         parallel: bool = False,
         threshold_per_atom: float = 1e-3,
         wsl: bool = False,
+        slurm_config: Optional[Any] = None,
     ) -> None:
         super().__init__(
             atoms=atoms,
@@ -240,6 +243,7 @@ class KpointConvergence(ConvergenceWorkflow):
             parallel=parallel,
             threshold_per_atom=threshold_per_atom,
             wsl=wsl,
+            slurm_config=slurm_config,
         )
         self._values_list = sorted(resolutions)
         self.ecutwfc = ecutwfc
@@ -255,7 +259,7 @@ class KpointConvergence(ConvergenceWorkflow):
             QECalculationType, QEKPointsConfig, get_qe_preset, compute_ecutrho,
         )
         from shalom.backends._physics import AccuracyLevel, compute_kpoints_grid
-        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
+        from shalom.backends.runner import ExecutionConfig, create_runner
 
         try:
             acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
@@ -287,7 +291,7 @@ class KpointConvergence(ConvergenceWorkflow):
                 timeout_seconds=self.timeout,
                 wsl=self.wsl,
             )
-            runner = ExecutionRunner(exec_config)
+            runner = create_runner(exec_config, self.slurm_config)
             exec_result = runner.run(calc_dir)
 
             result = backend.parse_output(calc_dir)

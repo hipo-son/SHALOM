@@ -189,6 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run pw.x via WSL (Windows only). Requires QE installed in WSL.",
     )
+    _add_slurm_args(run_parser)
 
     # 'plot' subcommand
     plot_parser = subparsers.add_parser(
@@ -301,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run pw.x via WSL (Windows only).",
     )
+    _add_slurm_args(workflow_parser)
     workflow_parser.add_argument(
         "--timeout",
         type=int,
@@ -403,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run pw.x via WSL (Windows only).",
     )
+    _add_slurm_args(converge_parser)
     converge_parser.add_argument(
         "--threshold",
         type=float,
@@ -536,6 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Falls back to $SHALOM_LLM_BASE_URL env var."
         ),
     )
+    _add_slurm_args(pipeline_parser)
 
     return parser
 
@@ -883,13 +887,78 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
     return 0 if issues == 0 else 1
 
 
+def _add_slurm_args(parser: argparse.ArgumentParser) -> None:
+    """Add Slurm HPC arguments to a subcommand parser."""
+    grp = parser.add_argument_group("slurm", "Slurm HPC scheduler options")
+    grp.add_argument(
+        "--slurm", action="store_true",
+        help="Submit jobs via Slurm sbatch instead of local subprocess.",
+    )
+    grp.add_argument(
+        "--partition", default="compute",
+        help="Slurm partition (default: compute).",
+    )
+    grp.add_argument("--account", default=None, help="Slurm account name.")
+    grp.add_argument(
+        "--nodes", type=int, default=1,
+        help="Number of compute nodes (default: 1).",
+    )
+    grp.add_argument(
+        "--ntasks-per-node", type=int, default=None,
+        help="MPI tasks per node (default: same as --nprocs).",
+    )
+    grp.add_argument(
+        "--walltime", default="24:00:00",
+        help="Slurm wall-time limit HH:MM:SS (default: 24:00:00).",
+    )
+    grp.add_argument("--qos", default=None, help="Slurm QOS level.")
+    grp.add_argument("--mem", default=None, help="Memory per node (e.g. 64G).")
+    grp.add_argument(
+        "--module-load", action="append", default=[], dest="module_loads",
+        metavar="MODULE", help="Module to load in job script (repeatable).",
+    )
+    grp.add_argument(
+        "--slurm-extra", action="append", default=[], dest="slurm_extras",
+        metavar="DIRECTIVE",
+        help="Extra #SBATCH directive (repeatable, e.g. '--gres=gpu:4').",
+    )
+
+
+def _build_slurm_config(args: argparse.Namespace):
+    """Build a SlurmConfig from CLI args, or return None if --slurm not set."""
+    if not getattr(args, "slurm", False):
+        return None
+
+    from shalom.backends.slurm import SlurmConfig
+
+    ntasks = getattr(args, "ntasks_per_node", None)
+    if ntasks is None:
+        ntasks = getattr(args, "nprocs", 1)
+
+    return SlurmConfig(
+        partition=args.partition,
+        account=args.account,
+        nodes=args.nodes,
+        ntasks_per_node=ntasks,
+        walltime=args.walltime,
+        qos=args.qos,
+        mem=args.mem,
+        module_loads=getattr(args, "module_loads", []),
+        extra_directives=getattr(args, "slurm_extras", []),
+    )
+
+
 def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
     """Execute DFT and display results."""
     from shalom.backends.qe import QEBackend
-    from shalom.backends.runner import ExecutionConfig, ExecutionRunner, execute_with_recovery
+    from shalom.backends.runner import (
+        ExecutionConfig, execute_with_recovery, create_runner,
+    )
     from shalom.backends.qe_error_recovery import QEErrorRecoveryEngine
 
-    print(f"\nExecuting QE (nprocs={args.nprocs})...")
+    slurm_config = _build_slurm_config(args)
+    mode = "Slurm" if slurm_config else "local"
+    print(f"\nExecuting QE ({mode}, nprocs={args.nprocs})...")
 
     exec_config = ExecutionConfig(
         nprocs=args.nprocs,
@@ -897,7 +966,7 @@ def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
         timeout_seconds=args.timeout,
         wsl=getattr(args, "wsl", False),
     )
-    runner = ExecutionRunner(config=exec_config)
+    runner = create_runner(exec_config, slurm_config)
 
     # Validate prerequisites
     prereq_errors = runner.validate_prerequisites(output_dir)
@@ -1024,6 +1093,7 @@ def cmd_workflow(args: argparse.Namespace) -> int:
         dos_emin=args.dos_emin,
         dos_emax=args.dos_emax,
         wsl=getattr(args, "wsl", False),
+        slurm_config=_build_slurm_config(args),
     )
 
     try:
@@ -1088,6 +1158,7 @@ def cmd_converge(args: argparse.Namespace) -> int:
                 accuracy=args.accuracy,
                 threshold_per_atom=args.threshold,
                 wsl=getattr(args, "wsl", False),
+                slurm_config=_build_slurm_config(args),
             )
         else:  # kpoints
             conv = KpointConvergence(
@@ -1101,6 +1172,7 @@ def cmd_converge(args: argparse.Namespace) -> int:
                 accuracy=args.accuracy,
                 threshold_per_atom=args.threshold,
                 wsl=getattr(args, "wsl", False),
+                slurm_config=_build_slurm_config(args),
             )
 
         result = conv.run()
@@ -1151,6 +1223,22 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     if args.steps:
         steps = [s.strip() for s in args.steps.split(",")]
 
+    # Build Slurm config fields for PipelineConfig
+    slurm_kwargs = {}
+    if getattr(args, "slurm", False):
+        slurm_kwargs = {
+            "slurm_partition": args.partition,
+            "slurm_account": args.account,
+            "slurm_nodes": args.nodes,
+            "slurm_ntasks_per_node": (
+                args.ntasks_per_node
+                if args.ntasks_per_node is not None
+                else args.nprocs
+            ),
+            "slurm_walltime": args.walltime,
+            "slurm_module_loads": getattr(args, "module_loads", []),
+        }
+
     # Build config
     config = PipelineConfig(
         backend_name=args.backend,
@@ -1167,6 +1255,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         steps=steps,
         material_name=args.material,
         base_url=base_url,
+        **slurm_kwargs,
     )
 
     print(f"SHALOM Pipeline -LLM-driven Material Discovery")

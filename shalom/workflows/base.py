@@ -11,7 +11,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from ase import Atoms
@@ -119,6 +119,7 @@ class ConvergenceWorkflow(ABC):
         parallel: bool = False,
         threshold_per_atom: float = 1e-3,
         wsl: bool = False,
+        slurm_config: Optional[Any] = None,
     ) -> None:
         self.atoms = atoms
         self.output_dir = os.path.abspath(output_dir)
@@ -130,6 +131,7 @@ class ConvergenceWorkflow(ABC):
         self.parallel = parallel
         self.threshold_per_atom = threshold_per_atom
         self.wsl = wsl
+        self.slurm_config = slurm_config
 
     # ------------------------------------------------------------------
     # Abstract interface

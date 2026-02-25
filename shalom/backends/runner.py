@@ -506,3 +506,28 @@ def execute_with_recovery(
         dft_result.quality_warnings.extend(quality_warnings)
         dft_result.correction_history = correction_history
     return final_result, dft_result, correction_history
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def create_runner(
+    exec_config: Optional[ExecutionConfig] = None,
+    slurm_config: Optional[Any] = None,
+) -> Any:
+    """Create a local or Slurm runner based on configuration.
+
+    Args:
+        exec_config: Execution configuration (command, nprocs, etc.).
+        slurm_config: If provided (a :class:`~shalom.backends.slurm.SlurmConfig`
+            instance), returns a :class:`~shalom.backends.slurm.SlurmRunner`.
+
+    Returns:
+        ``ExecutionRunner`` for local execution or ``SlurmRunner`` for Slurm.
+    """
+    if slurm_config is not None:
+        from shalom.backends.slurm import SlurmRunner
+        return SlurmRunner(exec_config=exec_config, slurm_config=slurm_config)
+    return ExecutionRunner(config=exec_config)
