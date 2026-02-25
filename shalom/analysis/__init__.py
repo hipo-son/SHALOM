@@ -46,6 +46,7 @@ from shalom.analysis.magnetic import (
     analyze_magnetism,
     extract_lowdin_charges,
     extract_site_magnetization,
+    extract_total_magnetization,
     is_magnetic_available,
 )
 from shalom.analysis.phonon import (
@@ -91,6 +92,7 @@ __all__ = [
     "MagneticResult",
     "analyze_magnetism",
     "extract_site_magnetization",
+    "extract_total_magnetization",
     "extract_lowdin_charges",
     "is_magnetic_available",
 ]

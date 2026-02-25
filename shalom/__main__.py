@@ -974,8 +974,8 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
         print()
         print("  Option B -Set an existing directory:")
         print()
-        print(f"    export SHALOM_PSEUDO_DIR=/path/to/pseudos")
-        print(f"    python -m shalom setup-qe")
+        print("    export SHALOM_PSEUDO_DIR=/path/to/pseudos")
+        print("    python -m shalom setup-qe")
         print()
         if not args.download:
             issues += 1
@@ -1024,12 +1024,12 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
                     print(f"    {el:<4s}  {upf}  [MISSING]")
                 print(f"    ... and {len(missing) - 5} more")
             print()
-            print(f"  Download missing pseudopotentials:")
+            print("  Download missing pseudopotentials:")
             if args.elements:
                 print(f"    python -m shalom setup-qe --elements {args.elements} --download")
             else:
-                print(f"    python -m shalom setup-qe --elements Si,Fe,O --download  # specific")
-                print(f"    python -m shalom setup-qe --download                     # all 60")
+                print("    python -m shalom setup-qe --elements Si,Fe,O --download  # specific")
+                print("    python -m shalom setup-qe --download                     # all 60")
         else:
             print(f"  Pseudopotentials  {n_ok}/{total} OK")
 
@@ -1385,7 +1385,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     key_env = "ANTHROPIC_API_KEY" if args.provider == "anthropic" else "OPENAI_API_KEY"
     if not os.environ.get(key_env) and not base_url:
         print(f"Error: {key_env} environment variable not set.")
-        print(f"  Get your API key and set it:")
+        print("  Get your API key and set it:")
         if args.provider == "anthropic":
             print("    export ANTHROPIC_API_KEY='sk-ant-...'")
             print("  Get key at: https://console.anthropic.com/")
@@ -1437,7 +1437,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         **slurm_kwargs,
     )
 
-    print(f"SHALOM Pipeline -LLM-driven Material Discovery")
+    print("SHALOM Pipeline -LLM-driven Material Discovery")
     print(f"  Objective: {args.objective}")
     print(f"  Provider:  {args.provider} ({model})")
     if base_url:
@@ -1477,7 +1477,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     if result.status == PipelineStatus.AWAITING_DFT:
         print()
         print("Next: Run DFT on the generated input files, then use:")
-        print(f"  Pipeline.resume_from_dft(result)  # Python API")
+        print("  Pipeline.resume_from_dft(result)  # Python API")
 
     success = result.status in (
         PipelineStatus.COMPLETED,
@@ -1664,7 +1664,7 @@ def _cmd_analyze_phonon(args: argparse.Namespace) -> int:
             from phonopy.file_IO import parse_FORCE_SETS
             force_sets_data = parse_FORCE_SETS(filename=args.force_sets)
 
-            from shalom.analysis.phonon import generate_phonon_displacements, analyze_phonon
+            from shalom.analysis.phonon import generate_phonon_displacements
             import numpy as np
 
             _, ph = generate_phonon_displacements(atoms, sc)
@@ -1929,6 +1929,7 @@ def _cmd_analyze_magnetic(args: argparse.Namespace) -> int:
     """Run magnetic analysis from QE pw.out."""
     from shalom.analysis.magnetic import (
         extract_site_magnetization,
+        extract_total_magnetization,
         extract_lowdin_charges,
         analyze_magnetism,
     )
@@ -1979,20 +1980,7 @@ def _cmd_analyze_magnetic(args: argparse.Namespace) -> int:
 
             from shalom.backends.base import DFTResult
 
-            # Try to extract total magnetization from pw.out
-            import re
-            total_mag = None
-            try:
-                with open(pw_out, "r", encoding="utf-8", errors="replace") as fh:
-                    text = fh.read()
-                m = re.findall(
-                    r"total magnetization\s+=\s+([-\d.]+)\s+Bohr mag/cell", text
-                )
-                if m:
-                    total_mag = float(m[-1])
-            except OSError:
-                pass
-
+            total_mag = extract_total_magnetization(pw_out)
             dft_result = DFTResult(magnetization=total_mag, is_converged=True)
             result = analyze_magnetism(dft_result, atoms, pw_out_path=pw_out)
 

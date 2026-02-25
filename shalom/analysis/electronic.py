@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 HBAR_EV_S = 6.582119569e-16  # hbar in eV*s
 M_E_KG = 9.1093837015e-31  # electron mass in kg
 ANG_TO_M = 1e-10  # Angstrom to meter
+_EV_TO_J = 1.602176634e-19  # eV to Joules
+_HBAR_JS = HBAR_EV_S * _EV_TO_J  # hbar in J*s
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +203,7 @@ def _estimate_effective_mass(
     # Convert k from 1/Angstrom to 1/m for SI calculation
     k_si = k_vals * (1.0 / ANG_TO_M)  # 1/Angstrom → 1/m
     # Convert E from eV to Joules
-    e_joules = e_vals * 1.602176634e-19  # eV → J
+    e_joules = e_vals * _EV_TO_J
 
     try:
         coeffs = np.polyfit(k_si, e_joules, 2)
@@ -219,11 +221,8 @@ def _estimate_effective_mass(
         )
         return None
 
-    # hbar in J*s
-    hbar_js = HBAR_EV_S * 1.602176634e-19  # eV*s → J*s
-
     # m* = hbar^2 / (2 * |a2|)
-    m_star_kg = hbar_js**2 / (2.0 * abs(a2))
+    m_star_kg = _HBAR_JS**2 / (2.0 * abs(a2))
     m_star_me = m_star_kg / M_E_KG
 
     # Sanity check: reject unphysical masses

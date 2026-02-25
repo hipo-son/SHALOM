@@ -211,7 +211,6 @@ def analyze_symmetry(
         is_prim = False
 
     # Convert dataset to a plain dict for storage in raw.
-    # spglib >= 2.1 uses attribute interface; fall back to dict iteration.
     raw_dict: Dict[str, Any] = {}
     _raw_keys = [
         "number", "hall_number", "international", "hall", "choice",
@@ -223,10 +222,8 @@ def analyze_symmetry(
     ]
     for key in _raw_keys:
         try:
-            val = getattr(dataset, key, None)
-            if val is None:
-                val = dataset[key]  # type: ignore[index]
-        except (KeyError, TypeError):
+            val = _get(key)
+        except (KeyError, TypeError, AttributeError):
             continue
         if isinstance(val, np.ndarray):
             raw_dict[key] = val.tolist()

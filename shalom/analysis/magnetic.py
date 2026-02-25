@@ -81,6 +81,38 @@ _MAGNETIC_THRESHOLD = 0.05
 # ---------------------------------------------------------------------------
 
 
+def extract_total_magnetization(pw_out_path: str) -> Optional[float]:
+    """Extract total cell magnetization from QE pw.out.
+
+    Parses lines like::
+
+        total magnetization       =     4.0000 Bohr mag/cell
+
+    If multiple ionic steps exist, returns the **last** value.
+
+    Args:
+        pw_out_path: Path to QE ``pw.out`` file.
+
+    Returns:
+        Total magnetization in Bohr magneton per cell, or ``None`` if
+        the file doesn't exist or no total magnetization data was found.
+    """
+    if not os.path.isfile(pw_out_path):
+        return None
+
+    try:
+        with open(pw_out_path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+
+    matches = _TOTAL_MAG_RE.findall(text)
+    if not matches:
+        return None
+
+    return float(matches[-1])
+
+
 def extract_site_magnetization(pw_out_path: str) -> Optional[List[float]]:
     """Extract per-site magnetic moments from QE pw.out.
 
