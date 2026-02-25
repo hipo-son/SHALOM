@@ -370,7 +370,22 @@ docker pull ghcr.io/hipo-son/shalom:latest
 See the [Master Design Document](docs/master_design_document.md) for detailed milestones and publication strategy.
 
 ## Documentation
-See the [docs/](docs/) folder for architecture details and the [Master Design Document](docs/master_design_document.md) for the full roadmap.
+
+| Document | Description |
+|----------|-------------|
+| [Installation](docs/installation.rst) | Install guide (conda / pip / Docker) with optional extras |
+| [Quick Start](docs/quickstart.rst) | First calculation in 5 minutes — CLI, workflow, analysis, MCP |
+| [Architecture](docs/architecture.rst) | System design: agents, backends, workflows |
+| [API Reference](docs/api_reference.rst) | Full autodoc for every public module |
+| [Master Design Document](docs/master_design_document.md) | Roadmap, milestones, publication strategy |
+
+**Build docs locally:**
+
+```bash
+pip install -e ".[docs,llm,analysis,phonon,symmetry,plotting]"
+cd docs && make html    # open _build/html/index.html
+```
+
 <!-- ReadTheDocs will be available after RTD project setup: https://shalom.readthedocs.io -->
 
 ## Contributing
