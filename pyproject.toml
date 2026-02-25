@@ -74,8 +74,14 @@ demo = [
 mcp = [
     "mcp[cli]>=1.2.0",  # MCP server for Claude Code integration (requires Python >=3.10)
 ]
+analysis = [
+    "pymatgen>=2023.10.11",  # elastic tensor analysis (pymatgen.analysis.elasticity)
+]
+phonon = [
+    "phonopy>=2.20",  # phonon band structure, DOS, thermal properties
+]
 all = [
-    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp]"
+    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp,analysis,phonon]"
 ]
 
 [project.scripts]

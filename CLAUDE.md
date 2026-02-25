@@ -20,9 +20,14 @@ shalom/
 │   ├── qe_error_recovery.py # QE error recovery (progressive correction, S-matrix diagnostic)
 │   ├── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop, create_runner)
 │   └── slurm.py      # Slurm HPC job submission/monitoring (SlurmConfig, SlurmRunner)
+├── analysis/         # Post-DFT analysis wrapping external libraries
+│   ├── _base.py      # Result dataclasses (ElasticResult, PhononResult)
+│   ├── elastic.py    # Elastic tensor analysis via pymatgen (bulk/shear/Young's modulus, stability)
+│   └── phonon.py     # Phonon analysis via phonopy (band structure, DOS, thermal props, stability)
 ├── plotting/         # Matplotlib visualisation (optional: pip install shalom[plotting])
 │   ├── band_plot.py  # BandStructurePlotter — band structure with high-sym labels, spin
-│   └── dos_plot.py   # DOSPlotter — total/spin-polarised DOS with Fermi level marker
+│   ├── dos_plot.py   # DOSPlotter — total/spin-polarised DOS with Fermi level marker
+│   └── phonon_plot.py # PhononBandPlotter, PhononDOSPlotter — phonon dispersion & DOS
 ├── workflows/        # High-level multi-step workflows
 │   ├── base.py       # ConvergenceWorkflow ABC, ConvergenceResult, ConvergenceTestResult
 │   ├── convergence.py # CutoffConvergence (ecutwfc sweep), KpointConvergence (k-mesh sweep)
@@ -44,8 +49,8 @@ shalom/
 ├── _defaults.py      # Hardcoded fallback values
 ├── mp_client.py      # Materials Project API client (optional: pip install mp-api)
 ├── direct_run.py     # Direct material run (structure -> DFT input files)
-├── mcp_server.py     # MCP server for Claude Code integration (10 tools)
-├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/pipeline
+├── mcp_server.py     # MCP server for Claude Code integration (12 tools)
+├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/analyze/pipeline
 └── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
 ```
 
@@ -73,7 +78,7 @@ shalom/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: 1189 tests, coverage ≥85%
+pytest tests/                          # default: 1296 tests, coverage ≥85%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```
@@ -118,6 +123,23 @@ All magic numbers are named constants. `_physics.py` docstring has the full inde
 2. Single backend only → that backend's `*_config.py`
 3. Never inline a physics/computation threshold — always use a named constant
 4. Run `help(shalom.backends._physics)` to see the full list
+
+### Analysis Module (External Library Wrappers)
+- `shalom/analysis/` wraps mature external libraries for post-DFT property analysis
+- **Elastic** (pymatgen): `pip install shalom[analysis]` — bulk/shear/Young's modulus, Poisson ratio, stability
+- **Phonon** (phonopy): `pip install shalom[phonon]` — band structure, DOS, thermal properties, stability
+- Pattern: `_AVAILABLE` flag + `_ensure_available()` guard (same as `mp_client.py`)
+- Result dataclasses in `analysis/_base.py`: `ElasticResult`, `PhononResult`
+- Import: `from shalom.analysis import analyze_elastic_tensor, analyze_phonon`
+
+**When adding a new analysis module:**
+1. Create `shalom/analysis/<property>.py` with optional dep guard
+2. Add result dataclass to `_base.py`
+3. Export from `__init__.py`
+4. Add MCP tool to `mcp_server.py`
+5. Add CLI subcommand to `__main__.py` (under `analyze` parser)
+6. Add `[<property>]` optional dep group in `pyproject.toml`
+7. Write tests in `tests/test_analysis_<property>.py`
 
 ### Physics Constants
 - POTCAR mappings: PBE_54 dataset (version metadata in YAML)
@@ -164,6 +186,13 @@ python -m shalom workflow mp-19717 -b qe -np 8 --dos-emin -20
 python -m shalom converge Si --test cutoff --values 30,40,50,60,80 -np 2
 python -m shalom converge Si --test kpoints --values 20,30,40,50 --ecutwfc 60
 
+# ── Post-DFT analysis ─────────────────────────────────────────────────────────
+python -m shalom analyze elastic --tensor '[[165.7,63.9,...],...]'  # Elastic from JSON string
+python -m shalom analyze elastic --file tensor.json                 # Elastic from JSON file
+python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --generate-displacements -o ./phonon/
+python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-sets FORCE_SETS
+python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-constants FORCE_CONSTANTS
+
 # ── Slurm HPC execution ──────────────────────────────────────────────────────
 python -m shalom run Si -b qe -x --slurm --partition=compute --account=mat_sci
 python -m shalom workflow Si -o ./si_wf --slurm --nodes=4 --ntasks-per-node=32
@@ -205,7 +234,7 @@ After setup, tell Claude Code things like:
 - "mp-1040425 그래핀 밴드 구조 계산해줘"
 - "QE 환경이 설정되어 있는지 확인해줘"
 
-**10 MCP tools** (9 deterministic + 1 LLM-driven):
+**11 MCP tools** (10 deterministic + 1 LLM-driven):
 
 | Tool | Description | Requires API Key? |
 |------|-------------|:-----------------:|
@@ -218,6 +247,8 @@ After setup, tell Claude Code things like:
 | `plot_dos` | Density of states plot | No |
 | `run_convergence` | Cutoff/k-point convergence test | No |
 | `check_qe_setup` | Verify QE environment | No |
+| `analyze_elastic` | Elastic tensor analysis (bulk/shear/Young's modulus) | No |
+| `analyze_phonon_properties` | Phonon analysis (band structure, DOS, thermal, stability) | No |
 | `run_pipeline` | Full multi-agent LLM pipeline | Yes (or `base_url`) |
 
 The `run_pipeline` tool supports `base_url` for local LLM servers (Ollama, vLLM, etc.)

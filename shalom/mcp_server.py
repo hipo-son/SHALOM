@@ -1000,6 +1000,171 @@ def run_pipeline(
 
 
 # ---------------------------------------------------------------------------
+# Tool 11: analyze_elastic
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def analyze_elastic(elastic_tensor_json: str) -> dict:
+    """Analyze a 6x6 elastic tensor to derive mechanical properties.
+
+    Computes bulk modulus, shear modulus, Young's modulus, Poisson ratio,
+    universal anisotropy index, and Born mechanical stability.
+
+    Args:
+        elastic_tensor_json: 6x6 Voigt elastic tensor in GPa as a JSON array.
+            Example: "[[165.7,63.9,63.9,0,0,0],[63.9,165.7,63.9,0,0,0],
+            [63.9,63.9,165.7,0,0,0],[0,0,0,79.6,0,0],[0,0,0,0,79.6,0],
+            [0,0,0,0,0,79.6]]"
+    """
+    try:
+        from shalom.analysis.elastic import is_elastic_available, analyze_elastic_tensor
+
+        if not is_elastic_available():
+            return {
+                "success": False,
+                "error": (
+                    "pymatgen not installed. "
+                    "Install with: pip install 'shalom[analysis]'"
+                ),
+            }
+
+        import json
+        tensor = json.loads(elastic_tensor_json)
+
+        result = analyze_elastic_tensor(tensor)
+
+        return {
+            "success": True,
+            "bulk_modulus_GPa": result.bulk_modulus_vrh,
+            "shear_modulus_GPa": result.shear_modulus_vrh,
+            "youngs_modulus_GPa": result.youngs_modulus,
+            "poisson_ratio": result.poisson_ratio,
+            "universal_anisotropy": result.universal_anisotropy,
+            "is_mechanically_stable": result.is_stable,
+            "stability_violations": result.stability_violations,
+        }
+    except json.JSONDecodeError as exc:
+        return {
+            "success": False,
+            "error": f"Invalid JSON: {exc}. Provide a 6x6 nested array.",
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# Tool 12: Phonon analysis  ------------------------------------------------
+
+
+@mcp.tool()
+def analyze_phonon_properties(
+    structure_file: str,
+    supercell: str = "2,2,2",
+    force_sets_file: str = "",
+    force_constants_file: str = "",
+    mesh: str = "20,20,20",
+) -> dict:
+    """Analyze phonon properties from a structure and force data.
+
+    Computes phonon band structure, density of states, thermal properties
+    (Cv, entropy, free energy), and dynamical stability.
+
+    Requires phonopy: ``pip install 'shalom[phonon]'``
+
+    Args:
+        structure_file: Path to unit cell structure (POSCAR, CIF, etc.).
+        supercell: Supercell dimensions as "Nx,Ny,Nz" (e.g. "2,2,2").
+        force_sets_file: Path to phonopy FORCE_SETS file.
+        force_constants_file: Path to FORCE_CONSTANTS or .hdf5 file.
+        mesh: Q-point mesh as "Nx,Ny,Nz" for phonon DOS (default: "20,20,20").
+    """
+    try:
+        from shalom.analysis.phonon import is_phonopy_available
+
+        if not is_phonopy_available():
+            return {
+                "success": False,
+                "error": (
+                    "phonopy not installed. "
+                    "Install with: pip install 'shalom[phonon]'"
+                ),
+            }
+
+        import numpy as np
+        from ase.io import read as ase_read
+
+        atoms = ase_read(structure_file)
+
+        # Parse supercell
+        parts = supercell.replace("x", ",").split(",")
+        if len(parts) == 3:
+            sc = [
+                [int(parts[0]), 0, 0],
+                [0, int(parts[1]), 0],
+                [0, 0, int(parts[2])],
+            ]
+        else:
+            return {"success": False, "error": f"Invalid supercell: '{supercell}'"}
+
+        mesh_list = [int(x) for x in mesh.split(",")]
+
+        if force_constants_file:
+            from phonopy.file_IO import parse_FORCE_CONSTANTS
+            from shalom.analysis.phonon import analyze_phonon_from_force_constants
+
+            fc = parse_FORCE_CONSTANTS(filename=force_constants_file)
+            result = analyze_phonon_from_force_constants(
+                atoms, fc, sc, mesh=mesh_list,
+            )
+        elif force_sets_file:
+            from phonopy.file_IO import parse_FORCE_SETS
+            from shalom.analysis.phonon import (
+                generate_phonon_displacements,
+                _run_phonon_analysis,
+            )
+
+            force_sets_data = parse_FORCE_SETS(filename=force_sets_file)
+            _, ph = generate_phonon_displacements(atoms, sc)
+            ph.dataset = force_sets_data
+            ph.produce_force_constants()
+            result = _run_phonon_analysis(ph, mesh_list, 51, 0.0, 1000.0, 10.0)
+        else:
+            return {
+                "success": False,
+                "error": "Provide force_sets_file or force_constants_file.",
+            }
+
+        # Thermal at 300K
+        cv_300k = None
+        entropy_300k = None
+        fe_300k = None
+        if result.thermal_temperatures is not None:
+            idx = int(np.argmin(np.abs(result.thermal_temperatures - 300.0)))
+            if result.thermal_cv is not None:
+                cv_300k = round(float(result.thermal_cv[idx]), 2)
+            if result.thermal_entropy is not None:
+                entropy_300k = round(float(result.thermal_entropy[idx]), 2)
+            if result.thermal_free_energy is not None:
+                fe_300k = round(float(result.thermal_free_energy[idx]), 2)
+
+        return {
+            "success": True,
+            "is_dynamically_stable": result.is_stable,
+            "min_frequency_THz": (
+                round(result.min_frequency_THz, 4)
+                if result.min_frequency_THz is not None
+                else None
+            ),
+            "n_imaginary_modes": len(result.imaginary_modes),
+            "n_branches": result.n_branches,
+            "cv_300K_J_per_K_mol": cv_300k,
+            "entropy_300K_J_per_K_mol": entropy_300k,
+            "free_energy_300K_kJ_per_mol": fe_300k,
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

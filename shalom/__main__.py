@@ -546,6 +546,83 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_slurm_args(pipeline_parser)
 
+    # 'analyze' subcommand
+    analyze_parser = subparsers.add_parser(
+        "analyze",
+        help="Analyze DFT results using external libraries (elastic, phonon, etc.).",
+        description=(
+            "Post-DFT analysis tools that wrap mature external libraries. "
+            "Supports elastic tensor analysis (pymatgen) and phonon analysis (phonopy)."
+        ),
+    )
+    analyze_sub = analyze_parser.add_subparsers(dest="analyze_type", help="Analysis type")
+
+    # analyze elastic
+    elastic_parser = analyze_sub.add_parser(
+        "elastic",
+        help="Analyze a 6x6 elastic tensor (bulk/shear/Young's modulus, stability).",
+    )
+    elastic_parser.add_argument(
+        "--tensor",
+        default=None,
+        help=(
+            "6x6 Voigt elastic tensor in GPa as a JSON array. "
+            "E.g. '[[165.7,63.9,63.9,0,0,0],...]'"
+        ),
+    )
+    elastic_parser.add_argument(
+        "--file",
+        default=None,
+        metavar="PATH",
+        help="Path to a JSON file containing the 6x6 elastic tensor.",
+    )
+
+    # analyze phonon
+    phonon_parser = analyze_sub.add_parser(
+        "phonon",
+        help="Analyze phonon properties from force sets or force constants.",
+    )
+    phonon_parser.add_argument(
+        "--structure",
+        required=True,
+        help="Path to unit cell structure file (POSCAR, CIF, etc.).",
+    )
+    phonon_parser.add_argument(
+        "--supercell",
+        required=True,
+        help=(
+            "Supercell matrix as NxNxN (e.g. 2x2x2) or JSON array "
+            "(e.g. '[[2,0,0],[0,2,0],[0,0,2]]')."
+        ),
+    )
+    phonon_parser.add_argument(
+        "--force-sets",
+        default=None,
+        metavar="PATH",
+        help="Path to phonopy FORCE_SETS file.",
+    )
+    phonon_parser.add_argument(
+        "--force-constants",
+        default=None,
+        metavar="PATH",
+        help="Path to FORCE_CONSTANTS or force_constants.hdf5 file.",
+    )
+    phonon_parser.add_argument(
+        "--generate-displacements",
+        action="store_true",
+        help="Generate displaced supercells only (no analysis).",
+    )
+    phonon_parser.add_argument(
+        "--mesh",
+        default="20,20,20",
+        help="Q-point mesh for phonon DOS as Nx,Ny,Nz (default: 20,20,20).",
+    )
+    phonon_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output directory for displaced structures or plots.",
+    )
+
     return parser
 
 
@@ -1313,6 +1390,244 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
+def cmd_analyze(args: argparse.Namespace) -> int:
+    """Execute the 'analyze' subcommand."""
+    if not getattr(args, "analyze_type", None):
+        print("Error: specify an analysis type. Available: elastic, phonon")
+        print("  python -m shalom analyze elastic --tensor '[[...]]'")
+        print("  python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 ...")
+        return 1
+
+    if args.analyze_type == "elastic":
+        return _cmd_analyze_elastic(args)
+    if args.analyze_type == "phonon":
+        return _cmd_analyze_phonon(args)
+
+    print(f"Error: unknown analysis type '{args.analyze_type}'.")
+    return 1
+
+
+def _cmd_analyze_elastic(args: argparse.Namespace) -> int:
+    """Run elastic tensor analysis."""
+    import json
+
+    from shalom.analysis.elastic import is_elastic_available, analyze_elastic_tensor
+
+    if not is_elastic_available():
+        print("Error: pymatgen not installed.")
+        print("  Install with: pip install 'shalom[analysis]'")
+        return 1
+
+    # Load tensor from --tensor or --file
+    tensor_data = None
+    if args.tensor:
+        try:
+            tensor_data = json.loads(args.tensor)
+        except json.JSONDecodeError as exc:
+            print(f"Error: invalid JSON in --tensor: {exc}")
+            return 1
+    elif args.file:
+        try:
+            with open(args.file) as f:
+                tensor_data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Error: cannot read --file '{args.file}': {exc}")
+            return 1
+    else:
+        print("Error: provide --tensor (JSON string) or --file (JSON file path).")
+        print("  python -m shalom analyze elastic --tensor '[[165.7,63.9,...],...]'")
+        return 1
+
+    try:
+        result = analyze_elastic_tensor(tensor_data)
+    except (ValueError, Exception) as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    # Display results
+    print("=" * 50)
+    print("  Elastic Properties Analysis")
+    print("=" * 50)
+    print()
+    if result.bulk_modulus_vrh is not None:
+        print(f"  Bulk modulus (VRH):    {result.bulk_modulus_vrh:.2f} GPa")
+    if result.shear_modulus_vrh is not None:
+        print(f"  Shear modulus (VRH):   {result.shear_modulus_vrh:.2f} GPa")
+    if result.youngs_modulus is not None:
+        print(f"  Young's modulus:       {result.youngs_modulus:.2f} GPa")
+    if result.poisson_ratio is not None:
+        print(f"  Poisson's ratio:       {result.poisson_ratio:.4f}")
+    if result.universal_anisotropy is not None:
+        print(f"  Anisotropy (A_U):      {result.universal_anisotropy:.4f}")
+    print()
+    if result.is_stable:
+        print("  Mechanical stability:  STABLE")
+    else:
+        print("  Mechanical stability:  UNSTABLE")
+        for v in result.stability_violations:
+            print(f"    - {v}")
+    print()
+    print("=" * 50)
+
+    return 0
+
+
+def _parse_supercell(supercell_str: str):
+    """Parse supercell string to 3x3 list.
+
+    Accepts ``"2x2x2"`` (diagonal) or JSON ``"[[2,0,0],[0,2,0],[0,0,2]]"``.
+    Returns 3x3 nested list or None on error.
+    """
+    import json as _json
+
+    # Try JSON first
+    try:
+        sc = _json.loads(supercell_str)
+        if isinstance(sc, list) and len(sc) == 3:
+            return sc
+    except (ValueError, TypeError):
+        pass
+
+    # Try NxNxN format
+    parts = supercell_str.replace(",", "x").split("x")
+    if len(parts) == 3:
+        try:
+            nx, ny, nz = int(parts[0]), int(parts[1]), int(parts[2])
+            return [[nx, 0, 0], [0, ny, 0], [0, 0, nz]]
+        except ValueError:
+            pass
+
+    return None
+
+
+def _cmd_analyze_phonon(args: argparse.Namespace) -> int:
+    """Run phonon analysis or generate displacements."""
+    from shalom.analysis.phonon import is_phonopy_available
+
+    if not is_phonopy_available():
+        print("Error: phonopy not installed.")
+        print("  Install with: pip install 'shalom[phonon]'")
+        return 1
+
+    # Parse supercell
+    sc = _parse_supercell(args.supercell)
+    if sc is None:
+        print(f"Error: invalid supercell '{args.supercell}'.")
+        print("  Use NxNxN (e.g. 2x2x2) or JSON (e.g. '[[2,0,0],[0,2,0],[0,0,2]]').")
+        return 1
+
+    # Load structure
+    try:
+        from ase.io import read as ase_read
+        atoms = ase_read(args.structure)
+    except Exception as exc:
+        print(f"Error: cannot read structure '{args.structure}': {exc}")
+        return 1
+
+    # Mode: generate displacements only
+    if args.generate_displacements:
+        from shalom.analysis.phonon import generate_phonon_displacements
+
+        disps, _ = generate_phonon_displacements(atoms, sc)
+        output_dir = args.output or "."
+
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+
+        from ase.io import write as ase_write
+        for i, disp in enumerate(disps):
+            out_path = os.path.join(output_dir, f"disp-{i + 1:03d}.vasp")
+            ase_write(out_path, disp, format="vasp")
+
+        print(f"Generated {len(disps)} displaced supercells in {output_dir}/")
+        return 0
+
+    # Mode: analyze from force sets or force constants
+    if not args.force_sets and not args.force_constants:
+        print("Error: provide --force-sets or --force-constants (or --generate-displacements).")
+        return 1
+
+    mesh = [int(x) for x in args.mesh.split(",")]
+
+    try:
+        if args.force_sets:
+            from phonopy.file_IO import parse_FORCE_SETS
+            force_sets_data = parse_FORCE_SETS(filename=args.force_sets)
+
+            from shalom.analysis.phonon import generate_phonon_displacements, analyze_phonon
+            import numpy as np
+
+            _, ph = generate_phonon_displacements(atoms, sc)
+            ph.dataset = force_sets_data
+            ph.produce_force_constants()
+
+            from shalom.analysis.phonon import _run_phonon_analysis
+            result = _run_phonon_analysis(ph, mesh, 51, 0.0, 1000.0, 10.0)
+        else:
+            from phonopy.file_IO import parse_FORCE_CONSTANTS
+            fc = parse_FORCE_CONSTANTS(filename=args.force_constants)
+
+            from shalom.analysis.phonon import analyze_phonon_from_force_constants
+            result = analyze_phonon_from_force_constants(
+                atoms, fc, sc, mesh=mesh,
+            )
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    # Display results
+    print("=" * 50)
+    print("  Phonon Properties Analysis")
+    print("=" * 50)
+    print()
+    print(f"  Atoms:             {atoms.get_chemical_formula()}")
+    print(f"  Supercell:         {args.supercell}")
+    print(f"  Branches:          {result.n_branches}")
+    print()
+    if result.min_frequency_THz is not None:
+        print(f"  Min frequency:     {result.min_frequency_THz:.4f} THz")
+    if result.is_stable:
+        print("  Dynamical stability: STABLE")
+    else:
+        print("  Dynamical stability: UNSTABLE")
+        n_imag = len(result.imaginary_modes)
+        print(f"    Imaginary modes: {n_imag}")
+    print()
+
+    # Thermal properties at 300K
+    if result.thermal_temperatures is not None:
+        import numpy as np
+        idx_300 = np.argmin(np.abs(result.thermal_temperatures - 300.0))
+        if result.thermal_cv is not None:
+            print(f"  Cv (300 K):        {result.thermal_cv[idx_300]:.2f} J/K/mol")
+        if result.thermal_entropy is not None:
+            print(f"  Entropy (300 K):   {result.thermal_entropy[idx_300]:.2f} J/K/mol")
+        if result.thermal_free_energy is not None:
+            print(f"  Free energy (300 K): {result.thermal_free_energy[idx_300]:.2f} kJ/mol")
+
+    print()
+    print("=" * 50)
+
+    # Save plots if output dir given
+    if args.output:
+        import os
+        os.makedirs(args.output, exist_ok=True)
+        try:
+            from shalom.plotting import PhononBandPlotter, PhononDOSPlotter
+
+            band_path = os.path.join(args.output, "phonon_bands.png")
+            PhononBandPlotter(result).plot(output_path=band_path)
+            print(f"  Saved: {band_path}")
+
+            dos_path = os.path.join(args.output, "phonon_dos.png")
+            PhononDOSPlotter(result).plot(output_path=dos_path)
+            print(f"  Saved: {dos_path}")
+        except ImportError:
+            print("  Note: matplotlib not installed, skipping plots.")
+
+    return 0
+
+
 def _load_atoms(args: argparse.Namespace):
     """Load ASE Atoms from args.material / args.structure. Returns None on error."""
     structure_file = getattr(args, "structure", None)
@@ -1383,6 +1698,8 @@ def main() -> None:
         sys.exit(cmd_converge(args))
     elif args.command == "pipeline":
         sys.exit(cmd_pipeline(args))
+    elif args.command == "analyze":
+        sys.exit(cmd_analyze(args))
     else:
         parser.print_help()
         sys.exit(0)
