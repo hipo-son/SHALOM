@@ -96,6 +96,7 @@ class CutoffConvergence(ConvergenceWorkflow):
         accuracy: str = "standard",
         parallel: bool = False,
         threshold_per_atom: float = 1e-3,
+        wsl: bool = False,
     ) -> None:
         super().__init__(
             atoms=atoms,
@@ -107,6 +108,7 @@ class CutoffConvergence(ConvergenceWorkflow):
             accuracy=accuracy,
             parallel=parallel,
             threshold_per_atom=threshold_per_atom,
+            wsl=wsl,
         )
         self._values_list = sorted(values)
         self.kgrid = kgrid
@@ -154,6 +156,7 @@ class CutoffConvergence(ConvergenceWorkflow):
                 nprocs=self.nprocs,
                 mpi_command=self.mpi_command,
                 timeout_seconds=self.timeout,
+                wsl=self.wsl,
             )
             runner = ExecutionRunner(exec_config)
             exec_result = runner.run(calc_dir)
@@ -224,6 +227,7 @@ class KpointConvergence(ConvergenceWorkflow):
         accuracy: str = "standard",
         parallel: bool = False,
         threshold_per_atom: float = 1e-3,
+        wsl: bool = False,
     ) -> None:
         super().__init__(
             atoms=atoms,
@@ -235,6 +239,7 @@ class KpointConvergence(ConvergenceWorkflow):
             accuracy=accuracy,
             parallel=parallel,
             threshold_per_atom=threshold_per_atom,
+            wsl=wsl,
         )
         self._values_list = sorted(resolutions)
         self.ecutwfc = ecutwfc
@@ -280,6 +285,7 @@ class KpointConvergence(ConvergenceWorkflow):
                 nprocs=self.nprocs,
                 mpi_command=self.mpi_command,
                 timeout_seconds=self.timeout,
+                wsl=self.wsl,
             )
             runner = ExecutionRunner(exec_config)
             exec_result = runner.run(calc_dir)

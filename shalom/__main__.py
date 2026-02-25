@@ -184,6 +184,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="mpirun",
         help="MPI launcher command (default: mpirun).",
     )
+    run_parser.add_argument(
+        "--wsl",
+        action="store_true",
+        help="Run pw.x via WSL (Windows only). Requires QE installed in WSL.",
+    )
 
     # 'plot' subcommand
     plot_parser = subparsers.add_parser(
@@ -292,6 +297,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="MPI launcher (default: mpirun).",
     )
     workflow_parser.add_argument(
+        "--wsl",
+        action="store_true",
+        help="Run pw.x via WSL (Windows only).",
+    )
+    workflow_parser.add_argument(
         "--timeout",
         type=int,
         default=7200,
@@ -387,6 +397,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout",
         type=int,
         default=3600,
+    )
+    converge_parser.add_argument(
+        "--wsl",
+        action="store_true",
+        help="Run pw.x via WSL (Windows only).",
     )
     converge_parser.add_argument(
         "--threshold",
@@ -880,6 +895,7 @@ def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
         nprocs=args.nprocs,
         mpi_command=args.mpi_command,
         timeout_seconds=args.timeout,
+        wsl=getattr(args, "wsl", False),
     )
     runner = ExecutionRunner(config=exec_config)
 
@@ -1007,6 +1023,7 @@ def cmd_workflow(args: argparse.Namespace) -> int:
         is_2d=args.is_2d,
         dos_emin=args.dos_emin,
         dos_emax=args.dos_emax,
+        wsl=getattr(args, "wsl", False),
     )
 
     try:
@@ -1070,6 +1087,7 @@ def cmd_converge(args: argparse.Namespace) -> int:
                 timeout=args.timeout,
                 accuracy=args.accuracy,
                 threshold_per_atom=args.threshold,
+                wsl=getattr(args, "wsl", False),
             )
         else:  # kpoints
             conv = KpointConvergence(
@@ -1082,6 +1100,7 @@ def cmd_converge(args: argparse.Namespace) -> int:
                 timeout=args.timeout,
                 accuracy=args.accuracy,
                 threshold_per_atom=args.threshold,
+                wsl=getattr(args, "wsl", False),
             )
 
         result = conv.run()

@@ -113,6 +113,7 @@ class StandardWorkflow:
         dos_emin: float = -20.0,
         dos_emax: float = 10.0,
         dos_deltaE: float = 0.01,
+        wsl: bool = False,
     ) -> None:
         self.atoms = atoms
         self.output_dir = os.path.abspath(output_dir)
@@ -122,6 +123,7 @@ class StandardWorkflow:
         self.pw_executable = pw_executable
         self.dos_executable = dos_executable
         self.timeout = timeout
+        self.wsl = wsl
         if accuracy not in ("standard", "precise"):
             raise ValueError(
                 f"accuracy must be 'standard' or 'precise', got '{accuracy}'"
@@ -504,6 +506,7 @@ class StandardWorkflow:
             nprocs=self.nprocs,
             mpi_command=self.mpi_command,
             timeout_seconds=self.timeout,
+            wsl=self.wsl,
         )
         runner = ExecutionRunner(exec_config)
         result = runner.run(calc_dir)
@@ -521,6 +524,7 @@ class StandardWorkflow:
             nprocs=1,          # dos.x is serial
             mpi_command=self.mpi_command,
             timeout_seconds=300,
+            wsl=self.wsl,
         )
         runner = ExecutionRunner(exec_config)
         result = runner.run(calc_dir)

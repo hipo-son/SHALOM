@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ class ExecutionConfig:
     mpi_command: str = "mpirun"
     timeout_seconds: int = 86400
     env_overrides: Dict[str, str] = field(default_factory=dict)
+    wsl: bool = False  # Run via WSL on Windows (wsl -e pw.x)
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +64,27 @@ class ExecutionResult:
 # ---------------------------------------------------------------------------
 # ExecutionRunner
 # ---------------------------------------------------------------------------
+
+def detect_wsl_executable(command: str = "pw.x") -> bool:
+    """Check whether *command* is available inside WSL (Windows only).
+
+    Accepts either a bare command name (``"pw.x"``) or a full WSL path
+    (``"/opt/micromamba/envs/qe/bin/pw.x"``).  Returns ``False`` immediately
+    on non-Windows platforms or when WSL is not installed.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        # Full path → test -x; bare name → which
+        if command.startswith("/"):
+            check_cmd = ["wsl", "-e", "test", "-x", command]
+        else:
+            check_cmd = ["wsl", "-e", "which", command]
+        result = subprocess.run(check_cmd, capture_output=True, timeout=5)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
 
 class ExecutionRunner:
     """Runs DFT calculations via subprocess.
@@ -90,7 +113,16 @@ class ExecutionRunner:
 
         Returns:
             Command as list of strings (e.g., ["mpirun", "-np", "4", "pw.x"]).
+            When ``config.wsl`` is True, the command is prefixed with
+            ``["wsl", "-e"]`` so that the executable runs inside WSL.
         """
+        if config.wsl:
+            if config.nprocs <= 1:
+                return ["wsl", "-e", config.command]
+            cmd = ["wsl", "-e", config.mpi_command]
+            cmd.extend(["-np", str(config.nprocs), config.command])
+            return cmd
+
         if config.nprocs <= 1:
             return [config.command]
         cmd = [config.mpi_command]
@@ -111,8 +143,14 @@ class ExecutionRunner:
         """
         errors: List[str] = []
 
-        # Check executable
-        if shutil.which(self.config.command) is None:
+        # Check executable — WSL mode checks inside WSL
+        if self.config.wsl:
+            if not detect_wsl_executable(self.config.command):
+                errors.append(
+                    f"Executable '{self.config.command}' not found in WSL.\n"
+                    f"  Install: wsl -e sudo apt install quantum-espresso"
+                )
+        elif shutil.which(self.config.command) is None:
             errors.append(
                 f"Executable '{self.config.command}' not found on PATH.\n"
                 f"  Install: sudo apt install quantum-espresso  (Ubuntu/Debian)\n"
@@ -123,7 +161,13 @@ class ExecutionRunner:
 
         # Check MPI if parallel
         if self.config.nprocs > 1:
-            if shutil.which(self.config.mpi_command) is None:
+            if self.config.wsl:
+                if not detect_wsl_executable(self.config.mpi_command):
+                    errors.append(
+                        f"MPI launcher '{self.config.mpi_command}' not found in WSL.\n"
+                        f"  Install: wsl -e sudo apt install openmpi-bin"
+                    )
+            elif shutil.which(self.config.mpi_command) is None:
                 errors.append(
                     f"MPI launcher '{self.config.mpi_command}' not found on PATH.\n"
                     f"  Install: sudo apt install openmpi-bin  (Ubuntu/Debian)\n"
@@ -137,9 +181,10 @@ class ExecutionRunner:
                 f"Input file not found: {input_path}"
             )
         else:
-            # Check pseudo_dir and pseudopotential files
-            pseudo_errors = self._check_pseudopotentials(input_path)
-            errors.extend(pseudo_errors)
+            # In WSL mode, pseudo_dir is a WSL path — skip Windows-side check
+            if not self.config.wsl:
+                pseudo_errors = self._check_pseudopotentials(input_path)
+                errors.extend(pseudo_errors)
 
         return errors
 

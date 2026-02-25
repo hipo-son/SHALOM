@@ -539,3 +539,81 @@ class TestQECLI:
         )
         assert proc.returncode == 0, f"CLI failed: {proc.stdout}\n{proc.stderr}"
         assert os.path.isfile(os.path.join(out, "pw.in"))
+
+
+# ---------------------------------------------------------------------------
+# DFT Reference Validation Tests (requires pw.x)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    shutil.which("pw.x") is None,
+    reason="pw.x not installed (run from WSL with QE)",
+)
+class TestQEValidation:
+    """Validate DFT results against physical reference ranges.
+
+    Tests convergence, energy sign, force magnitude, and Fermi energy
+    for simple materials (Si, Al).  Cu is omitted from CI because
+    ecutwfc=55 Ry makes it too slow on 1 CPU.
+    """
+
+    @pytest.fixture()
+    def pseudo_dir(self):
+        d = os.environ.get("SHALOM_PSEUDO_DIR", "")
+        if not d or not os.path.isdir(d):
+            pytest.skip("SHALOM_PSEUDO_DIR not set or missing")
+        return d
+
+    def _run_scf(self, element, crystal, a, tmp_path, pseudo_dir):
+        """Generate input, run SCF, parse and return DFTResult."""
+        from ase.build import bulk
+        from ase.io import write as ase_write
+        from shalom.backends.qe import QEBackend
+        from shalom.backends.runner import ExecutionConfig, ExecutionRunner
+        from shalom.direct_run import DirectRunConfig, direct_run
+
+        atoms = bulk(element, crystal, a=a)
+        poscar = tmp_path / f"{element}_POSCAR"
+        ase_write(str(poscar), atoms, format="vasp")
+
+        calc_dir = str(tmp_path / f"{element}_scf")
+        config = DirectRunConfig(
+            backend_name="qe", calc_type="scf",
+            output_dir=calc_dir,
+            structure_file=str(poscar),
+            pseudo_dir=pseudo_dir,
+            force_overwrite=True,
+        )
+        gen = direct_run("", config)
+        assert gen.success, f"Input generation failed for {element}"
+
+        runner = ExecutionRunner(ExecutionConfig(nprocs=1, timeout_seconds=600))
+        exec_result = runner.run(gen.output_dir)
+        assert exec_result.success, (
+            f"{element} SCF failed: {exec_result.error_message}"
+        )
+
+        backend = QEBackend()
+        return backend.parse_output(gen.output_dir), gen.output_dir
+
+    def test_si_scf_reference(self, tmp_path, pseudo_dir):
+        """Si SCF: converged, E < 0, small forces, Fermi in range."""
+        from shalom.backends.qe_parser import extract_fermi_energy
+
+        dft, calc_dir = self._run_scf("Si", "diamond", 5.43, tmp_path, pseudo_dir)
+        assert dft.is_converged, "Si SCF did not converge"
+        assert dft.energy is not None and dft.energy < 0
+        if dft.forces_max is not None:
+            assert dft.forces_max < 0.05, f"Si forces too large: {dft.forces_max}"
+        fermi = extract_fermi_energy(os.path.join(calc_dir, "pw.out"))
+        assert fermi is not None, "No Fermi energy for Si"
+        assert 4.0 < fermi < 9.0, f"Si Fermi out of range: {fermi}"
+
+    def test_al_scf_reference(self, tmp_path, pseudo_dir):
+        """Al SCF: converged, E < 0, small forces (metallic)."""
+        dft, _ = self._run_scf("Al", "fcc", 4.05, tmp_path, pseudo_dir)
+        assert dft.is_converged, "Al SCF did not converge"
+        assert dft.energy is not None and dft.energy < 0
+        if dft.forces_max is not None:
+            assert dft.forces_max < 0.05, f"Al forces too large: {dft.forces_max}"

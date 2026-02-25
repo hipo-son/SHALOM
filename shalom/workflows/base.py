@@ -118,6 +118,7 @@ class ConvergenceWorkflow(ABC):
         accuracy: str = "standard",
         parallel: bool = False,
         threshold_per_atom: float = 1e-3,
+        wsl: bool = False,
     ) -> None:
         self.atoms = atoms
         self.output_dir = os.path.abspath(output_dir)
@@ -128,6 +129,7 @@ class ConvergenceWorkflow(ABC):
         self.accuracy = accuracy
         self.parallel = parallel
         self.threshold_per_atom = threshold_per_atom
+        self.wsl = wsl
 
     # ------------------------------------------------------------------
     # Abstract interface
