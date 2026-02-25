@@ -18,7 +18,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        pip install -e ".[dev,llm]"
     - name: Check formatting with black
       run: black --check shalom/ tests/
     - name: Lint with ruff
@@ -47,7 +47,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        pip install -e ".[dev,llm,analysis,phonon,symmetry]"
     - name: Run tests with pytest
       run: |
         pytest -m "not integration"
@@ -69,7 +69,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[docs]"
+        pip install -e ".[docs,llm,analysis,phonon,symmetry,plotting]"
     - name: Build docs
       run: |
         cd docs
