@@ -9,6 +9,7 @@ from ase import Atoms
 from pydantic import BaseModel
 
 from shalom._config_loader import load_prompt
+from shalom.backends._physics import MAX_CELL_VOLUME, MIN_INTERATOMIC_DISTANCE
 from shalom.backends.base import DFTBackend
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import StructureReviewForm, RankedMaterial
@@ -102,13 +103,13 @@ class FormFiller:
         if num_atoms == 0:
             is_valid = False
             feedback = "Error: No atoms were generated."
-        elif min_dist < 0.8 and num_atoms > 1:
+        elif min_dist < MIN_INTERATOMIC_DISTANCE and num_atoms > 1:
             is_valid = False
             feedback = (
                 f"Physical error: Interatomic distance is too short ({min_dist:.2f} A). "
                 "Atoms may be overlapping."
             )
-        elif vol > 10000:
+        elif vol > MAX_CELL_VOLUME:
             is_valid = False
             feedback = (
                 f"Warning: Unit cell is too large (Volume: {vol:.1f} A^3). "

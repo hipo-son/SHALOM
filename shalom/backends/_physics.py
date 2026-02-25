@@ -1,15 +1,42 @@
 """Shared physics constants and utilities for DFT backends.
 
-This module holds backend-neutral constants and helper functions used by both
-the VASP and QE configuration systems.  It was extracted from ``vasp_config.py``
-to avoid the QE module importing from a VASP-named file.
+This module is the **single source of truth** for backend-neutral constants,
+conversion factors, and validation thresholds.  Both the VASP and QE
+configuration systems import from here, and downstream modules (agents,
+workflows, CLI) reference the same values — so changing a constant here
+propagates everywhere automatically.
 
-Physical references:
+Constants provided
+------------------
+**Unit conversions** (energy / force):
+    RY_TO_EV, HA_TO_EV, EV_TO_RY, RY_PER_BOHR_TO_EV_PER_ANG
+
+**DFT / validation thresholds** (shared across all backends):
+    DEFAULT_KPR              — k-point resolution (2π/Å)
+    DEFAULT_BAND_NPOINTS     — k-points per band segment
+    DEFAULT_VACUUM_THRESHOLD — 2D detection vacuum (Å)
+    MIN_INTERATOMIC_DISTANCE — atomic overlap floor (Å)
+    MAX_CELL_VOLUME          — structure validation ceiling (ų)
+    FORCE_CONVERGENCE_THRESHOLD  — eV/Å
+    ENTROPY_THRESHOLD_PER_ATOM   — eV/atom (1 meV)
+    CONVERGENCE_THRESHOLD_PER_ATOM — eV/atom
+    DEFAULT_TIMEOUT_SECONDS  — 24 h standard DFT timeout
+
+**Config-loaded data** (from ``shalom/config/*.yaml``):
+    MAGNETIC_ELEMENTS, DEFAULT_MAGMOM, HUBBARD_U_VALUES,
+    ANION_ELEMENTS, _METALLIC_ELEMENTS
+
+**Backend-specific constants** live in their own modules:
+    - ``vasp_config.py``: ENCUT_MULTIPLIER_*, METAL_SIGMA, SLAB_THICKNESS_THRESHOLD
+    - ``qe_config.py``:  ECUTWFC_*, ECUTRHO_*, DEGAUSS_*, NBND_*
+    - ``runner.py``:     MIN_RECOVERY_TIMEOUT, STDERR_TAIL_CHARS
+
+Physical references
+-------------------
 - Magnetic moments: high-spin ferromagnetic initialisation defaults.
 - Hubbard U: Dudarev scheme, Wang et al. PRB 73, 195107 (2006), PBE-fitted.
 - Metallic elements: periodic table classification for ISMEAR selection.
 - K-point grid: VASPKIT convention (N_i = max(1, round(|b_i| * kpr / 2pi))).
-- Unit conversions: Rydberg/Hartree/eV (single source of truth for all backends).
 """
 
 from __future__ import annotations
@@ -67,6 +94,43 @@ _LMAXMIX_D_THRESHOLD = 20   # Z > 20 (Sc onwards): d-electrons
 _LMAXMIX_F_THRESHOLD = 56   # Z > 56 (La onwards): f-electrons
 
 
+# ---------------------------------------------------------------------------
+# Pure Metal Detection
+# ---------------------------------------------------------------------------
+
+_METALLIC_ELEMENTS: frozenset = frozenset(load_config("metallic_elements")["elements"])
+
+
+# ---------------------------------------------------------------------------
+# Unit conversion constants (single source of truth)
+# ---------------------------------------------------------------------------
+
+RY_TO_EV: float = 13.6057                      # Rydberg → eV
+HA_TO_EV: float = 27.2114                      # Hartree → eV
+EV_TO_RY: float = 1.0 / RY_TO_EV              # eV → Rydberg
+RY_PER_BOHR_TO_EV_PER_ANG: float = 25.7112    # force unit: Ry/Bohr → eV/Ang
+
+
+# ---------------------------------------------------------------------------
+# Shared DFT / validation thresholds (single source of truth)
+# ---------------------------------------------------------------------------
+
+DEFAULT_KPR: float = 30.0                        # k-point resolution (2π/Å)
+DEFAULT_BAND_NPOINTS: int = 40                    # k-points per band segment
+DEFAULT_VACUUM_THRESHOLD: float = 5.0             # 2D detection vacuum (Å)
+MIN_INTERATOMIC_DISTANCE: float = 0.8             # atomic overlap floor (Å)
+MAX_CELL_VOLUME: float = 10_000.0                 # structure validation ceiling (ų)
+FORCE_CONVERGENCE_THRESHOLD: float = 0.02         # eV/Å
+ENTROPY_THRESHOLD_PER_ATOM: float = 0.001         # eV/atom (1 meV)
+CONVERGENCE_THRESHOLD_PER_ATOM: float = 1e-3      # eV/atom
+DEFAULT_TIMEOUT_SECONDS: int = 86400              # 24 hours
+
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+
 def _get_lmaxmix(atomic_numbers: List[int]) -> Optional[int]:
     """Determine LMAXMIX from atomic numbers in the structure."""
     if not atomic_numbers:
@@ -79,24 +143,12 @@ def _get_lmaxmix(atomic_numbers: List[int]) -> Optional[int]:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Pure Metal Detection
-# ---------------------------------------------------------------------------
-
-_METALLIC_ELEMENTS: frozenset = frozenset(load_config("metallic_elements")["elements"])
-
-
 def _is_pure_metal(elements: List[str]) -> bool:
     """Check if all elements are metallic (no anions/non-metals)."""
     return all(el in _METALLIC_ELEMENTS for el in elements)
 
 
-# ---------------------------------------------------------------------------
-# 2D Structure Detection
-# ---------------------------------------------------------------------------
-
-
-def detect_2d(atoms: Atoms, vacuum_threshold: float = 5.0) -> bool:
+def detect_2d(atoms: Atoms, vacuum_threshold: float = DEFAULT_VACUUM_THRESHOLD) -> bool:
     """Detect whether a structure is 2D based on vacuum in the z-direction.
 
     Args:
@@ -119,13 +171,8 @@ def detect_2d(atoms: Atoms, vacuum_threshold: float = 5.0) -> bool:
     return bool(vacuum > vacuum_threshold)
 
 
-# ---------------------------------------------------------------------------
-# KPOINTS Grid Calculation
-# ---------------------------------------------------------------------------
-
-
 def compute_kpoints_grid(
-    atoms: Atoms, kpr: float = 30.0, is_2d: bool = False,
+    atoms: Atoms, kpr: float = DEFAULT_KPR, is_2d: bool = False,
 ) -> List[int]:
     """Compute Gamma-centered k-point grid using VASPKIT convention.
 
@@ -152,13 +199,3 @@ def compute_kpoints_grid(
     if is_2d:
         grid[2] = 1
     return grid
-
-
-# ---------------------------------------------------------------------------
-# Unit conversion constants (single source of truth)
-# ---------------------------------------------------------------------------
-
-RY_TO_EV: float = 13.6057                      # Rydberg → eV
-HA_TO_EV: float = 27.2114                      # Hartree → eV
-EV_TO_RY: float = 1.0 / RY_TO_EV              # eV → Rydberg
-RY_PER_BOHR_TO_EV_PER_ANG: float = 25.7112    # force unit: Ry/Bohr → eV/Ang

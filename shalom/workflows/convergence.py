@@ -40,6 +40,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any, List, Optional
 
+from shalom.backends._physics import CONVERGENCE_THRESHOLD_PER_ATOM
 from shalom.workflows.base import ConvergenceResult, ConvergenceWorkflow
 
 if TYPE_CHECKING:
@@ -95,7 +96,7 @@ class CutoffConvergence(ConvergenceWorkflow):
         mpi_command: str = "mpirun",
         accuracy: str = "standard",
         parallel: bool = False,
-        threshold_per_atom: float = 1e-3,
+        threshold_per_atom: float = CONVERGENCE_THRESHOLD_PER_ATOM,
         wsl: bool = False,
         slurm_config: Optional[Any] = None,
     ) -> None:
@@ -228,7 +229,7 @@ class KpointConvergence(ConvergenceWorkflow):
         mpi_command: str = "mpirun",
         accuracy: str = "standard",
         parallel: bool = False,
-        threshold_per_atom: float = 1e-3,
+        threshold_per_atom: float = CONVERGENCE_THRESHOLD_PER_ATOM,
         wsl: bool = False,
         slurm_config: Optional[Any] = None,
     ) -> None:

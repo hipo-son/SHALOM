@@ -35,6 +35,8 @@ from shalom.backends._physics import (
     ANION_ELEMENTS,
     RY_TO_EV,
     EV_TO_RY,
+    DEFAULT_KPR,
+    DEFAULT_BAND_NPOINTS,
     _is_pure_metal,
     detect_2d,
     compute_kpoints_grid,
@@ -157,6 +159,25 @@ class QEInputConfig:
 
 
 # ---------------------------------------------------------------------------
+# QE computation constants
+# ---------------------------------------------------------------------------
+
+ECUTWFC_MIN_STANDARD: float = 45.0                # Ry — minimum ecutwfc at STANDARD
+ECUTWFC_MIN_PRECISE: float = 60.0                 # Ry — minimum ecutwfc at PRECISE
+ECUTWFC_PRECISE_MULTIPLIER: float = 1.2           # scale factor for PRECISE
+
+ECUTRHO_FALLBACK_MULTIPLIER: float = 8.0          # when SSSP ecutrho unavailable
+ECUTRHO_PRECISE_MULTIPLIER: float = 1.2           # scale factor for PRECISE ecutrho
+
+DEGAUSS_METAL_RY: float = 0.00735                 # Ry (= 0.1 eV / 13.6057)
+DEGAUSS_INSULATOR_RY: float = 0.00147             # Ry (= 0.02 eV / 13.6057)
+METAL_MIXING_BETA: float = 0.4                    # lower mixing for metallic SCF
+
+NBND_MULTIPLIER: float = 1.3                      # 30% extra empty bands
+NBND_MINIMUM: int = 20                            # absolute floor for nbnd
+
+
+# ---------------------------------------------------------------------------
 # SSSP Pseudopotential Metadata
 # ---------------------------------------------------------------------------
 
@@ -183,16 +204,16 @@ def get_z_valence(element: str) -> int:
 def compute_ecutwfc(elements: List[str], accuracy: AccuracyLevel) -> float:
     """Compute ecutwfc from SSSP per-element hints.
 
-    STANDARD: max(hints), minimum 45 Ry.
-    PRECISE:  max(hints) * 1.2, minimum 60 Ry.
+    STANDARD: max(hints), minimum ECUTWFC_MIN_STANDARD Ry.
+    PRECISE:  max(hints) * ECUTWFC_PRECISE_MULTIPLIER, minimum ECUTWFC_MIN_PRECISE Ry.
     """
     hints = [SSSP_ELEMENTS[el]["ecutwfc"] for el in set(elements) if el in SSSP_ELEMENTS]
     if not hints:
-        return 60.0 if accuracy == AccuracyLevel.PRECISE else 45.0
+        return ECUTWFC_MIN_PRECISE if accuracy == AccuracyLevel.PRECISE else ECUTWFC_MIN_STANDARD
     max_hint = max(hints)
     if accuracy == AccuracyLevel.PRECISE:
-        return max(60.0, math.ceil(max_hint * 1.2))
-    return max(45.0, float(max_hint))
+        return max(ECUTWFC_MIN_PRECISE, math.ceil(max_hint * ECUTWFC_PRECISE_MULTIPLIER))
+    return max(ECUTWFC_MIN_STANDARD, float(max_hint))
 
 
 def compute_ecutrho(elements: List[str], accuracy: AccuracyLevel) -> float:
@@ -204,10 +225,10 @@ def compute_ecutrho(elements: List[str], accuracy: AccuracyLevel) -> float:
     hints = [SSSP_ELEMENTS[el]["ecutrho"] for el in set(elements) if el in SSSP_ELEMENTS]
     if not hints:
         ecutwfc = compute_ecutwfc(elements, accuracy)
-        return ecutwfc * 8.0  # fallback
+        return ecutwfc * ECUTRHO_FALLBACK_MULTIPLIER
     max_rho = max(hints)
     if accuracy == AccuracyLevel.PRECISE:
-        return max(max_rho, math.ceil(max_rho * 1.2))
+        return max(max_rho, math.ceil(max_rho * ECUTRHO_PRECISE_MULTIPLIER))
     return float(max_rho)
 
 
@@ -298,12 +319,12 @@ def detect_and_apply_qe_hints(
         # Methfessel-Paxton order 1, degauss = VASP SIGMA(0.1 eV) / 13.6057
         config.system["occupations"] = "smearing"
         config.system["smearing"] = "methfessel-paxton"
-        config.system["degauss"] = 0.00735
-        config.electrons["mixing_beta"] = 0.4  # Lower for metallic SCF stability
+        config.system["degauss"] = DEGAUSS_METAL_RY
+        config.electrons["mixing_beta"] = METAL_MIXING_BETA
     elif not has_magnetic:
         # Non-magnetic non-metal (semiconductor/insulator): reduce broadening
         # 0.02 eV / 13.6057 = 0.00147 Ry — negligible for wide-gap materials
-        config.system["degauss"] = 0.00147
+        config.system["degauss"] = DEGAUSS_INSULATOR_RY
 
     # 5. ecutwfc / ecutrho from SSSP metadata
     ecutwfc = compute_ecutwfc(unique_elements, config.accuracy)
@@ -313,7 +334,7 @@ def detect_and_apply_qe_hints(
 
     # 6. K-points grid (reuses shared function)
     config.kpoints.grid = compute_kpoints_grid(
-        atoms, kpr=30.0, is_2d=config.is_2d,
+        atoms, kpr=DEFAULT_KPR, is_2d=config.is_2d,
     )
 
     # 7. Pseudo mapping
@@ -465,7 +486,7 @@ def get_band_calc_atoms(atoms: Atoms, is_2d: bool = False) -> Optional[Atoms]:
 
 def generate_band_kpath(
     atoms: Atoms,
-    npoints: int = 40,
+    npoints: int = DEFAULT_BAND_NPOINTS,
     is_2d: bool = False,
 ) -> QEKPointsConfig:
     """Generate a high-symmetry k-path for a band-structure (``crystal_b``) run.

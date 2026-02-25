@@ -27,6 +27,7 @@ from shalom.backends._physics import (  # noqa: F401
     DEFAULT_MAGMOM,
     HUBBARD_U_VALUES,
     ANION_ELEMENTS,
+    DEFAULT_VACUUM_THRESHOLD,
     _METALLIC_ELEMENTS,
     _is_pure_metal,
     _get_lmaxmix,
@@ -149,6 +150,21 @@ def get_potcar_variant(element: str, preset: str = "vasp_recommended") -> str:
 
 
 # ---------------------------------------------------------------------------
+# ENCUT computation constants
+# ---------------------------------------------------------------------------
+
+ENCUT_MULTIPLIER_STANDARD: float = 1.3            # STANDARD accuracy multiplier
+ENCUT_MULTIPLIER_PRECISE: float = 1.5             # PRECISE accuracy multiplier
+ENCUT_MINIMUM: int = 520                          # eV floor for ENCUT
+
+# Metal smearing
+METAL_SIGMA: float = 0.1                          # eV (Methfessel-Paxton order 1)
+
+# Slab detection
+SLAB_THICKNESS_THRESHOLD: float = 3.0             # Å minimum for slab classification
+
+
+# ---------------------------------------------------------------------------
 # ENMAX Reference Values (loaded from config/enmax_values.yaml)
 # ---------------------------------------------------------------------------
 
@@ -161,8 +177,8 @@ def compute_encut(
 ) -> int:
     """Compute ENCUT from element ENMAX values.
 
-    STANDARD: max(ENMAX) * 1.3, minimum 520 eV.
-    PRECISE: max(ENMAX) * 1.5, minimum 520 eV.
+    STANDARD: max(ENMAX) * ENCUT_MULTIPLIER_STANDARD, minimum ENCUT_MINIMUM eV.
+    PRECISE: max(ENMAX) * ENCUT_MULTIPLIER_PRECISE, minimum ENCUT_MINIMUM eV.
 
     Args:
         elements: List of element symbols in the structure.
@@ -175,10 +191,11 @@ def compute_encut(
     source = enmax_override or ENMAX_VALUES
     enmax_vals = [source.get(el, 300.0) for el in set(elements)]
     if not enmax_vals:
-        return 520
+        return ENCUT_MINIMUM
     max_enmax = max(enmax_vals)
-    multiplier = 1.3 if accuracy == AccuracyLevel.STANDARD else 1.5
-    return max(520, int(math.ceil(max_enmax * multiplier)))
+    multiplier = (ENCUT_MULTIPLIER_STANDARD if accuracy == AccuracyLevel.STANDARD
+                  else ENCUT_MULTIPLIER_PRECISE)
+    return max(ENCUT_MINIMUM, int(math.ceil(max_enmax * multiplier)))
 
 
 
@@ -282,7 +299,7 @@ def detect_and_apply_structure_hints(
             _z_pos = atoms.positions[:, 2]
             _slab_thickness = _z_pos.max() - _z_pos.min()
             _vacuum = _cell[2][2] - _slab_thickness
-            if _vacuum > 5.0 and _slab_thickness > 3.0:
+            if _vacuum > DEFAULT_VACUUM_THRESHOLD and _slab_thickness > SLAB_THICKNESS_THRESHOLD:
                 if config.calc_type == CalculationType.RELAXATION:
                     config.incar_settings["ISIF"] = 2
                 config.incar_settings["IDIPOL"] = 3
@@ -291,7 +308,7 @@ def detect_and_apply_structure_hints(
     # 4. Pure metal detection
     if _is_pure_metal(unique_elements):
         config.incar_settings["ISMEAR"] = 1
-        config.incar_settings["SIGMA"] = 0.1
+        config.incar_settings["SIGMA"] = METAL_SIGMA
         config.incar_settings["ALGO"] = "Fast"
 
     # 5. LMAXMIX

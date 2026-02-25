@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ase.io import read as ase_read
 
-from shalom.backends._physics import AccuracyLevel
+from shalom.backends._physics import AccuracyLevel, DEFAULT_BAND_NPOINTS
 from shalom.backends.qe import QEBackend
 from shalom.backends.qe_config import (
     QECalculationType,
@@ -108,7 +108,7 @@ class StandardWorkflow:
         timeout: int = 7200,
         accuracy: str = "standard",
         skip_relax: bool = False,
-        npoints_kpath: int = 40,
+        npoints_kpath: int = DEFAULT_BAND_NPOINTS,
         is_2d: bool = False,
         dos_emin: float = -20.0,
         dos_emax: float = 10.0,

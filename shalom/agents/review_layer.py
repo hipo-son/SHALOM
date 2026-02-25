@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from shalom._config_loader import load_prompt
 from shalom.backends._compression import estimate_tokens, truncate_to_tokens
+from shalom.backends._physics import ENTROPY_THRESHOLD_PER_ATOM, FORCE_CONVERGENCE_THRESHOLD
 from shalom.backends.base import DFTBackend, DFTResult
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import ReviewResult
@@ -218,14 +219,15 @@ class ReviewAgent:
         physics_warnings: List[str] = []
 
         # Force convergence check
-        if dft_result.forces_max is not None and dft_result.forces_max > 0.02:
+        if dft_result.forces_max is not None and dft_result.forces_max > FORCE_CONVERGENCE_THRESHOLD:
             physics_warnings.append(
-                f"Max force ({dft_result.forces_max:.4f} eV/A) exceeds 0.02 eV/A threshold."
+                f"Max force ({dft_result.forces_max:.4f} eV/A) exceeds "
+                f"{FORCE_CONVERGENCE_THRESHOLD} eV/A threshold."
             )
 
         # Entropy check (SIGMA over-smearing)
         if dft_result.entropy_per_atom is not None:
-            if abs(dft_result.entropy_per_atom) > 0.001:  # 1 meV/atom
+            if abs(dft_result.entropy_per_atom) > ENTROPY_THRESHOLD_PER_ATOM:
                 physics_warnings.append(
                     f"Entropy T*S/atom ({dft_result.entropy_per_atom:.6f} eV) exceeds 1 meV/atom. "
                     "Consider reducing SIGMA."

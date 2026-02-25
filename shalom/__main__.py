@@ -56,6 +56,11 @@ def _parse_set_values(set_args: Optional[list]) -> Dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
+    from shalom.backends._physics import (
+        CONVERGENCE_THRESHOLD_PER_ATOM,
+        DEFAULT_TIMEOUT_SECONDS,
+    )
+
     parser = argparse.ArgumentParser(
         prog="shalom",
         description="SHALOM - Generate DFT input files from material specifications.",
@@ -176,8 +181,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--timeout",
         type=int,
-        default=86400,
-        help="Execution timeout in seconds (default: 86400).",
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help=f"Execution timeout in seconds (default: {DEFAULT_TIMEOUT_SECONDS}).",
     )
     run_parser.add_argument(
         "--mpi-command",
@@ -409,8 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
     converge_parser.add_argument(
         "--threshold",
         type=float,
-        default=1e-3,
-        help="Convergence threshold in eV/atom (default: 1e-3).",
+        default=CONVERGENCE_THRESHOLD_PER_ATOM,
+        help=f"Convergence threshold in eV/atom (default: {CONVERGENCE_THRESHOLD_PER_ATOM}).",
     )
 
     # 'setup-qe' subcommand
@@ -514,8 +519,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline_parser.add_argument(
         "--timeout",
         type=int,
-        default=86400,
-        help="DFT execution timeout in seconds.",
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help=f"DFT execution timeout in seconds (default: {DEFAULT_TIMEOUT_SECONDS}).",
     )
     pipeline_parser.add_argument(
         "--max-loops",

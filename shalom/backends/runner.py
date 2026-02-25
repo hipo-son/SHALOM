@@ -22,10 +22,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ase import Atoms
 
+from shalom.backends._physics import DEFAULT_TIMEOUT_SECONDS
 from shalom.backends.base import DFTBackend, DFTResult
 from shalom.backends.qe_error_recovery import QEErrorRecoveryEngine
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Runner constants
+# ---------------------------------------------------------------------------
+
+MIN_RECOVERY_TIMEOUT: int = 7200                  # 2h floor for error recovery
+STDERR_TAIL_CHARS: int = 2000                     # max stderr capture characters
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +49,7 @@ class ExecutionConfig:
     output_file: str = "pw.out"
     nprocs: int = 1
     mpi_command: str = "mpirun"
-    timeout_seconds: int = 86400
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     env_overrides: Dict[str, str] = field(default_factory=dict)
     wsl: bool = False  # Run via WSL on Windows (wsl -e pw.x)
 
@@ -311,7 +320,7 @@ class ExecutionRunner:
 
         wall_time = time.monotonic() - t0
         stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
-        stderr_tail = stderr_text[-2000:] if stderr_text else None
+        stderr_tail = stderr_text[-STDERR_TAIL_CHARS:] if stderr_text else None
 
         # Determine success: return code 0 is required
         success = return_code == 0 and not timed_out
@@ -495,7 +504,7 @@ def execute_with_recovery(
 
         # Wall-clock decay: reduce timeout for subsequent attempts
         runner.config.timeout_seconds = max(
-            7200, original_timeout // (attempt + 2),
+            MIN_RECOVERY_TIMEOUT, original_timeout // (attempt + 2),
         )
 
     # Failed after all attempts

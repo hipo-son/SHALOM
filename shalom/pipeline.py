@@ -21,7 +21,7 @@ from shalom.agents.design_layer import CoarseSelector, MultiAgentFineSelector, g
 from shalom.agents.review_layer import ReviewAgent
 from shalom.agents.simulation_layer import GeometryGenerator, GeometryReviewer
 from shalom.backends import get_backend
-from shalom.backends._physics import AccuracyLevel
+from shalom.backends._physics import AccuracyLevel, DEFAULT_TIMEOUT_SECONDS
 from shalom.core.llm_provider import LLMProvider
 from shalom.core.schemas import (
     MaterialCandidate,
@@ -146,7 +146,7 @@ class PipelineConfig(BaseModel):
         description="MPI launcher command (mpirun, srun, etc.).",
     )
     execution_timeout: int = Field(
-        default=86400,
+        default=DEFAULT_TIMEOUT_SECONDS,
         description="DFT execution timeout in seconds.",
     )
     max_execution_retries: int = Field(

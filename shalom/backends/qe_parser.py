@@ -380,17 +380,17 @@ def compute_nbnd(atoms: Any, multiplier: float = 1.3) -> int:
     Formula::
 
         n_occupied = sum(z_valence[el] for all atoms) / 2  (spin-paired)
-        nbnd = max(20, ceil(n_occupied * multiplier))
+        nbnd = max(NBND_MINIMUM, ceil(n_occupied * multiplier))
 
     Args:
         atoms: ASE ``Atoms`` object representing the structure.
         multiplier: Scale factor applied to the occupied-band count
-            (default 1.3 → 30% extra empty bands).
+            (default NBND_MULTIPLIER → 30% extra empty bands).
 
     Returns:
-        Recommended ``nbnd`` value (integer, minimum 20).
+        Recommended ``nbnd`` value (integer, minimum NBND_MINIMUM).
     """
-    from shalom.backends.qe_config import SSSP_ELEMENTS
+    from shalom.backends.qe_config import NBND_MINIMUM, SSSP_ELEMENTS
 
     symbols = atoms.get_chemical_symbols()
     z_total = 0
@@ -399,4 +399,4 @@ def compute_nbnd(atoms: Any, multiplier: float = 1.3) -> int:
         z_total += entry["z_valence"] if entry else 1
 
     n_occupied = z_total / 2.0  # spin-paired assumption
-    return max(20, math.ceil(n_occupied * multiplier))
+    return max(NBND_MINIMUM, math.ceil(n_occupied * multiplier))

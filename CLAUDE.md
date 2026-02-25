@@ -8,7 +8,7 @@ SHALOM (System of Hierarchical Agents for Logical Orchestration of Materials) �
 shalom/
 ├── agents/           # LLM agent layers (Design, Simulation, Review)
 ├── backends/         # DFT backends (VASP, QE) + error recovery + execution
-│   ├── _physics.py   # Shared physics constants (AccuracyLevel, MAGMOM, detect_2d, unit conversions)
+│   ├── _physics.py   # Shared constants index (unit conversions, DFT thresholds, AccuracyLevel, detect_2d)
 │   ├── _compression.py # Token-aware error log compression + postprocess_parse_result helper
 │   ├── base.py       # Backend-agnostic dataclasses: DFTResult, BandStructureData, DOSData
 │   ├── vasp.py       # VASP backend (write_input, parse_output)
@@ -103,8 +103,23 @@ python scripts/validate_v1.py --skip-relax --nprocs 4   # skip vc-relax
 - Line length: 100 chars
 - Target: Python 3.9+
 
+### Named Constants Architecture
+All magic numbers are named constants. `_physics.py` docstring has the full index.
+
+| File | Owns | Examples |
+|------|------|---------|
+| `backends/_physics.py` | Shared cross-backend | `DEFAULT_KPR`, `FORCE_CONVERGENCE_THRESHOLD`, `DEFAULT_TIMEOUT_SECONDS`, unit conversions |
+| `backends/vasp_config.py` | VASP-specific | `ENCUT_MULTIPLIER_STANDARD/PRECISE`, `ENCUT_MINIMUM`, `METAL_SIGMA` |
+| `backends/qe_config.py` | QE-specific | `ECUTWFC_MIN_*`, `DEGAUSS_METAL_RY`, `NBND_MULTIPLIER` |
+| `backends/runner.py` | Execution | `MIN_RECOVERY_TIMEOUT`, `STDERR_TAIL_CHARS` |
+
+**Rules for adding new constants:**
+1. Used by 2+ files → `_physics.py`
+2. Single backend only → that backend's `*_config.py`
+3. Never inline a physics/computation threshold — always use a named constant
+4. Run `help(shalom.backends._physics)` to see the full list
+
 ### Physics Constants
-- Unit conversions: `_physics.py` is single source of truth (RY_TO_EV, HA_TO_EV, EV_TO_RY, etc.)
 - POTCAR mappings: PBE_54 dataset (version metadata in YAML)
 - SSSP pseudopotentials: SSSP Efficiency v1.3.0 (PBE), per-element ecutwfc/ecutrho/z_valence
 - Hubbard U: Dudarev scheme, Wang et al. PRB 73 (2006), PBE-fitted only
