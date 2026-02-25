@@ -17,6 +17,14 @@ from shalom.analysis.xrd import (
 )
 
 
+def _mcp_available() -> bool:
+    try:
+        import mcp  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -187,7 +195,6 @@ class TestCalculateXRD:
 
 
 class TestCLI:
-    @pytest.mark.skip(reason="Phase 2: CLI not yet implemented for XRD")
     def test_analyze_xrd_parser(self):
         from shalom.__main__ import build_parser
 
@@ -203,7 +210,9 @@ class TestCLI:
 
 
 class TestMCPTool:
-    @pytest.mark.skip(reason="Phase 2: MCP tool not yet implemented for XRD")
+    @pytest.mark.skipif(
+        not _mcp_available(), reason="mcp package not installed"
+    )
     def test_missing_file(self):
         from shalom.mcp_server import analyze_xrd_pattern
 
@@ -217,7 +226,6 @@ class TestMCPTool:
 
 
 class TestPackageImports:
-    @pytest.mark.skip(reason="Phase 2: XRD not yet exported from analysis __init__")
     def test_analysis_init_exports(self):
         from shalom.analysis import (
             XRDResult,
@@ -228,7 +236,6 @@ class TestPackageImports:
         assert callable(is_xrd_available)
         assert XRDResult is not None
 
-    @pytest.mark.skip(reason="Phase 2: XRD not yet exported from analysis __init__")
     def test_analysis_all(self):
         import shalom.analysis
         assert "XRDResult" in shalom.analysis.__all__

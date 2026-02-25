@@ -250,7 +250,6 @@ class TestCustomSymprec:
 
 
 class TestPackageImports:
-    @pytest.mark.skip(reason="Phase 2: symmetry not yet exported from __init__")
     def test_analysis_init_exports_symmetry(self):
         from shalom.analysis import (  # noqa: F401
             SymmetryResult,
@@ -258,7 +257,6 @@ class TestPackageImports:
             is_spglib_available,
         )
 
-    @pytest.mark.skip(reason="Phase 2: symmetry not yet in __all__")
     def test_analysis_all_contains_symmetry(self):
         import shalom.analysis
         assert "SymmetryResult" in shalom.analysis.__all__

@@ -21,13 +21,18 @@ shalom/
 │   ├── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop, create_runner)
 │   └── slurm.py      # Slurm HPC job submission/monitoring (SlurmConfig, SlurmRunner)
 ├── analysis/         # Post-DFT analysis wrapping external libraries
-│   ├── _base.py      # Result dataclasses (ElasticResult, PhononResult)
+│   ├── _base.py      # Result dataclasses (Elastic/Phonon/Electronic/XRD/Symmetry/MagneticResult)
 │   ├── elastic.py    # Elastic tensor analysis via pymatgen (bulk/shear/Young's modulus, stability)
-│   └── phonon.py     # Phonon analysis via phonopy (band structure, DOS, thermal props, stability)
+│   ├── phonon.py     # Phonon analysis via phonopy (band structure, DOS, thermal props, stability)
+│   ├── electronic.py # Electronic structure (band gap, VBM/CBM, effective mass, DOS@Ef)
+│   ├── xrd.py        # XRD pattern calculation via pymatgen XRDCalculator
+│   ├── symmetry.py   # Crystal symmetry analysis via spglib (space/point group, Wyckoff)
+│   └── magnetic.py   # Magnetic/charge analysis from QE pw.out (site moments, Löwdin charges)
 ├── plotting/         # Matplotlib visualisation (optional: pip install shalom[plotting])
 │   ├── band_plot.py  # BandStructurePlotter — band structure with high-sym labels, spin
 │   ├── dos_plot.py   # DOSPlotter — total/spin-polarised DOS with Fermi level marker
-│   └── phonon_plot.py # PhononBandPlotter, PhononDOSPlotter — phonon dispersion & DOS
+│   ├── phonon_plot.py # PhononBandPlotter, PhononDOSPlotter — phonon dispersion & DOS
+│   └── xrd_plot.py   # XRDPlotter — XRD stem plot with hkl labels
 ├── workflows/        # High-level multi-step workflows
 │   ├── base.py       # ConvergenceWorkflow ABC, ConvergenceResult, ConvergenceTestResult
 │   ├── convergence.py # CutoffConvergence (ecutwfc sweep), KpointConvergence (k-mesh sweep)
@@ -49,7 +54,7 @@ shalom/
 ├── _defaults.py      # Hardcoded fallback values
 ├── mp_client.py      # Materials Project API client (optional: pip install mp-api)
 ├── direct_run.py     # Direct material run (structure -> DFT input files)
-├── mcp_server.py     # MCP server for Claude Code integration (12 tools)
+├── mcp_server.py     # MCP server for Claude Code integration (16 tools)
 ├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/analyze/pipeline
 └── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
 ```
@@ -78,7 +83,7 @@ shalom/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: 1296 tests, coverage ≥85%
+pytest tests/                          # default: 1390 tests, coverage ≥85%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```
@@ -128,9 +133,13 @@ All magic numbers are named constants. `_physics.py` docstring has the full inde
 - `shalom/analysis/` wraps mature external libraries for post-DFT property analysis
 - **Elastic** (pymatgen): `pip install shalom[analysis]` — bulk/shear/Young's modulus, Poisson ratio, stability
 - **Phonon** (phonopy): `pip install shalom[phonon]` — band structure, DOS, thermal properties, stability
+- **Electronic** (numpy): no extra deps — band gap, VBM/CBM, effective mass, DOS at Fermi
+- **XRD** (pymatgen): `pip install shalom[analysis]` — powder diffraction pattern from structure
+- **Symmetry** (spglib): `pip install shalom[symmetry]` — space/point group, crystal system, Wyckoff
+- **Magnetic** (builtin): no extra deps — site magnetization & Löwdin charges from QE pw.out
 - Pattern: `_AVAILABLE` flag + `_ensure_available()` guard (same as `mp_client.py`)
-- Result dataclasses in `analysis/_base.py`: `ElasticResult`, `PhononResult`
-- Import: `from shalom.analysis import analyze_elastic_tensor, analyze_phonon`
+- Result dataclasses in `analysis/_base.py`: `ElasticResult`, `PhononResult`, `ElectronicResult`, `XRDResult`, `SymmetryResult`, `MagneticResult`
+- Import: `from shalom.analysis import analyze_elastic_tensor, analyze_phonon, analyze_band_structure, calculate_xrd, analyze_symmetry, analyze_magnetism`
 
 **When adding a new analysis module:**
 1. Create `shalom/analysis/<property>.py` with optional dep guard
@@ -192,6 +201,14 @@ python -m shalom analyze elastic --file tensor.json                 # Elastic fr
 python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --generate-displacements -o ./phonon/
 python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-sets FORCE_SETS
 python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-constants FORCE_CONSTANTS
+python -m shalom analyze electronic --bands-xml ./03_bands/    # Band gap, VBM/CBM, effective mass
+python -m shalom analyze electronic --calc-dir ./03_bands/ --fermi-energy 5.2
+python -m shalom analyze xrd --structure POSCAR                # XRD pattern (CuKa default)
+python -m shalom analyze xrd --structure POSCAR --wavelength MoKa -o xrd.png
+python -m shalom analyze symmetry --structure POSCAR           # Space group, point group
+python -m shalom analyze symmetry --structure POSCAR --symprec 1e-3
+python -m shalom analyze magnetic --pw-out ./02_scf/pw.out     # Site magnetization, Löwdin
+python -m shalom analyze magnetic --pw-out pw.out --structure POSCAR
 
 # ── Slurm HPC execution ──────────────────────────────────────────────────────
 python -m shalom run Si -b qe -x --slurm --partition=compute --account=mat_sci
@@ -234,7 +251,7 @@ After setup, tell Claude Code things like:
 - "mp-1040425 그래핀 밴드 구조 계산해줘"
 - "QE 환경이 설정되어 있는지 확인해줘"
 
-**11 MCP tools** (10 deterministic + 1 LLM-driven):
+**16 MCP tools** (15 deterministic + 1 LLM-driven):
 
 | Tool | Description | Requires API Key? |
 |------|-------------|:-----------------:|
@@ -249,6 +266,10 @@ After setup, tell Claude Code things like:
 | `check_qe_setup` | Verify QE environment | No |
 | `analyze_elastic` | Elastic tensor analysis (bulk/shear/Young's modulus) | No |
 | `analyze_phonon_properties` | Phonon analysis (band structure, DOS, thermal, stability) | No |
+| `analyze_electronic_structure` | Band gap, VBM/CBM, effective mass, DOS at Fermi | No |
+| `analyze_xrd_pattern` | Powder XRD pattern from crystal structure | No |
+| `analyze_symmetry_properties` | Space group, point group, crystal system, Wyckoff | No |
+| `analyze_magnetic_properties` | Site magnetization and Löwdin charges from QE pw.out | No |
 | `run_pipeline` | Full multi-agent LLM pipeline | Yes (or `base_url`) |
 
 The `run_pipeline` tool supports `base_url` for local LLM servers (Ollama, vLLM, etc.)

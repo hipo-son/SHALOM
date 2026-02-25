@@ -514,7 +514,6 @@ class TestAnalyzeBandStructure:
 
 
 class TestPackageImports:
-    @pytest.mark.skip(reason="Phase 2 integration pending")
     def test_analysis_exports(self):
         from shalom.analysis import (
             ElectronicResult,
@@ -525,7 +524,6 @@ class TestPackageImports:
         assert callable(is_electronic_available)
         assert ElectronicResult is not None
 
-    @pytest.mark.skip(reason="Phase 2 integration pending")
     def test_analysis_all(self):
         import shalom.analysis
         assert "ElectronicResult" in shalom.analysis.__all__

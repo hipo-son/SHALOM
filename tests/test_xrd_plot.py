@@ -92,7 +92,6 @@ class TestXRDPlotter:
 
 
 class TestPackageImports:
-    @pytest.mark.skip(reason="Phase 2: XRDPlotter not yet exported from plotting __init__")
     def test_plotting_exports(self):
         from shalom.plotting import XRDPlotter as XP
         assert XP is not None

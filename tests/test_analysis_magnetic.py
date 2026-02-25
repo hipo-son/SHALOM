@@ -322,13 +322,11 @@ class TestAnalyzeMagnetism:
 
 
 class TestPackageImports:
-    @pytest.mark.skip(reason="Phase 2: MagneticResult not yet exported from __init__")
     def test_analysis_init_exports_magnetic_result(self):
         from shalom.analysis import MagneticResult as MR  # noqa: F811
 
         assert MR is not None
 
-    @pytest.mark.skip(reason="Phase 2: analyze_magnetism not yet exported from __init__")
     def test_analysis_all_includes_magnetic(self):
         import shalom.analysis
 
