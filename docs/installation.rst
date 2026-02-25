@@ -61,12 +61,17 @@ Then install:
 
 .. code-block:: bash
 
-   pip install -e ".[dev,mp]"
+   pip install -e ".[dev]"
 
-   # Optional: band/DOS plotting
-   pip install -e ".[plotting]"
+   # Optional extras (install what you need):
+   pip install -e ".[mp]"         # Materials Project structure lookup
+   pip install -e ".[plotting]"   # Band/DOS/XRD plotting (matplotlib)
+   pip install -e ".[llm]"       # LLM agents (openai + anthropic) — for 'pipeline' command
+   pip install -e ".[analysis]"   # Elastic/XRD analysis (pymatgen)
+   pip install -e ".[symmetry]"   # Crystal symmetry (spglib)
+   pip install -e ".[phonon]"     # Phonon analysis (phonopy)
 
-   # Optional: everything (plotting + MP + MCP)
+   # Or install everything at once:
    pip install -e ".[all]"
 
 Verify the installation:

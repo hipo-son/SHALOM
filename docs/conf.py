@@ -40,6 +40,12 @@ autodoc_mock_imports = [
     'mp_api',
     'pymatgen',
     'rich',
+    'openai',
+    'anthropic',
+    'spglib',
+    'phonopy',
+    'matplotlib',
+    'seekpath',
 ]
 
 intersphinx_mapping = {

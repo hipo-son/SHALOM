@@ -66,6 +66,31 @@ Plot results from completed QE calculations:
    python -m shalom plot ./04_nscf --dos
    python -m shalom plot ./03_bands --bands --fermi-from ./04_nscf --emin -8 --emax 6
 
+CLI: Post-DFT Analysis
+-----------------------
+
+Six analysis modules for computed results (some require optional dependencies):
+
+.. code-block:: bash
+
+   # Crystal symmetry (requires: pip install shalom[symmetry])
+   python -m shalom analyze symmetry --structure POSCAR
+
+   # Powder XRD pattern (requires: pip install shalom[analysis])
+   python -m shalom analyze xrd --structure POSCAR -o xrd.png
+
+   # Electronic band structure (numpy only — no extra deps)
+   python -m shalom analyze electronic --calc-dir ./03_bands
+
+   # Magnetic properties from QE output (no extra deps)
+   python -m shalom analyze magnetic --pw-out pw.out
+
+   # Elastic tensor analysis (requires: pip install shalom[analysis])
+   python -m shalom analyze elastic --file elastic_tensor.json
+
+   # Phonon properties (requires: pip install shalom[phonon])
+   python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-constants fc.hdf5
+
 Python API: LLM-Driven Pipeline
 ---------------------------------
 
@@ -135,7 +160,11 @@ After setup, tell Claude Code things like:
 - "Generate QE SCF input for Silicon"
 - "Run the full workflow for mp-1040425"
 - "Plot the band structure in ./03_bands"
+- "Analyze symmetry of this structure"
 
-**10 MCP tools**: ``search_material``, ``generate_dft_input``, ``run_workflow``,
+**16 MCP tools**: ``search_material``, ``generate_dft_input``, ``run_workflow``,
 ``execute_dft``, ``parse_dft_output``, ``plot_bands``, ``plot_dos``,
-``run_convergence``, ``check_qe_setup``, ``run_pipeline``
+``run_convergence``, ``check_qe_setup``, ``run_pipeline``,
+``analyze_elastic``, ``analyze_phonon_properties``,
+``analyze_electronic_structure``, ``analyze_xrd_pattern``,
+``analyze_symmetry_properties``, ``analyze_magnetic_properties``

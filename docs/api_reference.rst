@@ -110,6 +110,44 @@ Workflows
    :undoc-members:
    :show-inheritance:
 
+Analysis
+--------
+
+.. automodule:: shalom.analysis._base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.analysis.elastic
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.analysis.phonon
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.analysis.electronic
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.analysis.xrd
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.analysis.symmetry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.analysis.magnetic
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Plotting
 --------
 
@@ -119,6 +157,16 @@ Plotting
    :show-inheritance:
 
 .. automodule:: shalom.plotting.dos_plot
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.plotting.phonon_plot
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: shalom.plotting.xrd_plot
    :members:
    :undoc-members:
    :show-inheritance:
