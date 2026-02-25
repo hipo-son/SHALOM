@@ -22,6 +22,12 @@ dependencies:
   - openai>=1.40.0
   - anthropic>=0.25.0
 
+  # ── 시각화 + 분석 (Plotting & analysis) ──────────────────────────────────
+  - matplotlib>=3.5.0  # 밴드/DOS/XRD 플로팅
+  - seekpath>=2.0.0    # 고대칭점 k-path 자동 생성
+  - spglib>=2.0        # 결정 대칭 분석 (공간군, Wyckoff)
+  - phonopy>=2.20      # 포논 밴드/DOS/열역학 분석
+
   # ── 개발 도구 (Development tools) ────────────────────────────────────────
   - pytest>=7.0
   - ruff              # 린터

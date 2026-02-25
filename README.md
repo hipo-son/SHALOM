@@ -33,7 +33,7 @@ Existing LLM-agent systems are either too general (lacking domain primitives for
 - **Pluggable LLM backends** — Swap between OpenAI, Anthropic, or local/self-hosted models (Ollama, vLLM, llama.cpp) via `base_url` parameter.
 - **Dual DFT backend support** — Quantum ESPRESSO (open-source, personal workstations) and VASP (licensed, HPC clusters) as first-class DFT solvers, with a unified abstraction layer.
 - **HPC-native design** — First-class Slurm integration for submitting and monitoring jobs on supercomputers.
-- **MCP server for Claude Code** — 10 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
+- **MCP server for Claude Code** — 16 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
 - **Deterministic reproducibility** — Seed-locked prompts and structured outputs ensure every run is traceable and repeatable.
 
 ### Proof of Concept: Autonomous Material Discovery
@@ -115,12 +115,17 @@ source .venv/bin/activate
 Then install dependencies:
 
 ```bash
-pip install -e ".[dev,mp]"
+pip install -e ".[dev]"
 
-# Optional: band/DOS plotting
-pip install -e ".[plotting]"
+# Optional extras (install what you need):
+pip install -e ".[mp]"         # Materials Project structure lookup
+pip install -e ".[plotting]"   # Band/DOS/XRD plotting (matplotlib)
+pip install -e ".[llm]"       # LLM agents (openai + anthropic) — for 'pipeline' command
+pip install -e ".[analysis]"   # Elastic/XRD analysis (pymatgen)
+pip install -e ".[symmetry]"   # Crystal symmetry (spglib)
+pip install -e ".[phonon]"     # Phonon analysis (phonopy)
 
-# Optional: everything (plotting + MP + MCP)
+# Or install everything at once:
 pip install -e ".[all]"
 ```
 
@@ -262,6 +267,14 @@ python -m shalom workflow mp-19717 -b qe -np 8 --dos-emin -20  # Custom DOS wind
 python -m shalom converge Si --test cutoff --values 30,40,50,60,80 -np 2
 python -m shalom converge Si --test kpoints --values 20,30,40,50 --ecutwfc 60
 
+# ── Post-DFT analysis (elastic, phonon, electronic, XRD, symmetry, magnetic) ─
+python -m shalom analyze symmetry --structure POSCAR         # Space group, Wyckoff positions
+python -m shalom analyze xrd --structure POSCAR -o xrd.png   # Powder XRD pattern + plot
+python -m shalom analyze electronic --calc-dir ./03_bands    # Band gap, effective mass
+python -m shalom analyze magnetic --pw-out pw.out            # Site moments, Lowdin charges
+python -m shalom analyze elastic --file elastic_tensor.json  # Bulk/shear/Young's modulus
+python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-constants fc.hdf5
+
 # ── LLM-driven autonomous pipeline ──────────────────────────────────────────
 python -m shalom pipeline "Find a 2D HER catalyst"              # Full pipeline (OpenAI)
 python -m shalom pipeline "Stable cathode" --provider anthropic  # Use Claude
@@ -305,7 +318,7 @@ After setup, tell Claude Code things like:
 - "Si의 SCF 계산 입력 파일을 만들어줘"
 - "mp-1040425 밴드 구조 계산해줘"
 
-**10 MCP tools**: `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `run_pipeline`
+**16 MCP tools**: `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `run_pipeline`, `analyze_elastic`, `analyze_phonon_properties`, `analyze_electronic_structure`, `analyze_xrd_pattern`, `analyze_symmetry_properties`, `analyze_magnetic_properties`
 
 The `run_pipeline` tool runs the full multi-agent LLM pipeline and supports `base_url` for local LLM servers as an alternative to external API keys.
 
@@ -350,7 +363,7 @@ docker pull ghcr.io/hipo-son/shalom:latest
 
 | Phase | Target | Key Features | Status |
 |-------|--------|-------------|--------|
-| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (10 tools), local LLM support, token-aware compression, band/DOS plotting, convergence tests, 5-step workflow, audit logging | Code complete (1126+ tests, 94.6% coverage) |
+| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (16 tools), local LLM support, token-aware compression, band/DOS/XRD plotting, convergence tests, 5-step workflow, 6 post-DFT analysis modules, audit logging | Code complete (1390+ tests, 94.6% coverage) |
 | **Phase 2** | Engine expansion | VASP-Slurm HPC, LAMMPS/AIMD integration, Dynamic Recipe Generator, 100+ self-correction benchmarks | Planned |
 | **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) | Planned |
 

@@ -28,8 +28,6 @@ dependencies = [
     "ase>=3.22.1",
     "numpy>=1.24.0",
     "pydantic>=2.4.0",
-    "openai>=1.40.0",   # beta.chat.completions.parse (structured outputs) requires >=1.40
-    "anthropic>=0.25.0",
     "pyyaml>=6.0",
 ]
 
@@ -71,6 +69,10 @@ docs = [
 demo = [
     "rich>=13.0"
 ]
+llm = [
+    "openai>=1.40.0",     # beta.chat.completions.parse (structured outputs) requires >=1.40
+    "anthropic>=0.25.0",  # Claude API client
+]
 mcp = [
     "mcp[cli]>=1.2.0",  # MCP server for Claude Code integration (requires Python >=3.10)
 ]
@@ -84,7 +86,7 @@ symmetry = [
     "spglib>=2.0",  # crystal symmetry analysis (space group, Wyckoff, etc.)
 ]
 all = [
-    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp,analysis,phonon,symmetry]"
+    "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp,analysis,phonon,symmetry,llm]"
 ]
 
 [project.scripts]

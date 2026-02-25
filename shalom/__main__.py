@@ -549,10 +549,11 @@ def build_parser() -> argparse.ArgumentParser:
     # 'analyze' subcommand
     analyze_parser = subparsers.add_parser(
         "analyze",
-        help="Analyze DFT results using external libraries (elastic, phonon, etc.).",
+        help="Analyze DFT results (elastic, phonon, electronic, XRD, symmetry, magnetic).",
         description=(
-            "Post-DFT analysis tools that wrap mature external libraries. "
-            "Supports elastic tensor analysis (pymatgen) and phonon analysis (phonopy)."
+            "Post-DFT analysis tools wrapping external libraries. "
+            "Supports: elastic (pymatgen), phonon (phonopy), electronic (numpy), "
+            "XRD (pymatgen), symmetry (spglib), magnetic (text parsing)."
         ),
     )
     analyze_sub = analyze_parser.add_subparsers(dest="analyze_type", help="Analysis type")
@@ -1370,7 +1371,13 @@ def cmd_converge(args: argparse.Namespace) -> int:
 
 def cmd_pipeline(args: argparse.Namespace) -> int:
     """Execute the 'pipeline' subcommand -LLM-driven autonomous discovery."""
-    from shalom.pipeline import Pipeline, PipelineConfig
+    try:
+        from shalom.pipeline import Pipeline, PipelineConfig
+    except ImportError:
+        print("Error: LLM dependencies not installed.")
+        print("  The 'pipeline' command requires openai and anthropic packages.")
+        print("  Install with: pip install 'shalom[llm]'")
+        return 1
     from shalom.core.schemas import PipelineStatus
 
     # Resolve model name
