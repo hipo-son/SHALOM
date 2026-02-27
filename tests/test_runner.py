@@ -16,6 +16,8 @@ from shalom.backends.runner import (
     ExecutionConfig,
     ExecutionResult,
     ExecutionRunner,
+    _patch_input_paths_for_wsl,
+    _windows_to_wsl_path,
     execute_with_recovery,
 )
 
@@ -898,3 +900,133 @@ class TestUPFValidation:
         msg = errors[0]
         assert "sudo apt install" in msg
         assert "setup-qe" in msg
+
+
+# =========================================================================
+# TestWindowsToWSLPath
+# =========================================================================
+
+class TestWindowsToWSLPath:
+    """Test Windows-to-WSL path conversion utility."""
+
+    def test_c_drive_forward_slash(self):
+        assert _windows_to_wsl_path("C:/Users/Foo") == "/mnt/c/Users/Foo"
+
+    def test_c_drive_backslash(self):
+        assert _windows_to_wsl_path("C:\\Users\\Foo") == "/mnt/c/Users/Foo"
+
+    def test_d_drive(self):
+        assert _windows_to_wsl_path("D:/data/pseudo") == "/mnt/d/data/pseudo"
+
+    def test_lowercase_drive(self):
+        assert _windows_to_wsl_path("c:/Users") == "/mnt/c/Users"
+
+    def test_unix_path_unchanged(self):
+        assert _windows_to_wsl_path("/mnt/c/Users") == "/mnt/c/Users"
+
+    def test_relative_path_unchanged(self):
+        assert _windows_to_wsl_path("./tmp") == "./tmp"
+
+    def test_empty_string(self):
+        assert _windows_to_wsl_path("") == ""
+
+
+# =========================================================================
+# TestPatchInputPathsForWSL
+# =========================================================================
+
+class TestPatchInputPathsForWSL:
+    """Test pw.in / dos.in path patching for WSL execution."""
+
+    def test_patches_pseudo_dir(self, tmp_path):
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n"
+            "  pseudo_dir = 'C:/Users/Sejong/pseudopotentials'\n"
+            "  outdir = './tmp'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        content = pw_in.read_text()
+        assert "/mnt/c/Users/Sejong/pseudopotentials" in content
+
+    def test_patches_outdir_absolute(self, tmp_path):
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n"
+            "  outdir = 'D:\\data\\calc\\tmp'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        content = pw_in.read_text()
+        assert "/mnt/d/data/calc/tmp" in content
+
+    def test_relative_outdir_unchanged(self, tmp_path):
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n"
+            "  outdir = './tmp'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        content = pw_in.read_text()
+        assert "'./tmp'" in content
+
+    def test_dos_in_outdir_patched(self, tmp_path):
+        dos_in = tmp_path / "dos.in"
+        dos_in.write_text(
+            "&DOS\n"
+            "  outdir = 'C:/Users/Sejong/calc/02_scf/tmp'\n"
+            "  prefix = 'shalom'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "dos.in")
+        content = dos_in.read_text()
+        assert "/mnt/c/Users/Sejong/calc/02_scf/tmp" in content
+
+    def test_no_file_no_error(self, tmp_path):
+        """Missing input file should not raise."""
+        _patch_input_paths_for_wsl(str(tmp_path), "nonexistent.in")  # no error
+
+    def test_no_windows_paths_unchanged(self, tmp_path):
+        pw_in = tmp_path / "pw.in"
+        original = (
+            "&CONTROL\n"
+            "  pseudo_dir = '/home/user/pseudo'\n"
+            "  outdir = '/tmp/calc'\n"
+            "/\n"
+        )
+        pw_in.write_text(original)
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        assert pw_in.read_text() == original
+
+
+# =========================================================================
+# TestBuildCommandWSL
+# =========================================================================
+
+class TestBuildCommandWSL:
+    """Test WSL-specific command construction."""
+
+    def test_wsl_serial(self):
+        config = ExecutionConfig(command="/opt/qe/bin/pw.x", wsl=True)
+        cmd = ExecutionRunner.build_command(config)
+        assert cmd == ["wsl", "-e", "bash", "-c", "/opt/qe/bin/pw.x"]
+
+    def test_wsl_parallel(self):
+        config = ExecutionConfig(
+            command="/opt/qe/bin/pw.x",
+            nprocs=4,
+            mpi_command="/opt/conda/bin/mpirun",
+            wsl=True,
+        )
+        cmd = ExecutionRunner.build_command(config)
+        assert cmd == [
+            "wsl", "-e", "bash", "-c",
+            "/opt/conda/bin/mpirun --allow-run-as-root -np 4 /opt/qe/bin/pw.x",
+        ]
+
+    def test_wsl_single_proc_serial(self):
+        config = ExecutionConfig(command="pw.x", nprocs=1, wsl=True)
+        cmd = ExecutionRunner.build_command(config)
+        assert cmd == ["wsl", "-e", "bash", "-c", "pw.x"]

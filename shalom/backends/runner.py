@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 MIN_RECOVERY_TIMEOUT: int = 7200                  # 2h floor for error recovery
 STDERR_TAIL_CHARS: int = 2000                     # max stderr capture characters
 
+# Regex for Windows drive letter paths (e.g. C:/Users/... or C:\Users\...)
+_WIN_PATH_RE = re.compile(r"[A-Za-z]:[/\\]")
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -73,6 +76,67 @@ class ExecutionResult:
 # ---------------------------------------------------------------------------
 # ExecutionRunner
 # ---------------------------------------------------------------------------
+
+def _windows_to_wsl_path(win_path: str) -> str:
+    """Convert a Windows path to its WSL ``/mnt/`` equivalent.
+
+    ``C:/Users/Foo`` → ``/mnt/c/Users/Foo``
+    ``D:\\data\\pseudo`` → ``/mnt/d/data/pseudo``
+
+    If the path is already a Unix path (starts with ``/``), return it unchanged.
+    """
+    if not win_path or win_path.startswith("/"):
+        return win_path
+    # Normalise backslashes
+    p = win_path.replace("\\", "/")
+    if len(p) >= 2 and p[1] == ":":
+        drive = p[0].lower()
+        rest = p[2:]  # starts with /
+        return f"/mnt/{drive}{rest}"
+    return p
+
+
+def _patch_input_paths_for_wsl(directory: str, input_file: str = "pw.in") -> None:
+    """Rewrite Windows paths inside a QE input file to WSL ``/mnt/`` paths.
+
+    Patches ``pseudo_dir``, ``outdir``, and any other path-valued keys that
+    contain Windows drive letters (e.g. ``C:/Users/...``) so that pw.x or
+    dos.x running inside WSL can resolve them.  Also converts the
+    ``cwd``-relative ``'./tmp'`` form to an absolute WSL path so that
+    chained calculations (bands/nscf reusing SCF charge density) work.
+
+    Works with both ``pw.in`` and ``dos.in`` input files.
+    """
+    input_path = os.path.join(directory, input_file)
+    if not os.path.isfile(input_path):
+        return
+
+    with open(input_path, "r") as f:
+        content = f.read()
+
+    changed = False
+    for key in ("pseudo_dir", "outdir"):
+        # Match  key = 'value'  or  key = "value"
+        pattern = re.compile(
+            rf"({key}\s*=\s*)(['\"])(.+?)\2", re.IGNORECASE,
+        )
+        match = pattern.search(content)
+        if match:
+            old_val = match.group(3)
+            if _WIN_PATH_RE.match(old_val):
+                new_val = _windows_to_wsl_path(old_val)
+                content = content[:match.start(3)] + new_val + content[match.end(3):]
+                changed = True
+                logger.debug("WSL path patch: %s = '%s' → '%s'", key, old_val, new_val)
+            elif old_val.startswith("./"):
+                # Relative paths work fine under WSL — leave them as-is.
+                # WSL inherits the Windows CWD, so ./tmp resolves correctly.
+                pass
+
+    if changed:
+        with open(input_path, "w") as f:
+            f.write(content)
+
 
 def detect_wsl_executable(command: str = "pw.x") -> bool:
     """Check whether *command* is available inside WSL (Windows only).
@@ -126,11 +190,16 @@ class ExecutionRunner:
             ``["wsl", "-e"]`` so that the executable runs inside WSL.
         """
         if config.wsl:
+            # Use "wsl -e bash -c ..." to avoid MSYS2 path mangling
+            # (Git Bash rewrites /opt/... to C:/Program Files/Git/opt/...)
             if config.nprocs <= 1:
-                return ["wsl", "-e", config.command]
-            cmd = ["wsl", "-e", config.mpi_command]
-            cmd.extend(["-np", str(config.nprocs), config.command])
-            return cmd
+                shell_cmd = config.command
+            else:
+                shell_cmd = (
+                    f"{config.mpi_command} --allow-run-as-root"
+                    f" -np {config.nprocs} {config.command}"
+                )
+            return ["wsl", "-e", "bash", "-c", shell_cmd]
 
         if config.nprocs <= 1:
             return [config.command]
@@ -257,6 +326,10 @@ class ExecutionRunner:
         Returns:
             ExecutionResult with success status, timing, and error info.
         """
+        # WSL path patching: convert Windows paths in input file so pw.x/dos.x can find them
+        if self.config.wsl:
+            _patch_input_paths_for_wsl(directory, self.config.input_file)
+
         cmd = self.build_command(self.config)
         input_path = os.path.join(directory, self.config.input_file)
         output_path = os.path.join(directory, self.config.output_file)
