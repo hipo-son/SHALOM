@@ -97,6 +97,9 @@ pyver.txt
 where.txt
 pytest_capture.txt
 manual_test*.py
+run_*.py
+si_valid*/
+si_*.png
 mock_test*.py
 import_trace*
 test_import*
