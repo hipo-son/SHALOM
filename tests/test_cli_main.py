@@ -17,25 +17,20 @@ class TestBuildParser:
         assert args.command == "run"
         assert args.material == "mp-19717"
 
-    def test_backend_flag(self):
+    @pytest.mark.parametrize("args_list,attr_name,expected", [
+        (["run", "mp-19717", "--backend", "qe"], "backend", "qe"),
+        (["run", "mp-19717", "-b", "qe"], "backend", "qe"),
+        (["run", "mp-19717", "--calc", "scf"], "calc", "scf"),
+        (["run", "mp-19717", "--accuracy", "precise"], "accuracy", "precise"),
+        (["run", "mp-19717", "--force"], "force", True),
+        (["run", "mp-19717", "--no-validate"], "no_validate", True),
+        (["run", "mp-19717", "-q"], "quiet", True),
+        (["run", "mp-19717", "-v"], "verbose", True),
+    ])
+    def test_parser_single_flag(self, args_list, attr_name, expected):
         parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "--backend", "qe"])
-        assert args.backend == "qe"
-
-    def test_short_backend(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "-b", "qe"])
-        assert args.backend == "qe"
-
-    def test_calc_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "--calc", "scf"])
-        assert args.calc == "scf"
-
-    def test_accuracy_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "--accuracy", "precise"])
-        assert args.accuracy == "precise"
+        args = parser.parse_args(args_list)
+        assert getattr(args, attr_name) == expected
 
     def test_set_values(self):
         parser = build_parser()
@@ -52,26 +47,6 @@ class TestBuildParser:
         args = parser.parse_args(["run", "--structure", "POSCAR"])
         assert args.structure == "POSCAR"
         assert args.material is None
-
-    def test_force_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "--force"])
-        assert args.force is True
-
-    def test_no_validate_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "--no-validate"])
-        assert args.no_validate is True
-
-    def test_quiet_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "-q"])
-        assert args.quiet is True
-
-    def test_verbose_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["run", "mp-19717", "-v"])
-        assert args.verbose is True
 
     def test_default_backend_is_vasp(self):
         parser = build_parser()

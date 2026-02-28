@@ -135,20 +135,6 @@ def dummy_outcar_ionic_steps(tmp_path):
 
 
 @pytest.fixture
-def dummy_outcar_scf_error(tmp_path):
-    """OUTCAR with SCF_UNCONVERGED error (NELM reached)."""
-    content = textwrap.dedent("""\
-     free  energy   TOTEN  =       -10.123456 eV
-
-     NELM reached
-     Some other output without timing section
-    """)
-    outcar_path = tmp_path / "OUTCAR"
-    outcar_path.write_text(content)
-    return str(tmp_path)
-
-
-@pytest.fixture
 def mock_band_data():
     """Synthetic band structure data (Si-like, 20 k-points, 8 bands)."""
     import numpy as np
@@ -205,20 +191,6 @@ def mock_dos_spin_path():
     return os.path.join(os.path.dirname(__file__), "fixtures", "mock_dos_spin.dat")
 
 
-@pytest.fixture
-def dummy_outcar_brmix(tmp_path):
-    """OUTCAR with BRMIX error."""
-    content = textwrap.dedent("""\
-     free  energy   TOTEN  =       -10.123456 eV
-
-     BRMIX: very serious problems
-     the old and the new charge density differ
-    """)
-    outcar_path = tmp_path / "OUTCAR"
-    outcar_path.write_text(content)
-    return str(tmp_path)
-
-
 # ---------------------------------------------------------------------------
 # Autouse: matplotlib cleanup
 # ---------------------------------------------------------------------------
@@ -249,20 +221,6 @@ def make_workflow(sample_si_diamond, tmp_path):
         defaults.update(kwargs)
         return StandardWorkflow(**defaults)
     return _factory
-
-
-@pytest.fixture
-def mock_qe_config():
-    """MagicMock of QEInputConfig with empty control/system/kpoints."""
-    cfg = MagicMock()
-    cfg.control = {}
-    cfg.system = {}
-    kpts = MagicMock()
-    kpts.grid = [4, 4, 4]
-    cfg.kpoints = kpts
-    cfg.pseudo_dir = None
-    cfg.is_2d = False
-    return cfg
 
 
 @pytest.fixture

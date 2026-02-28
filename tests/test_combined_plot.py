@@ -131,27 +131,17 @@ class TestCombinedPlotter:
         assert os.path.isfile(out)
         assert os.path.getsize(out) > 100  # not a trivially empty file
 
-    def test_energy_window(self):
+    @pytest.mark.parametrize("emin,emax", [(-3.0, 3.0), (-10.0, 10.0)])
+    def test_energy_window(self, emin, emax):
         """Energy window parameter controls y-axis limits."""
         bs = _make_band_data()
         dos = _make_dos_data()
         plotter = CombinedPlotter(bs, dos)
-        fig = plotter.plot(energy_window=(-3.0, 3.0))
+        fig = plotter.plot(energy_window=(emin, emax))
         ax_band = fig.get_axes()[0]
         ylim = ax_band.get_ylim()
-        assert ylim[0] == pytest.approx(-3.0)
-        assert ylim[1] == pytest.approx(3.0)
-
-    def test_custom_energy_window_wide(self):
-        """Wide energy window is respected."""
-        bs = _make_band_data()
-        dos = _make_dos_data()
-        plotter = CombinedPlotter(bs, dos)
-        fig = plotter.plot(energy_window=(-10.0, 10.0))
-        ax_band = fig.get_axes()[0]
-        ylim = ax_band.get_ylim()
-        assert ylim[0] == pytest.approx(-10.0)
-        assert ylim[1] == pytest.approx(10.0)
+        assert ylim[0] == pytest.approx(emin)
+        assert ylim[1] == pytest.approx(emax)
 
     def test_title(self):
         """Title parameter sets the figure suptitle."""
@@ -273,31 +263,21 @@ class TestCombinedPlotter:
         fig = plotter.plot(energy_window=(100.0, 200.0))
         assert len(fig.get_axes()) == 2
 
-    def test_mixed_spin_band_spin_dos_nonspin(self):
-        """Spin-polarized bands + non-spin DOS renders without error."""
-        bs = _make_band_data(spin=True)
-        dos = _make_dos_data(spin=False)
+    @pytest.mark.parametrize("bs_spin,dos_spin,extra_bands", [
+        (True, False, 8),   # spin-polarized bands add 8 spin-down lines
+        (False, True, 0),   # non-spin bands, no extra lines
+    ])
+    def test_mixed_spin_data(self, bs_spin, dos_spin, extra_bands):
+        """Mixed spin-polarization between bands and DOS renders without error."""
+        bs = _make_band_data(spin=bs_spin)
+        dos = _make_dos_data(spin=dos_spin)
         plotter = CombinedPlotter(bs, dos)
         fig = plotter.plot()
         assert len(fig.get_axes()) == 2
         ax_band = fig.get_axes()[0]
         lines = ax_band.get_lines()
         n_hsym = len(bs.high_sym_labels)
-        # 8 spin-up + 8 spin-down + 1 Fermi + high-sym vlines
-        assert len(lines) == 8 + 8 + 1 + n_hsym
-
-    def test_mixed_spin_band_nonspin_dos_spin(self):
-        """Non-spin bands + spin-polarized DOS renders without error."""
-        bs = _make_band_data(spin=False)
-        dos = _make_dos_data(spin=True)
-        plotter = CombinedPlotter(bs, dos)
-        fig = plotter.plot()
-        assert len(fig.get_axes()) == 2
-        ax_band = fig.get_axes()[0]
-        lines = ax_band.get_lines()
-        n_hsym = len(bs.high_sym_labels)
-        # 8 bands + 1 Fermi + high-sym vlines
-        assert len(lines) == 8 + 1 + n_hsym
+        assert len(lines) == 8 + extra_bands + 1 + n_hsym
 
     def test_width_ratios_affect_panel_widths(self):
         """Custom width_ratios actually changes panel relative widths."""

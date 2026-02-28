@@ -19,15 +19,8 @@ from shalom.workflows.standard import StandardWorkflow
 class TestDosInGeneration:
     """Verify that dos.in is written with eV units."""
 
-    def test_dos_in_emin_in_ev(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si,
-            output_dir=str(tmp_path),
-            dos_emin=-20.0,
-            dos_emax=10.0,
-            dos_deltaE=0.01,
-        )
+    def test_dos_in_emin_in_ev(self, tmp_path, make_workflow):
+        wf = make_workflow(dos_emin=-20.0, dos_emax=10.0, dos_deltaE=0.01)
         nscf_dir = str(tmp_path / "04_nscf")
         os.makedirs(nscf_dir, exist_ok=True)
         # Monkey-patch _dos_run to avoid actually running dos.x
@@ -42,9 +35,8 @@ class TestDosInGeneration:
         assert "-20.000000" in content
         assert "10.000000" in content
 
-    def test_dos_in_uses_absolute_outdir(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+    def test_dos_in_uses_absolute_outdir(self, tmp_path, make_workflow):
+        wf = make_workflow()
         nscf_dir = str(tmp_path / "04_nscf")
         os.makedirs(nscf_dir, exist_ok=True)
         wf._dos_run = MagicMock()
@@ -55,9 +47,8 @@ class TestDosInGeneration:
         content = open(os.path.join(nscf_dir, "dos.in")).read()
         assert abs_scf_tmp in content
 
-    def test_dos_in_prefix_is_shalom(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+    def test_dos_in_prefix_is_shalom(self, tmp_path, make_workflow):
+        wf = make_workflow()
         nscf_dir = str(tmp_path / "04_nscf")
         os.makedirs(nscf_dir, exist_ok=True)
         wf._dos_run = MagicMock()
@@ -78,12 +69,9 @@ class TestAbsoluteOutdir:
         """Run a workflow step and capture the outdir written to pw.in."""
         captured = {}
 
-        original_write_input = None
-
         def fake_write_input(atoms, calc_dir, config=None):
             if config is not None:
                 captured["outdir"] = config.control.get("outdir")
-            # Create a dummy pw.in so subsequent reads don't fail
             os.makedirs(calc_dir, exist_ok=True)
             with open(os.path.join(calc_dir, "pw.in"), "w") as f:
                 f.write("! placeholder\n")
@@ -92,26 +80,20 @@ class TestAbsoluteOutdir:
             workflow._pw_run = MagicMock()
             method = getattr(workflow, step_method_name)
             if step_method_name == "_run_bands":
-                si = bulk("Si", "diamond", a=5.43)
                 calc_dir = os.path.join(workflow.output_dir, "03_bands")
-                scf_tmp = "/abs/path/scf/tmp"
-                method(calc_dir, si, scf_tmp)
+                method(calc_dir, workflow.atoms, "/abs/path/scf/tmp")
             elif step_method_name == "_run_nscf":
-                si = bulk("Si", "diamond", a=5.43)
                 calc_dir = os.path.join(workflow.output_dir, "04_nscf")
-                scf_tmp = "/abs/path/scf/tmp"
-                method(calc_dir, si, scf_tmp)
+                method(calc_dir, workflow.atoms, "/abs/path/scf/tmp")
         return captured
 
-    def test_bands_uses_absolute_scf_tmp(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+    def test_bands_uses_absolute_scf_tmp(self, make_workflow):
+        wf = make_workflow()
         captured = self._capture_config_outdir("_run_bands", wf)
         assert captured.get("outdir") == "/abs/path/scf/tmp"
 
-    def test_nscf_uses_absolute_scf_tmp(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+    def test_nscf_uses_absolute_scf_tmp(self, make_workflow):
+        wf = make_workflow()
         captured = self._capture_config_outdir("_run_nscf", wf)
         assert captured.get("outdir") == "/abs/path/scf/tmp"
 
@@ -122,25 +104,14 @@ class TestAbsoluteOutdir:
 
 
 class TestFermiEnergyPriority:
-    def test_nscf_preferred_over_scf(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
-        scf_dir = tmp_path / "02_scf"
-        nscf_dir = tmp_path / "04_nscf"
-        scf_dir.mkdir()
-        nscf_dir.mkdir()
-        (scf_dir / "pw.out").write_text(
-            "the Fermi energy is   5.0000 ev\n"
-        )
-        (nscf_dir / "pw.out").write_text(
-            "the Fermi energy is   5.1234 ev\n"
-        )
-        ef = wf._get_best_fermi_energy(str(scf_dir), str(nscf_dir))
+    def test_nscf_preferred_over_scf(self, tmp_path, make_workflow, setup_fermi_dirs):
+        wf = make_workflow()
+        scf_dir, nscf_dir = setup_fermi_dirs(include_dos=False)
+        ef = wf._get_best_fermi_energy(scf_dir, nscf_dir)
         assert ef == pytest.approx(5.1234)
 
-    def test_falls_back_to_scf_if_nscf_missing(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+    def test_falls_back_to_scf_if_nscf_missing(self, tmp_path, make_workflow):
+        wf = make_workflow()
         scf_dir = tmp_path / "02_scf"
         nscf_dir = tmp_path / "04_nscf"
         scf_dir.mkdir()
@@ -151,9 +122,8 @@ class TestFermiEnergyPriority:
         ef = wf._get_best_fermi_energy(str(scf_dir), str(nscf_dir))
         assert ef == pytest.approx(4.9876)
 
-    def test_returns_none_if_both_missing(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+    def test_returns_none_if_both_missing(self, tmp_path, make_workflow):
+        wf = make_workflow()
         scf_dir = tmp_path / "02_scf"
         nscf_dir = tmp_path / "04_nscf"
         scf_dir.mkdir()
@@ -184,13 +154,9 @@ def test_standard_workflow_defaults():
 
 
 class TestPwRun:
-    def _make_wf(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        return StandardWorkflow(atoms=si, output_dir=str(tmp_path))
-
-    def test_pw_run_success(self, tmp_path):
+    def test_pw_run_success(self, tmp_path, make_workflow):
         """_pw_run succeeds when ExecutionRunner returns success."""
-        wf = self._make_wf(tmp_path)
+        wf = make_workflow()
         from unittest.mock import MagicMock, patch
 
         mock_result = MagicMock()
@@ -200,9 +166,9 @@ class TestPwRun:
             # Should not raise
             wf._pw_run(str(tmp_path))
 
-    def test_pw_run_failure_raises(self, tmp_path):
+    def test_pw_run_failure_raises(self, tmp_path, make_workflow):
         """_pw_run raises RuntimeError when runner fails."""
-        wf = self._make_wf(tmp_path)
+        wf = make_workflow()
         from unittest.mock import MagicMock, patch
 
         mock_result = MagicMock()
@@ -213,9 +179,9 @@ class TestPwRun:
             with pytest.raises(RuntimeError, match="pw.x failed"):
                 wf._pw_run(str(tmp_path))
 
-    def test_pw_run_failure_no_message(self, tmp_path):
+    def test_pw_run_failure_no_message(self, tmp_path, make_workflow):
         """_pw_run raises RuntimeError even when error_message is None."""
-        wf = self._make_wf(tmp_path)
+        wf = make_workflow()
         from unittest.mock import MagicMock, patch
 
         mock_result = MagicMock()
@@ -228,13 +194,9 @@ class TestPwRun:
 
 
 class TestDosRun:
-    def _make_wf(self, tmp_path):
-        si = bulk("Si", "diamond", a=5.43)
-        return StandardWorkflow(atoms=si, output_dir=str(tmp_path))
-
-    def test_dos_run_success(self, tmp_path):
+    def test_dos_run_success(self, tmp_path, make_workflow):
         """_dos_run succeeds silently."""
-        wf = self._make_wf(tmp_path)
+        wf = make_workflow()
         from unittest.mock import MagicMock, patch
 
         mock_result = MagicMock()
@@ -243,9 +205,9 @@ class TestDosRun:
         with patch("shalom.backends.runner.ExecutionRunner.run", return_value=mock_result):
             wf._dos_run(str(tmp_path))  # no exception
 
-    def test_dos_run_failure_only_warns(self, tmp_path):
+    def test_dos_run_failure_only_warns(self, tmp_path, make_workflow):
         """_dos_run logs warning on failure instead of raising."""
-        wf = self._make_wf(tmp_path)
+        wf = make_workflow()
         from unittest.mock import MagicMock, patch
         import logging
 
@@ -265,10 +227,9 @@ class TestDosRun:
 
 
 class TestRunVcRelax:
-    def test_returns_relaxed_structure(self, tmp_path):
+    def test_returns_relaxed_structure(self, tmp_path, make_workflow):
         """When ase_read succeeds, returns the relaxed atoms."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import MagicMock, patch
         from ase.build import bulk as ase_bulk
@@ -278,31 +239,28 @@ class TestRunVcRelax:
         with patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"), \
              patch("shalom.workflows.standard.ase_read", return_value=relaxed):
-            result = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), si)
+            result = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), wf.atoms)
 
         assert result is relaxed
 
-    def test_falls_back_to_input_on_read_failure(self, tmp_path):
+    def test_falls_back_to_input_on_read_failure(self, tmp_path, make_workflow):
         """When ase_read fails, returns the original atoms."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch
 
         with patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"), \
              patch("shalom.workflows.standard.ase_read", side_effect=Exception("parse error")):
-            result = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), si)
+            result = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), wf.atoms)
 
-        assert result is si
+        assert result is wf.atoms
 
-    def test_precise_accuracy_applied(self, tmp_path):
+    def test_precise_accuracy_applied(self, tmp_path, make_workflow):
         """Precise accuracy flag is forwarded to get_qe_preset."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path), accuracy="precise")
+        wf = make_workflow(accuracy="precise")
 
         from unittest.mock import patch, MagicMock
-        from ase.build import bulk as ase_bulk
 
         captured_acc = {}
 
@@ -318,18 +276,15 @@ class TestRunVcRelax:
         with patch("shalom.workflows.standard.get_qe_preset", side_effect=fake_preset), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"), \
-             patch("shalom.workflows.standard.ase_read", return_value=si):
-            wf._run_vc_relax(str(tmp_path / "01"), si)
+             patch("shalom.workflows.standard.ase_read", return_value=wf.atoms):
+            wf._run_vc_relax(str(tmp_path / "01"), wf.atoms)
 
         from shalom.backends._physics import AccuracyLevel
         assert captured_acc["acc"] == AccuracyLevel.PRECISE
 
-    def test_pseudo_dir_override_applied(self, tmp_path):
+    def test_pseudo_dir_override_applied(self, tmp_path, make_workflow):
         """pseudo_dir is applied to the config when set."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), pseudo_dir="/my/pseudos"
-        )
+        wf = make_workflow(pseudo_dir="/my/pseudos")
 
         from unittest.mock import patch, MagicMock
 
@@ -341,8 +296,8 @@ class TestRunVcRelax:
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"), \
-             patch("shalom.workflows.standard.ase_read", return_value=si):
-            wf._run_vc_relax(str(tmp_path / "01"), si)
+             patch("shalom.workflows.standard.ase_read", return_value=wf.atoms):
+            wf._run_vc_relax(str(tmp_path / "01"), wf.atoms)
 
         assert config_obj.pseudo_dir == "/my/pseudos"
 
@@ -353,10 +308,9 @@ class TestRunVcRelax:
 
 
 class TestRunScf:
-    def test_creates_directory_and_runs(self, tmp_path):
+    def test_creates_directory_and_runs(self, tmp_path, make_workflow):
         """_run_scf creates calc_dir and calls write_input + _pw_run."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         scf_dir = str(tmp_path / "02_scf")
         from unittest.mock import patch, MagicMock, call
@@ -368,18 +322,15 @@ class TestRunScf:
 
         with patch("shalom.backends.qe.QEBackend.write_input", side_effect=fake_write), \
              patch.object(wf, "_pw_run") as mock_pw:
-            wf._run_scf(scf_dir, si)
+            wf._run_scf(scf_dir, wf.atoms)
 
         assert len(write_calls) == 1
         assert write_calls[0] == scf_dir
         mock_pw.assert_called_once_with(scf_dir)
 
-    def test_pseudo_dir_override(self, tmp_path):
+    def test_pseudo_dir_override(self, tmp_path, make_workflow):
         """pseudo_dir is forwarded to config."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), pseudo_dir="/pseudo"
-        )
+        wf = make_workflow(pseudo_dir="/pseudo")
 
         from unittest.mock import patch, MagicMock
 
@@ -391,7 +342,7 @@ class TestRunScf:
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"):
-            wf._run_scf(str(tmp_path / "02"), si)
+            wf._run_scf(str(tmp_path / "02"), wf.atoms)
 
         assert config_obj.pseudo_dir == "/pseudo"
 
@@ -402,10 +353,9 @@ class TestRunScf:
 
 
 class TestRunBandsExtended:
-    def test_uses_cached_kpath(self, tmp_path):
+    def test_uses_cached_kpath(self, tmp_path, make_workflow):
         """_run_bands uses self._kpath_cfg when available."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch, MagicMock
         from shalom.backends.qe_config import QEKPointsConfig
@@ -421,14 +371,13 @@ class TestRunBandsExtended:
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"):
-            wf._run_bands(str(tmp_path / "03"), si, "/fake/scf/tmp")
+            wf._run_bands(str(tmp_path / "03"), wf.atoms, "/fake/scf/tmp")
 
         assert config_obj.kpoints is cached_kpath
 
-    def test_generates_kpath_when_no_cache(self, tmp_path):
+    def test_generates_kpath_when_no_cache(self, tmp_path, make_workflow):
         """_run_bands generates kpath when _kpath_cfg is None."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         wf._kpath_cfg = None
 
         from unittest.mock import patch, MagicMock
@@ -445,14 +394,13 @@ class TestRunBandsExtended:
              patch("shalom.workflows.standard.generate_band_kpath", return_value=generated_kpath), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"):
-            wf._run_bands(str(tmp_path / "03"), si, "/fake/scf/tmp")
+            wf._run_bands(str(tmp_path / "03"), wf.atoms, "/fake/scf/tmp")
 
         assert config_obj.kpoints is generated_kpath
 
-    def test_nbnd_set_in_system(self, tmp_path):
+    def test_nbnd_set_in_system(self, tmp_path, make_workflow):
         """_run_bands auto-computes nbnd and adds it to config.system."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch, MagicMock
         from shalom.backends.qe_config import QEKPointsConfig
@@ -467,7 +415,7 @@ class TestRunBandsExtended:
                    return_value=QEKPointsConfig(mode="crystal_b")), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"):
-            wf._run_bands(str(tmp_path / "03"), si, "/fake/scf/tmp")
+            wf._run_bands(str(tmp_path / "03"), wf.atoms, "/fake/scf/tmp")
 
         assert "nbnd" in config_obj.system
         assert config_obj.system["nbnd"] >= 20
@@ -479,10 +427,9 @@ class TestRunBandsExtended:
 
 
 class TestRunNscfExtended:
-    def test_creates_dir_and_runs(self, tmp_path):
+    def test_creates_dir_and_runs(self, tmp_path, make_workflow):
         """_run_nscf creates directory, writes input, runs pw.x."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         nscf_dir = str(tmp_path / "04_nscf")
         from unittest.mock import patch, MagicMock
@@ -494,7 +441,7 @@ class TestRunNscfExtended:
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input") as mock_write, \
              patch.object(wf, "_pw_run") as mock_pw:
-            wf._run_nscf(nscf_dir, si, "/abs/scf/tmp")
+            wf._run_nscf(nscf_dir, wf.atoms, "/abs/scf/tmp")
 
         mock_write.assert_called_once()
         mock_pw.assert_called_once_with(nscf_dir)
@@ -507,10 +454,9 @@ class TestRunNscfExtended:
 
 
 class TestPlotBands:
-    def test_returns_none_when_no_xml(self, tmp_path):
+    def test_returns_none_when_no_xml(self, tmp_path, make_workflow):
         """Returns None when no bands XML found."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch
 
@@ -519,10 +465,9 @@ class TestPlotBands:
 
         assert result is None
 
-    def test_returns_none_when_no_matplotlib(self, tmp_path):
+    def test_returns_none_when_no_matplotlib(self, tmp_path, make_workflow):
         """Returns None when matplotlib is not installed (import fails)."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch
         import sys
@@ -534,10 +479,9 @@ class TestPlotBands:
 
         assert result is None
 
-    def test_plot_bands_full_pipeline(self, tmp_path):
+    def test_plot_bands_full_pipeline(self, tmp_path, make_workflow):
         """_plot_bands calls plotter and returns output path."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch, MagicMock
         from shalom.backends.base import BandStructureData
@@ -569,10 +513,9 @@ class TestPlotBands:
         mock_plotter.plot.assert_called_once()
         assert result == os.path.join(str(tmp_path), "bands.png")
 
-    def test_plot_bands_gap_collapse(self, tmp_path):
+    def test_plot_bands_gap_collapse(self, tmp_path, make_workflow):
         """Gap at discontinuity label 'X|U' is removed from kpath_distances."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         from unittest.mock import patch, MagicMock
         from shalom.backends.base import BandStructureData
@@ -623,18 +566,16 @@ class TestPlotBands:
 
 
 class TestPlotDos:
-    def test_returns_none_when_no_dos_file(self, tmp_path):
+    def test_returns_none_when_no_dos_file(self, tmp_path, make_workflow):
         """Returns None when pwscf.dos doesn't exist."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         result = wf._plot_dos(str(tmp_path / "04_nscf"), fermi=5.0)
         assert result is None
 
-    def test_plot_dos_full_pipeline(self, tmp_path):
+    def test_plot_dos_full_pipeline(self, tmp_path, make_workflow):
         """_plot_dos calls DOSPlotter and returns output path."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         nscf_dir = tmp_path / "04_nscf"
         nscf_dir.mkdir()
@@ -662,10 +603,9 @@ class TestPlotDos:
         # Fermi energy was injected
         assert fake_dos.fermi_energy == pytest.approx(5.0)
 
-    def test_plot_dos_none_fermi_not_set(self, tmp_path):
+    def test_plot_dos_none_fermi_not_set(self, tmp_path, make_workflow):
         """When fermi=None, fermi_energy is not set on DOSData."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         nscf_dir = tmp_path / "04_nscf"
         nscf_dir.mkdir()
@@ -698,10 +638,10 @@ class TestPlotDos:
 
 
 class TestRunFull:
-    def _mock_wf_run(self, wf, si, tmp_path):
+    def _mock_wf_run(self, wf, tmp_path, minimal_dos_data, setup_fermi_dirs):
         """Run wf.run() with all pw.x/plotting mocked out."""
         from unittest.mock import patch, MagicMock
-        from shalom.backends.base import BandStructureData, DOSData
+        from shalom.backends.base import BandStructureData
         import numpy as np
 
         fake_bs = BandStructureData(
@@ -711,21 +651,9 @@ class TestRunFull:
             high_sym_labels={},
             source="qe",
         )
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
-        dos_dir = tmp_path / "04_nscf"
-        dos_dir.mkdir(parents=True, exist_ok=True)
-        (dos_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
-        (dos_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
+        setup_fermi_dirs()
 
         mock_band_plotter = MagicMock()
         mock_dos_plotter = MagicMock()
@@ -739,13 +667,10 @@ class TestRunFull:
              patch("shalom.plotting.dos_plot.DOSPlotter", return_value=mock_dos_plotter):
             return wf.run()
 
-    def test_run_skip_relax_returns_dict(self, tmp_path):
+    def test_run_skip_relax_returns_dict(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """run() with skip_relax=True returns expected keys."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True
-        )
-        result = self._mock_wf_run(wf, si, tmp_path)
+        wf = make_workflow(skip_relax=True)
+        result = self._mock_wf_run(wf, tmp_path, minimal_dos_data, setup_fermi_dirs)
 
         assert "atoms" in result
         assert "fermi_energy" in result
@@ -753,38 +678,29 @@ class TestRunFull:
         assert "dos_png" in result
         assert "calc_dirs" in result
 
-    def test_run_fermi_energy_from_nscf(self, tmp_path):
+    def test_run_fermi_energy_from_nscf(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """run() extracts Fermi energy from NSCF pw.out (priority)."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True
-        )
-        result = self._mock_wf_run(wf, si, tmp_path)
+        wf = make_workflow(skip_relax=True)
+        result = self._mock_wf_run(wf, tmp_path, minimal_dos_data, setup_fermi_dirs)
 
         assert result["fermi_energy"] == pytest.approx(5.1234, rel=1e-4)
 
-    def test_run_calc_dirs_has_all_steps(self, tmp_path):
+    def test_run_calc_dirs_has_all_steps(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """run() result contains all 4 calc_dir keys."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True
-        )
-        result = self._mock_wf_run(wf, si, tmp_path)
+        wf = make_workflow(skip_relax=True)
+        result = self._mock_wf_run(wf, tmp_path, minimal_dos_data, setup_fermi_dirs)
 
         assert "vc_relax" in result["calc_dirs"]
         assert "scf" in result["calc_dirs"]
         assert "bands" in result["calc_dirs"]
         assert "nscf" in result["calc_dirs"]
 
-    def test_run_with_relax_calls_vc_relax(self, tmp_path):
+    def test_run_with_relax_calls_vc_relax(self, tmp_path, make_workflow, minimal_dos_data):
         """run() without skip_relax invokes _run_vc_relax."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=False
-        )
+        wf = make_workflow(skip_relax=False)
 
         from unittest.mock import patch, MagicMock
-        from shalom.backends.base import BandStructureData, DOSData
+        from shalom.backends.base import BandStructureData
         import numpy as np
 
         fake_bs = BandStructureData(
@@ -794,12 +710,7 @@ class TestRunFull:
             high_sym_labels={},
             source="qe",
         )
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         dos_dir = tmp_path / "04_nscf"
         dos_dir.mkdir(parents=True, exist_ok=True)
@@ -830,24 +741,18 @@ class TestRunFull:
 
         assert len(vc_relax_called) == 1
 
-    def test_run_kpath_cache_populated(self, tmp_path):
+    def test_run_kpath_cache_populated(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """After run(), _kpath_cfg and _calc_atoms are populated."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True
-        )
-        self._mock_wf_run(wf, si, tmp_path)
+        wf = make_workflow(skip_relax=True)
+        self._mock_wf_run(wf, tmp_path, minimal_dos_data, setup_fermi_dirs)
 
         assert wf._kpath_cfg is not None
         assert wf._calc_atoms is not None
 
-    def test_run_png_paths_in_output_dir(self, tmp_path):
+    def test_run_png_paths_in_output_dir(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """bands.png and dos.png are in the output_dir."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True
-        )
-        result = self._mock_wf_run(wf, si, tmp_path)
+        wf = make_workflow(skip_relax=True)
+        result = self._mock_wf_run(wf, tmp_path, minimal_dos_data, setup_fermi_dirs)
 
         if result["bands_png"] is not None:
             assert result["bands_png"].startswith(str(tmp_path))
@@ -911,13 +816,9 @@ class TestBandsXMLPreservation:
 class TestDosInUnitDefense:
     """Ensure dos.in values are in eV range, never Ry range."""
 
-    def test_dos_in_not_in_ry_range(self, tmp_path):
+    def test_dos_in_not_in_ry_range(self, tmp_path, make_workflow):
         """dos.in Emin/Emax must NOT be in Ry range (validates eV fix)."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            dos_emin=-20.0, dos_emax=10.0, dos_deltaE=0.01,
-        )
+        wf = make_workflow(dos_emin=-20.0, dos_emax=10.0, dos_deltaE=0.01)
         nscf_dir = str(tmp_path / "04_nscf")
         os.makedirs(nscf_dir, exist_ok=True)
         wf._dos_run = MagicMock()
@@ -977,10 +878,9 @@ class TestParameterValidation:
 class TestPreflightValidation:
     """StandardWorkflow._validate_environment warns on missing executables."""
 
-    def test_warns_when_pw_missing(self, tmp_path, caplog):
+    def test_warns_when_pw_missing(self, tmp_path, caplog, make_workflow):
         import logging
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         # Mock shutil.which to return None for all executables
         with patch("shutil.which", return_value=None):
             with caplog.at_level(logging.WARNING):
@@ -989,13 +889,9 @@ class TestPreflightValidation:
         assert "pw.x" in caplog.text
         assert "dos.x" in caplog.text
 
-    def test_warns_when_pseudo_dir_missing(self, tmp_path, caplog):
+    def test_warns_when_pseudo_dir_missing(self, tmp_path, caplog, make_workflow):
         import logging
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            pseudo_dir="/nonexistent/pseudo/dir",
-        )
+        wf = make_workflow(pseudo_dir="/nonexistent/pseudo/dir")
         with caplog.at_level(logging.WARNING):
             wf._validate_environment()
         assert "pseudo_dir" in caplog.text
@@ -1105,7 +1001,7 @@ class TestProgressHelpers:
             wf._log_step_end(1, 5, "vc-relax", t0)
         assert "m" in caplog.text  # should show Nm format
 
-    def test_extract_pw_summary_with_total_energy(self, tmp_path):
+    def test_extract_pw_summary_with_total_energy(self, tmp_path, make_workflow):
         """_extract_pw_summary extracts total energy with correct Ry→eV conversion."""
         pw_out = tmp_path / "pw.out"
         pw_out.write_text(
@@ -1114,8 +1010,7 @@ class TestProgressHelpers:
             "     convergence has been achieved in   8 iterations\n"
             "          iteration #   8     ecut=    60.00 Ry\n"
         )
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         summary = wf._extract_pw_summary(str(pw_out))
         # Verify Ry→eV conversion: -15.850 * 13.6057 ≈ -215.6
         assert "-215." in summary
@@ -1124,23 +1019,21 @@ class TestProgressHelpers:
         assert "8 SCF iter" in summary
         assert "converged" in summary
 
-    def test_extract_pw_summary_no_file(self, tmp_path):
+    def test_extract_pw_summary_no_file(self, tmp_path, make_workflow):
         """_extract_pw_summary returns empty string for missing file."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         summary = wf._extract_pw_summary(str(tmp_path / "nonexistent.out"))
         assert summary == ""
 
-    def test_extract_pw_summary_empty_file(self, tmp_path):
+    def test_extract_pw_summary_empty_file(self, tmp_path, make_workflow):
         """_extract_pw_summary returns empty string for empty file."""
         pw_out = tmp_path / "pw.out"
         pw_out.write_text("")
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         summary = wf._extract_pw_summary(str(pw_out))
         assert summary == ""
 
-    def test_extract_pw_summary_partial_data(self, tmp_path):
+    def test_extract_pw_summary_partial_data(self, tmp_path, make_workflow):
         """_extract_pw_summary handles partial output (no Fermi)."""
         pw_out = tmp_path / "pw.out"
         pw_out.write_text(
@@ -1148,8 +1041,7 @@ class TestProgressHelpers:
             "     convergence has been achieved in   5 iterations\n"
             "          iteration #   5     ecut=    60.00 Ry\n"
         )
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         summary = wf._extract_pw_summary(str(pw_out))
         assert "eV" in summary
         assert "5 SCF iter" in summary
@@ -1157,7 +1049,7 @@ class TestProgressHelpers:
         # No Fermi energy line → no Ef=
         assert "Ef=" not in summary
 
-    def test_extract_pw_summary_not_converged(self, tmp_path):
+    def test_extract_pw_summary_not_converged(self, tmp_path, make_workflow):
         """_extract_pw_summary without convergence line omits 'converged'."""
         pw_out = tmp_path / "pw.out"
         pw_out.write_text(
@@ -1165,8 +1057,7 @@ class TestProgressHelpers:
             "     the Fermi energy is     5.0000 ev\n"
             "          iteration #  50     ecut=    60.00 Ry\n"
         )
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         summary = wf._extract_pw_summary(str(pw_out))
         assert "eV" in summary
         assert "50 SCF iter" in summary
@@ -1181,15 +1072,9 @@ class TestProgressHelpers:
 class TestStepErrorHandling:
     """Test run() with step failures (mock _pw_run to raise RuntimeError)."""
 
-    def _make_workflow(self, tmp_path, skip_relax=True):
-        si = bulk("Si", "diamond", a=5.43)
-        return StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=skip_relax,
-        )
-
-    def test_scf_failure_returns_failed_step(self, tmp_path):
+    def test_scf_failure_returns_failed_step(self, tmp_path, make_workflow):
         """SCF failure sets failed_step='scf' and returns immediately."""
-        wf = self._make_workflow(tmp_path)
+        wf = make_workflow(skip_relax=True)
         with patch.object(wf, "_pw_run", side_effect=RuntimeError("SCF diverged")), \
              patch.object(wf, "_dos_run"):
             result = wf.run()
@@ -1200,9 +1085,9 @@ class TestStepErrorHandling:
         assert "bands" not in step_names
         assert "nscf" not in step_names
 
-    def test_bands_failure_nscf_still_runs(self, tmp_path):
+    def test_bands_failure_nscf_still_runs(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """Bands failure does not prevent NSCF from running."""
-        wf = self._make_workflow(tmp_path)
+        wf = make_workflow(skip_relax=True)
         call_count = [0]
 
         def failing_pw_run(calc_dir):
@@ -1211,23 +1096,9 @@ class TestStepErrorHandling:
                 raise RuntimeError("bands pw.x crashed")
             # Otherwise succeed (scf, nscf)
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True, exist_ok=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        setup_fermi_dirs()
 
-        from shalom.backends.base import BandStructureData, DOSData
-        import numpy as np
-
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run", side_effect=failing_pw_run), \
              patch.object(wf, "_dos_run"), \
@@ -1243,9 +1114,9 @@ class TestStepErrorHandling:
         assert len(bands_status) == 1
         assert bands_status[0].success is False
 
-    def test_nscf_failure_skips_dos(self, tmp_path):
+    def test_nscf_failure_skips_dos(self, tmp_path, make_workflow):
         """NSCF failure causes DOS step to be skipped."""
-        wf = self._make_workflow(tmp_path)
+        wf = make_workflow(skip_relax=True)
 
         def failing_pw_run(calc_dir):
             if "04_nscf" in calc_dir:
@@ -1265,9 +1136,9 @@ class TestStepErrorHandling:
         assert dos_status[0].success is False
         assert "skipped" in (dos_status[0].error_message or "").lower()
 
-    def test_vc_relax_failure_continues(self, tmp_path):
+    def test_vc_relax_failure_continues(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """vc-relax failure is non-fatal: workflow continues with input geometry."""
-        wf = self._make_workflow(tmp_path, skip_relax=False)
+        wf = make_workflow(skip_relax=False)
 
         call_count = [0]
 
@@ -1277,22 +1148,9 @@ class TestStepErrorHandling:
                 raise RuntimeError("vc-relax failed")
             # Otherwise succeed
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True, exist_ok=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        setup_fermi_dirs()
 
-        from shalom.backends.base import DOSData
-        import numpy as np
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run", side_effect=failing_pw_run), \
              patch.object(wf, "_dos_run"), \
@@ -1307,26 +1165,13 @@ class TestStepErrorHandling:
         # SCF should still have run
         assert "scf" in result["completed_steps"]
 
-    def test_step_results_in_output(self, tmp_path):
+    def test_step_results_in_output(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """run() output contains step_results, completed_steps, failed_step keys."""
-        wf = self._make_workflow(tmp_path)
+        wf = make_workflow(skip_relax=True)
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True, exist_ok=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        setup_fermi_dirs()
 
-        from shalom.backends.base import DOSData
-        import numpy as np
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run"), \
              patch.object(wf, "_dos_run"), \
@@ -1350,20 +1195,18 @@ class TestStepErrorHandling:
 class TestResume:
     """Test _save_checkpoint, _load_checkpoint, resume skips."""
 
-    def test_save_checkpoint_creates_file(self, tmp_path):
+    def test_save_checkpoint_creates_file(self, tmp_path, make_workflow):
         """_save_checkpoint writes workflow_state.json."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         os.makedirs(str(tmp_path), exist_ok=True)
         wf._save_checkpoint(["vc_relax", "scf"])
         ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
         assert os.path.isfile(ckpt_path)
 
-    def test_save_checkpoint_content(self, tmp_path):
+    def test_save_checkpoint_content(self, tmp_path, make_workflow):
         """_save_checkpoint writes correct JSON content."""
         import json
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         os.makedirs(str(tmp_path), exist_ok=True)
         wf._save_checkpoint(["vc_relax", "scf"])
 
@@ -1374,27 +1217,24 @@ class TestResume:
         assert data["completed_steps"] == ["vc_relax", "scf"]
         assert "timestamp" in data
 
-    def test_load_checkpoint_returns_data(self, tmp_path):
+    def test_load_checkpoint_returns_data(self, tmp_path, make_workflow):
         """_load_checkpoint returns saved data."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         os.makedirs(str(tmp_path), exist_ok=True)
         wf._save_checkpoint(["vc_relax", "scf", "bands"])
         ckpt = wf._load_checkpoint()
         assert ckpt is not None
         assert ckpt["completed_steps"] == ["vc_relax", "scf", "bands"]
 
-    def test_load_checkpoint_returns_none_when_missing(self, tmp_path):
+    def test_load_checkpoint_returns_none_when_missing(self, tmp_path, make_workflow):
         """_load_checkpoint returns None when no checkpoint file."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         ckpt = wf._load_checkpoint()
         assert ckpt is None
 
-    def test_load_checkpoint_handles_corrupt_json(self, tmp_path):
+    def test_load_checkpoint_handles_corrupt_json(self, tmp_path, make_workflow):
         """_load_checkpoint returns None for corrupt JSON."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         os.makedirs(str(tmp_path), exist_ok=True)
         ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
         with open(ckpt_path, "w") as f:
@@ -1402,10 +1242,9 @@ class TestResume:
         ckpt = wf._load_checkpoint()
         assert ckpt is None
 
-    def test_resume_skips_completed_steps(self, tmp_path):
+    def test_resume_skips_completed_steps(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """resume=True skips already-completed steps."""
         import json
-        si = bulk("Si", "diamond", a=5.43)
 
         # Create a checkpoint saying vc_relax and scf are done
         os.makedirs(str(tmp_path), exist_ok=True)
@@ -1413,33 +1252,16 @@ class TestResume:
         with open(ckpt_path, "w") as f:
             json.dump({"version": 1, "completed_steps": ["vc_relax", "scf"]}, f)
 
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            skip_relax=False, resume=True,
-        )
+        wf = make_workflow(skip_relax=False, resume=True)
 
         pw_run_dirs = []
 
         def tracking_pw_run(calc_dir):
             pw_run_dirs.append(calc_dir)
 
-        # Create scf pw.out for fermi extraction
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True, exist_ok=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        setup_fermi_dirs()
 
-        from shalom.backends.base import DOSData
-        import numpy as np
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run", side_effect=tracking_pw_run), \
              patch.object(wf, "_dos_run"), \
@@ -1471,13 +1293,10 @@ class TestResume:
 class TestValidateEnvironmentWSL:
     """Test _validate_environment with wsl=True."""
 
-    def test_wsl_mode_uses_detect_wsl_executable(self, tmp_path, caplog):
+    def test_wsl_mode_uses_detect_wsl_executable(self, tmp_path, caplog, make_workflow):
         """WSL mode calls detect_wsl_executable instead of shutil.which."""
         import logging
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), wsl=True,
-        )
+        wf = make_workflow(wsl=True)
         with patch("shalom.backends.runner.detect_wsl_executable", return_value=False) as mock_detect, \
              caplog.at_level(logging.WARNING, logger="shalom.workflows.standard"):
             wf._validate_environment()
@@ -1491,27 +1310,20 @@ class TestValidateEnvironmentWSL:
         assert "pw.x" in caplog.text
         assert "dos.x" in caplog.text
 
-    def test_wsl_mode_no_warning_when_found(self, tmp_path, caplog):
+    def test_wsl_mode_no_warning_when_found(self, tmp_path, caplog, make_workflow):
         """WSL mode with executables found does not log warnings."""
         import logging
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), wsl=True,
-        )
+        wf = make_workflow(wsl=True)
         with patch("shalom.backends.runner.detect_wsl_executable", return_value=True), \
              caplog.at_level(logging.WARNING, logger="shalom.workflows.standard"):
             wf._validate_environment()
 
         assert "not found" not in caplog.text
 
-    def test_wsl_mode_skips_pseudo_dir_check(self, tmp_path, caplog):
+    def test_wsl_mode_skips_pseudo_dir_check(self, tmp_path, caplog, make_workflow):
         """WSL mode skips pseudo_dir validation (Windows path cannot be resolved)."""
         import logging
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), wsl=True,
-            pseudo_dir="/nonexistent/pseudo_dir",
-        )
+        wf = make_workflow(wsl=True, pseudo_dir="/nonexistent/pseudo_dir")
         with patch("shalom.backends.runner.detect_wsl_executable", return_value=True), \
              caplog.at_level(logging.WARNING, logger="shalom.workflows.standard"):
             wf._validate_environment()
@@ -1528,13 +1340,9 @@ class TestValidateEnvironmentWSL:
 class TestNscfKmeshOverride:
     """Test _run_nscf with custom nscf_kmesh parameter."""
 
-    def test_explicit_nscf_kmesh_applied(self, tmp_path):
+    def test_explicit_nscf_kmesh_applied(self, tmp_path, make_workflow):
         """Explicit nscf_kmesh is used as the k-grid."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            nscf_kmesh=[8, 8, 8],
-        )
+        wf = make_workflow(nscf_kmesh=[8, 8, 8])
 
         captured_grid = {}
 
@@ -1549,18 +1357,14 @@ class TestNscfKmeshOverride:
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"):
-            wf._run_nscf(str(tmp_path / "04_nscf"), si, "/abs/scf/tmp")
+            wf._run_nscf(str(tmp_path / "04_nscf"), wf.atoms, "/abs/scf/tmp")
 
         # Grid should have been set to [8, 8, 8]
         assert config_obj.kpoints.grid == [8, 8, 8]
 
-    def test_default_nscf_kpr_when_no_kmesh(self, tmp_path):
+    def test_default_nscf_kpr_when_no_kmesh(self, tmp_path, make_workflow):
         """When nscf_kmesh is None, DEFAULT_NSCF_KPR is used to compute grid."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            nscf_kmesh=None,
-        )
+        wf = make_workflow(nscf_kmesh=None)
 
         config_obj = MagicMock()
         config_obj.control = {}
@@ -1577,7 +1381,7 @@ class TestNscfKmeshOverride:
                  "shalom.backends._physics.compute_kpoints_grid",
                  return_value=[6, 6, 6],
              ) as mock_compute:
-            wf._run_nscf(str(tmp_path / "04_nscf"), si, "/abs/scf/tmp")
+            wf._run_nscf(str(tmp_path / "04_nscf"), wf.atoms, "/abs/scf/tmp")
 
         # compute_kpoints_grid was called with DEFAULT_NSCF_KPR
         from shalom.backends._physics import DEFAULT_NSCF_KPR
@@ -1608,13 +1412,9 @@ class TestNscfKmeshOverride:
         assert isinstance(DEFAULT_NSCF_KPR, float)
         assert DEFAULT_NSCF_KPR == 20.0
 
-    def test_nscf_2d_passes_is_2d_true(self, tmp_path):
+    def test_nscf_2d_passes_is_2d_true(self, tmp_path, make_workflow):
         """When is_2d=True, compute_kpoints_grid receives is_2d=True."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            nscf_kmesh=None,
-        )
+        wf = make_workflow(nscf_kmesh=None)
 
         config_obj = MagicMock()
         config_obj.control = {}
@@ -1631,7 +1431,7 @@ class TestNscfKmeshOverride:
                  "shalom.backends._physics.compute_kpoints_grid",
                  return_value=[6, 6, 1],
              ) as mock_compute:
-            wf._run_nscf(str(tmp_path / "04_nscf"), si, "/abs/scf/tmp")
+            wf._run_nscf(str(tmp_path / "04_nscf"), wf.atoms, "/abs/scf/tmp")
 
         # is_2d should be passed through
         mock_compute.assert_called_once()
@@ -1647,42 +1447,25 @@ class TestNscfKmeshOverride:
 class TestResumeEdgeCases:
     """Additional resume edge case tests."""
 
-    def test_partial_checkpoint_reruns_remaining(self, tmp_path):
+    def test_partial_checkpoint_reruns_remaining(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """Checkpoint with only vc_relax done → SCF re-runs."""
         import json
-        si = bulk("Si", "diamond", a=5.43)
 
         os.makedirs(str(tmp_path), exist_ok=True)
         ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
         with open(ckpt_path, "w") as f:
             json.dump({"version": 1, "completed_steps": ["vc_relax"]}, f)
 
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            skip_relax=False, resume=True,
-        )
+        wf = make_workflow(skip_relax=False, resume=True)
 
         pw_run_dirs = []
 
         def tracking_pw_run(calc_dir):
             pw_run_dirs.append(calc_dir)
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True, exist_ok=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        setup_fermi_dirs()
 
-        from shalom.backends.base import DOSData
-        import numpy as np
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run", side_effect=tracking_pw_run), \
              patch.object(wf, "_dos_run"), \
@@ -1701,42 +1484,25 @@ class TestResumeEdgeCases:
         assert len(resumed_steps) == 1
         assert resumed_steps[0].name == "vc_relax"
 
-    def test_empty_completed_steps_checkpoint(self, tmp_path):
+    def test_empty_completed_steps_checkpoint(self, tmp_path, make_workflow, minimal_dos_data, setup_fermi_dirs):
         """Checkpoint with empty completed_steps acts like no checkpoint."""
         import json
-        si = bulk("Si", "diamond", a=5.43)
 
         os.makedirs(str(tmp_path), exist_ok=True)
         ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
         with open(ckpt_path, "w") as f:
             json.dump({"version": 1, "completed_steps": []}, f)
 
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            skip_relax=True, resume=True,
-        )
+        wf = make_workflow(skip_relax=True, resume=True)
 
         pw_run_dirs = []
 
         def tracking_pw_run(calc_dir):
             pw_run_dirs.append(calc_dir)
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True, exist_ok=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True, exist_ok=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
-        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        setup_fermi_dirs()
 
-        from shalom.backends.base import DOSData
-        import numpy as np
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run", side_effect=tracking_pw_run), \
              patch.object(wf, "_dos_run"), \
@@ -1747,11 +1513,10 @@ class TestResumeEdgeCases:
         # SCF should have run (not skipped)
         assert any("02_scf" in d for d in pw_run_dirs)
 
-    def test_checkpoint_version_mismatch_ignored(self, tmp_path):
+    def test_checkpoint_version_mismatch_ignored(self, tmp_path, make_workflow):
         """Checkpoint with unknown version is still loaded (no validation)."""
         import json
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
         os.makedirs(str(tmp_path), exist_ok=True)
         ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
         with open(ckpt_path, "w") as f:
@@ -1770,19 +1535,11 @@ class TestResumeEdgeCases:
 class TestDosFailureHandling:
     """Verify dos.x errors are caught and recorded in step_results."""
 
-    def test_dos_failure_does_not_crash_workflow(self, tmp_path):
+    def test_dos_failure_does_not_crash_workflow(self, tmp_path, make_workflow, setup_fermi_dirs):
         """OSError in _run_dos is caught; step_results records failure."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True,
-        )
+        wf = make_workflow(skip_relax=True)
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
+        setup_fermi_dirs(include_dos=False)
 
         with patch.object(wf, "_pw_run"), \
              patch.object(wf, "_run_dos", side_effect=OSError("disk full")), \
@@ -1797,19 +1554,11 @@ class TestDosFailureHandling:
         # Workflow should still complete (not crash)
         assert result["step_results"] is not None
 
-    def test_dos_failure_does_not_block_plotting(self, tmp_path):
+    def test_dos_failure_does_not_block_plotting(self, tmp_path, make_workflow, setup_fermi_dirs):
         """Even if dos.x fails, band plot is still attempted."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path), skip_relax=True,
-        )
+        wf = make_workflow(skip_relax=True)
 
-        scf_dir = tmp_path / "02_scf"
-        scf_dir.mkdir(parents=True)
-        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
-        nscf_dir = tmp_path / "04_nscf"
-        nscf_dir.mkdir(parents=True)
-        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
+        setup_fermi_dirs(include_dos=False)
 
         plot_bands_called = []
 
@@ -1835,10 +1584,9 @@ class TestDosFailureHandling:
 class TestCheckpointOSError:
     """_save_checkpoint should not crash on OSError."""
 
-    def test_save_checkpoint_disk_error_does_not_crash(self, tmp_path):
+    def test_save_checkpoint_disk_error_does_not_crash(self, tmp_path, make_workflow):
         """OSError during checkpoint write logs a warning, doesn't raise."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        wf = make_workflow()
 
         with patch("builtins.open", side_effect=OSError("disk full")):
             # Should not raise
@@ -1896,10 +1644,9 @@ class TestNscfKmeshValidation:
 class TestResumeMissingSCFOutput:
     """Resume detects missing pw.out and re-runs SCF."""
 
-    def test_resume_missing_scf_output_reruns(self, tmp_path):
+    def test_resume_missing_scf_output_reruns(self, tmp_path, make_workflow, minimal_dos_data):
         """Checkpoint says SCF done but pw.out missing → SCF is re-run."""
         import json
-        si = bulk("Si", "diamond", a=5.43)
 
         os.makedirs(str(tmp_path), exist_ok=True)
         ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
@@ -1909,10 +1656,7 @@ class TestResumeMissingSCFOutput:
                 "completed_steps": ["vc_relax", "scf"],
             }, f)
 
-        wf = StandardWorkflow(
-            atoms=si, output_dir=str(tmp_path),
-            skip_relax=False, resume=True,
-        )
+        wf = make_workflow(skip_relax=False, resume=True)
 
         pw_run_dirs = []
 
@@ -1927,14 +1671,7 @@ class TestResumeMissingSCFOutput:
         nscf_dir.mkdir(parents=True, exist_ok=True)
         (nscf_dir / "pw.out").write_text("the Fermi energy is   5.0 ev\n")
 
-        import numpy as np
-        from shalom.backends.base import DOSData
-        fake_dos = DOSData(
-            energies=np.array([0.0]),
-            dos=np.array([1.0]),
-            integrated_dos=np.array([0.0]),
-            source="qe",
-        )
+        fake_dos = minimal_dos_data
 
         with patch.object(wf, "_pw_run", side_effect=tracking_pw_run), \
              patch.object(wf, "_dos_run"), \
