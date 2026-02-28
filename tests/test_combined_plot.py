@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import MagicMock, patch
-
 import matplotlib
 matplotlib.use("Agg")
 
@@ -96,8 +94,6 @@ class TestCombinedPlotter:
         assert isinstance(fig, matplotlib.figure.Figure)
         # Figure should have 2 axes (band + dos)
         assert len(fig.get_axes()) == 2
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_png_output(self, tmp_path):
         """CombinedPlotter.plot() saves PNG to disk."""
@@ -108,8 +104,6 @@ class TestCombinedPlotter:
         fig = plotter.plot(output_path=out)
         assert os.path.isfile(out)
         assert os.path.getsize(out) > 0
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_spin_polarized(self):
         """CombinedPlotter correctly draws spin-up and spin-down bands."""
@@ -126,8 +120,6 @@ class TestCombinedPlotter:
         # At least one dashed line (spin-down uses "--")
         dashed = [ln for ln in lines if ln.get_linestyle() == "--"]
         assert len(dashed) >= 1
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_spin_polarized_png(self, tmp_path):
         """Spin-polarized combined plot saves valid PNG."""
@@ -138,8 +130,6 @@ class TestCombinedPlotter:
         fig = plotter.plot(output_path=out)
         assert os.path.isfile(out)
         assert os.path.getsize(out) > 100  # not a trivially empty file
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_energy_window(self):
         """Energy window parameter controls y-axis limits."""
@@ -151,8 +141,6 @@ class TestCombinedPlotter:
         ylim = ax_band.get_ylim()
         assert ylim[0] == pytest.approx(-3.0)
         assert ylim[1] == pytest.approx(3.0)
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_custom_energy_window_wide(self):
         """Wide energy window is respected."""
@@ -164,8 +152,6 @@ class TestCombinedPlotter:
         ylim = ax_band.get_ylim()
         assert ylim[0] == pytest.approx(-10.0)
         assert ylim[1] == pytest.approx(10.0)
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_title(self):
         """Title parameter sets the figure suptitle."""
@@ -179,8 +165,6 @@ class TestCombinedPlotter:
             # Fallback for older matplotlib: check fig.texts
             suptitle_text = fig.texts[0].get_text() if fig.texts else ""
         assert "Silicon" in suptitle_text
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_no_title(self):
         """When title=None, no suptitle is set."""
@@ -190,8 +174,6 @@ class TestCombinedPlotter:
         fig = plotter.plot(title=None)
         suptitle_text = fig.get_suptitle() if hasattr(fig, "get_suptitle") else ""
         assert suptitle_text == ""
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_figsize_parameter(self):
         """Custom figsize is applied to the figure."""
@@ -202,8 +184,6 @@ class TestCombinedPlotter:
         w, h = fig.get_size_inches()
         assert w == pytest.approx(12.0)
         assert h == pytest.approx(6.0)
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_zero_at_fermi_shifts_bands(self):
         """zero_at_fermi=True shifts eigenvalues so Fermi=0."""
@@ -223,8 +203,6 @@ class TestCombinedPlotter:
         # Original eigenvalues are fermi ± 2, so shifted should be ± 2
         assert np.abs(np.mean(ydata)) < 3.0
         assert np.max(np.abs(ydata)) < 8.0  # well below fermi=5
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_zero_at_fermi_false(self):
         """zero_at_fermi=False uses raw energies and different ylabel."""
@@ -241,8 +219,6 @@ class TestCombinedPlotter:
         band_line = lines[0]
         ydata = band_line.get_ydata()
         assert np.mean(ydata) > 3.0  # close to fermi=5
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_no_high_sym_labels(self):
         """Plot works even when high_sym_labels is empty."""
@@ -252,8 +228,6 @@ class TestCombinedPlotter:
         plotter = CombinedPlotter(bs, dos)
         fig = plotter.plot()
         assert len(fig.get_axes()) == 2
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_shared_y_axis(self):
         """Band and DOS panels share the same y-axis."""
@@ -264,8 +238,6 @@ class TestCombinedPlotter:
         ax_band, ax_dos = fig.get_axes()
         # Both should have the same y-limits
         assert ax_band.get_ylim() == ax_dos.get_ylim()
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_dos_xlabel(self):
         """DOS panel has 'DOS (states/eV)' xlabel."""
@@ -275,8 +247,6 @@ class TestCombinedPlotter:
         fig = plotter.plot()
         ax_dos = fig.get_axes()[1]
         assert "DOS" in ax_dos.get_xlabel()
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_width_ratios_default(self):
         """Default width_ratios=(3,1) produces wider band panel."""
@@ -286,8 +256,6 @@ class TestCombinedPlotter:
         fig = plotter.plot()  # default (3, 1)
         ax_band, ax_dos = fig.get_axes()
         assert ax_band.get_position().width > ax_dos.get_position().width
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_stores_band_and_dos_data(self):
         """CombinedPlotter stores band_data and dos_data attributes."""
@@ -304,8 +272,6 @@ class TestCombinedPlotter:
         plotter = CombinedPlotter(bs, dos)
         fig = plotter.plot(energy_window=(100.0, 200.0))
         assert len(fig.get_axes()) == 2
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_mixed_spin_band_spin_dos_nonspin(self):
         """Spin-polarized bands + non-spin DOS renders without error."""
@@ -319,8 +285,6 @@ class TestCombinedPlotter:
         n_hsym = len(bs.high_sym_labels)
         # 8 spin-up + 8 spin-down + 1 Fermi + high-sym vlines
         assert len(lines) == 8 + 8 + 1 + n_hsym
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_mixed_spin_band_nonspin_dos_spin(self):
         """Non-spin bands + spin-polarized DOS renders without error."""
@@ -334,8 +298,6 @@ class TestCombinedPlotter:
         n_hsym = len(bs.high_sym_labels)
         # 8 bands + 1 Fermi + high-sym vlines
         assert len(lines) == 8 + 1 + n_hsym
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_width_ratios_affect_panel_widths(self):
         """Custom width_ratios actually changes panel relative widths."""
@@ -347,8 +309,6 @@ class TestCombinedPlotter:
         bb_band = ax_band.get_position().width
         bb_dos = ax_dos.get_position().width
         assert bb_band > bb_dos * 2  # band panel significantly wider
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_composite_high_sym_labels(self):
         """Composite labels like 'G|X' are handled by _format_label."""
@@ -361,8 +321,6 @@ class TestCombinedPlotter:
         tick_labels = [t.get_text() for t in ax_band.get_xticklabels()]
         # "G" should be converted to Γ in at least one label
         assert any("\u0393" in lbl or "G" in lbl for lbl in tick_labels)
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_gap_collapse_at_discontinuity(self):
         """Gap-collapse removes artificial gaps at 'X|K' path breaks."""
@@ -383,8 +341,6 @@ class TestCombinedPlotter:
         # After gap-collapse, x-axis extent should be smaller than raw
         xlim = ax_band.get_xlim()
         assert xlim[1] - xlim[0] < raw_dist[-1] - raw_dist[0]
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_no_gap_collapse_without_pipe_label(self):
         """Normal labels (no '|') do not trigger gap collapse."""
@@ -401,8 +357,6 @@ class TestCombinedPlotter:
         # No collapse → x extent unchanged
         xlim = ax_band.get_xlim()
         assert abs((xlim[1] - xlim[0]) - (raw_dist[-1] - raw_dist[0])) < 1e-6
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------

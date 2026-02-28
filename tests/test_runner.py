@@ -72,11 +72,6 @@ class TestBuildCommand:
         cmd = ExecutionRunner.build_command(parallel_config)
         assert cmd == ["mpirun", "-np", "4", "pw.x"]
 
-    def test_single_proc_is_serial(self):
-        config = ExecutionConfig(nprocs=1)
-        cmd = ExecutionRunner.build_command(config)
-        assert cmd == ["pw.x"]
-
     def test_custom_mpi_command(self, srun_config):
         cmd = ExecutionRunner.build_command(srun_config)
         assert cmd == ["srun", "-np", "8", "pw.x"]
@@ -909,26 +904,17 @@ class TestUPFValidation:
 class TestWindowsToWSLPath:
     """Test Windows-to-WSL path conversion utility."""
 
-    def test_c_drive_forward_slash(self):
-        assert _windows_to_wsl_path("C:/Users/Foo") == "/mnt/c/Users/Foo"
-
-    def test_c_drive_backslash(self):
-        assert _windows_to_wsl_path("C:\\Users\\Foo") == "/mnt/c/Users/Foo"
-
-    def test_d_drive(self):
-        assert _windows_to_wsl_path("D:/data/pseudo") == "/mnt/d/data/pseudo"
-
-    def test_lowercase_drive(self):
-        assert _windows_to_wsl_path("c:/Users") == "/mnt/c/Users"
-
-    def test_unix_path_unchanged(self):
-        assert _windows_to_wsl_path("/mnt/c/Users") == "/mnt/c/Users"
-
-    def test_relative_path_unchanged(self):
-        assert _windows_to_wsl_path("./tmp") == "./tmp"
-
-    def test_empty_string(self):
-        assert _windows_to_wsl_path("") == ""
+    @pytest.mark.parametrize("inp,expected", [
+        ("C:/Users/Foo", "/mnt/c/Users/Foo"),
+        ("C:\\Users\\Foo", "/mnt/c/Users/Foo"),
+        ("D:/data/pseudo", "/mnt/d/data/pseudo"),
+        ("c:/Users", "/mnt/c/Users"),
+        ("/mnt/c/Users", "/mnt/c/Users"),
+        ("./tmp", "./tmp"),
+        ("", ""),
+    ])
+    def test_windows_to_wsl_path(self, inp, expected):
+        assert _windows_to_wsl_path(inp) == expected
 
 
 # =========================================================================

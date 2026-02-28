@@ -24,8 +24,6 @@ class TestBandStructurePlotter:
         plotter = BandStructurePlotter(mock_band_data)
         fig = plotter.plot()
         assert isinstance(fig, matplotlib.figure.Figure)
-        import matplotlib.pyplot as plt
-        plt.close(fig)
 
     def test_saves_png(self, mock_band_data, tmp_path):
         out = str(tmp_path / "bands.png")
@@ -36,29 +34,24 @@ class TestBandStructurePlotter:
 
     def test_energy_window_applied(self, mock_band_data):
         """y-axis limits should reflect the requested energy window."""
-        import matplotlib.pyplot as plt
         plotter = BandStructurePlotter(mock_band_data)
         fig = plotter.plot(energy_window=(-3.0, 3.0))
         ax = fig.axes[0]
         ymin, ymax = ax.get_ylim()
         assert ymin == pytest.approx(-3.0)
         assert ymax == pytest.approx(3.0)
-        plt.close(fig)
 
     def test_high_sym_labels_as_xticks(self, mock_band_data):
         """high_sym_labels (int-keyed) must produce x-tick positions."""
-        import matplotlib.pyplot as plt
         plotter = BandStructurePlotter(mock_band_data)
         fig = plotter.plot()
         ax = fig.axes[0]
         ticks = ax.get_xticks()
         # 3 labels defined in fixture → 3 ticks
         assert len(ticks) == 3
-        plt.close(fig)
 
     def test_spin_polarized_draws_two_colors(self):
         """Spin-polarised data should produce bands in two distinct colours."""
-        import matplotlib.pyplot as plt
         from shalom.backends.base import BandStructureData
 
         nkpts, nbands = 10, 4
@@ -81,14 +74,11 @@ class TestBandStructurePlotter:
         # Expect lines in both color_up (royalblue) and color_down (crimson)
         colors = {line.get_color() for line in ax.lines}
         assert len(colors) >= 2
-        plt.close(fig)
 
     def test_title_set(self, mock_band_data):
-        import matplotlib.pyplot as plt
         plotter = BandStructurePlotter(mock_band_data)
         fig = plotter.plot(title="Test Band Structure")
         assert fig.axes[0].get_title() == "Test Band Structure"
-        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -97,27 +87,20 @@ class TestBandStructurePlotter:
 
 
 class TestFormatLabel:
-    def test_gamma_mapping(self):
-        assert _format_label("G") == "Γ"
-        assert _format_label("Gamma") == "Γ"
-        assert _format_label("GAMMA") == "Γ"
-
-    def test_passthrough_unknown(self):
-        assert _format_label("Z1") == "Z1"
-
-    def test_common_labels(self):
-        for raw in ("X", "M", "K", "L", "W"):
-            assert _format_label(raw) == raw
-
-    # Composite labels (discontinuous band-path break points)
-    def test_pipe_xk_passthrough(self):
-        assert _format_label("X|K") == "X|K"
-
-    def test_pipe_gamma_k(self):
-        assert _format_label("G|K") == "Γ|K"
-
-    def test_pipe_both_mapped(self):
-        assert _format_label("G|G") == "Γ|Γ"
-
-    def test_pipe_gamma_full(self):
-        assert _format_label("Gamma|X") == "Γ|X"
+    @pytest.mark.parametrize("raw,expected", [
+        ("G", "\u0393"),
+        ("Gamma", "\u0393"),
+        ("GAMMA", "\u0393"),
+        ("Z1", "Z1"),
+        ("X", "X"),
+        ("M", "M"),
+        ("K", "K"),
+        ("L", "L"),
+        ("W", "W"),
+        ("X|K", "X|K"),
+        ("G|K", "\u0393|K"),
+        ("G|G", "\u0393|\u0393"),
+        ("Gamma|X", "\u0393|X"),
+    ])
+    def test_format_label(self, raw, expected):
+        assert _format_label(raw) == expected

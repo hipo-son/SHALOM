@@ -90,31 +90,19 @@ class TestBuildParser:
 
 
 class TestParseSetValues:
-    def test_integer(self):
-        result = _parse_set_values(["ENCUT=600"])
-        assert result == {"ENCUT": 600}
-        assert isinstance(result["ENCUT"], int)
-
-    def test_float(self):
-        result = _parse_set_values(["ecutwfc=80.5"])
-        assert result == {"ecutwfc": 80.5}
-        assert isinstance(result["ecutwfc"], float)
-
-    def test_scientific_notation(self):
-        result = _parse_set_values(["conv_thr=1e-8"])
-        assert result["conv_thr"] == 1e-8
-
-    def test_bool_true(self):
-        result = _parse_set_values(["tprnfor=true"])
-        assert result["tprnfor"] is True
-
-    def test_bool_false(self):
-        result = _parse_set_values(["LWAVE=false"])
-        assert result["LWAVE"] is False
-
-    def test_string(self):
-        result = _parse_set_values(["smearing=cold"])
-        assert result["smearing"] == "cold"
+    @pytest.mark.parametrize("input_str,key,expected_val,expected_type", [
+        ("ENCUT=600", "ENCUT", 600, int),
+        ("ecutwfc=80.5", "ecutwfc", 80.5, float),
+        ("conv_thr=1e-8", "conv_thr", 1e-8, float),
+        ("tprnfor=true", "tprnfor", True, bool),
+        ("LWAVE=false", "LWAVE", False, bool),
+        ("smearing=cold", "smearing", "cold", str),
+        ("LREAL=.TRUE.", "LREAL", True, bool),
+    ])
+    def test_type_parsing(self, input_str, key, expected_val, expected_type):
+        result = _parse_set_values([input_str])
+        assert result[key] == expected_val
+        assert isinstance(result[key], expected_type)
 
     def test_multiple(self):
         result = _parse_set_values(["ENCUT=600", "EDIFF=1e-6", "ALGO=Fast"])
@@ -132,10 +120,6 @@ class TestParseSetValues:
         """Items without = are skipped with a warning."""
         result = _parse_set_values(["ENCUT600"])
         assert result == {}
-
-    def test_fortran_bool(self):
-        result = _parse_set_values(["LREAL=.TRUE."])
-        assert result["LREAL"] is True
 
     def test_empty_key(self):
         """'=value' → skipped (empty key)."""
@@ -1803,49 +1787,14 @@ class TestCLIEdgeCases:
         defaults.update(overrides)
         return argparse.Namespace(**defaults)
 
-    def test_nscf_kgrid_two_components_returns_1(self, tmp_path, capsys):
-        """--nscf-kgrid with only 2 components returns error."""
+    @pytest.mark.parametrize("kgrid", ["6x6", "6x6x6x6", "0x6x6", "-1x6x6"])
+    def test_nscf_kgrid_invalid_returns_1(self, tmp_path, capsys, kgrid):
+        """Invalid --nscf-kgrid values return error code 1."""
         from unittest.mock import patch
         from shalom.__main__ import cmd_workflow
         from ase.build import bulk
         si = bulk("Si", "diamond", a=5.43)
-        args = self._make_workflow_args(tmp_path, nscf_kgrid="6x6")
-        with patch("shalom.__main__._load_atoms", return_value=si):
-            rc = cmd_workflow(args)
-        assert rc == 1
-        assert "invalid --nscf-kgrid" in capsys.readouterr().out
-
-    def test_nscf_kgrid_four_components_returns_1(self, tmp_path, capsys):
-        """--nscf-kgrid with 4 components returns error."""
-        from unittest.mock import patch
-        from shalom.__main__ import cmd_workflow
-        from ase.build import bulk
-        si = bulk("Si", "diamond", a=5.43)
-        args = self._make_workflow_args(tmp_path, nscf_kgrid="6x6x6x6")
-        with patch("shalom.__main__._load_atoms", return_value=si):
-            rc = cmd_workflow(args)
-        assert rc == 1
-        assert "invalid --nscf-kgrid" in capsys.readouterr().out
-
-    def test_nscf_kgrid_zero_value_returns_1(self, tmp_path, capsys):
-        """--nscf-kgrid with zero value returns error."""
-        from unittest.mock import patch
-        from shalom.__main__ import cmd_workflow
-        from ase.build import bulk
-        si = bulk("Si", "diamond", a=5.43)
-        args = self._make_workflow_args(tmp_path, nscf_kgrid="0x6x6")
-        with patch("shalom.__main__._load_atoms", return_value=si):
-            rc = cmd_workflow(args)
-        assert rc == 1
-        assert "invalid --nscf-kgrid" in capsys.readouterr().out
-
-    def test_nscf_kgrid_negative_value_returns_1(self, tmp_path, capsys):
-        """--nscf-kgrid with negative value returns error."""
-        from unittest.mock import patch
-        from shalom.__main__ import cmd_workflow
-        from ase.build import bulk
-        si = bulk("Si", "diamond", a=5.43)
-        args = self._make_workflow_args(tmp_path, nscf_kgrid="-1x6x6")
+        args = self._make_workflow_args(tmp_path, nscf_kgrid=kgrid)
         with patch("shalom.__main__._load_atoms", return_value=si):
             rc = cmd_workflow(args)
         assert rc == 1

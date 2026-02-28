@@ -950,54 +950,23 @@ class TestDosInUnitDefense:
 class TestParameterValidation:
     """StandardWorkflow __init__ should reject invalid parameters."""
 
-    def test_invalid_accuracy_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="accuracy must be"):
-            StandardWorkflow(atoms=si, output_dir="/tmp/test", accuracy="high")
+    @pytest.mark.parametrize("kwargs,match", [
+        (dict(accuracy="high"), "accuracy must be"),
+        (dict(dos_emin=10.0, dos_emax=-20.0), "dos_emin"),
+        (dict(dos_emin=5.0, dos_emax=5.0), "dos_emin"),
+        (dict(dos_deltaE=0.0), "dos_deltaE"),
+        (dict(dos_deltaE=-0.01), "dos_deltaE"),
+    ])
+    def test_invalid_params_raise(self, kwargs, match, sample_si_diamond):
+        with pytest.raises(ValueError, match=match):
+            StandardWorkflow(atoms=sample_si_diamond, output_dir="/tmp/test", **kwargs)
 
-    def test_dos_emin_gte_emax_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="dos_emin"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test",
-                dos_emin=10.0, dos_emax=-20.0,
-            )
-
-    def test_dos_emin_equal_emax_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="dos_emin"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test",
-                dos_emin=5.0, dos_emax=5.0,
-            )
-
-    def test_dos_deltaE_zero_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="dos_deltaE"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test", dos_deltaE=0.0,
-            )
-
-    def test_dos_deltaE_negative_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="dos_deltaE"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test", dos_deltaE=-0.01,
-            )
-
-    def test_valid_params_accepted(self):
-        """Default params should not raise."""
-        si = bulk("Si", "diamond", a=5.43)
-        wf = StandardWorkflow(atoms=si, output_dir="/tmp/test")
-        assert wf.accuracy == "standard"
-        assert wf.dos_emin < wf.dos_emax
-
-    def test_precise_accuracy_accepted(self):
-        si = bulk("Si", "diamond", a=5.43)
+    @pytest.mark.parametrize("accuracy", ["standard", "precise"])
+    def test_valid_accuracy_accepted(self, accuracy, sample_si_diamond):
         wf = StandardWorkflow(
-            atoms=si, output_dir="/tmp/test", accuracy="precise"
+            atoms=sample_si_diamond, output_dir="/tmp/test", accuracy=accuracy,
         )
-        assert wf.accuracy == "precise"
+        assert wf.accuracy == accuracy
 
 
 # ---------------------------------------------------------------------------
@@ -1899,42 +1868,21 @@ class TestRyToEvConstant:
 class TestNscfKmeshValidation:
     """nscf_kmesh must be [Nx, Ny, Nz] with positive ints."""
 
-    def test_nscf_kmesh_invalid_length_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
+    @pytest.mark.parametrize("kmesh", [
+        [6, 6],        # too few
+        [6, 6, 6, 6],  # too many
+        [6, 0, 6],     # zero
+        [6, -1, 6],    # negative
+    ])
+    def test_nscf_kmesh_invalid_raises(self, kmesh, sample_si_diamond):
         with pytest.raises(ValueError, match="nscf_kmesh must be"):
             StandardWorkflow(
-                atoms=si, output_dir="/tmp/test",
-                nscf_kmesh=[6, 6],
+                atoms=sample_si_diamond, output_dir="/tmp/test", nscf_kmesh=kmesh,
             )
 
-    def test_nscf_kmesh_four_elements_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="nscf_kmesh must be"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test",
-                nscf_kmesh=[6, 6, 6, 6],
-            )
-
-    def test_nscf_kmesh_zero_value_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="nscf_kmesh must be"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test",
-                nscf_kmesh=[6, 0, 6],
-            )
-
-    def test_nscf_kmesh_negative_value_raises(self):
-        si = bulk("Si", "diamond", a=5.43)
-        with pytest.raises(ValueError, match="nscf_kmesh must be"):
-            StandardWorkflow(
-                atoms=si, output_dir="/tmp/test",
-                nscf_kmesh=[6, -1, 6],
-            )
-
-    def test_nscf_kmesh_valid_accepted(self):
-        si = bulk("Si", "diamond", a=5.43)
+    def test_nscf_kmesh_valid_accepted(self, sample_si_diamond):
         wf = StandardWorkflow(
-            atoms=si, output_dir="/tmp/test",
+            atoms=sample_si_diamond, output_dir="/tmp/test",
             nscf_kmesh=[8, 8, 8],
         )
         assert wf.nscf_kmesh == [8, 8, 8]

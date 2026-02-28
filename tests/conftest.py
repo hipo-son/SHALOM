@@ -217,3 +217,82 @@ def dummy_outcar_brmix(tmp_path):
     outcar_path = tmp_path / "OUTCAR"
     outcar_path.write_text(content)
     return str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Autouse: matplotlib cleanup
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _close_matplotlib_figures():
+    """Auto-close all matplotlib figures after every test."""
+    yield
+    try:
+        import matplotlib.pyplot as plt
+        plt.close("all")
+    except ImportError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Workflow fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def make_workflow(sample_si_diamond, tmp_path):
+    """Factory fixture for StandardWorkflow with sensible defaults."""
+    from shalom.workflows.standard import StandardWorkflow
+    def _factory(**kwargs):
+        defaults = dict(atoms=sample_si_diamond, output_dir=str(tmp_path))
+        defaults.update(kwargs)
+        return StandardWorkflow(**defaults)
+    return _factory
+
+
+@pytest.fixture
+def mock_qe_config():
+    """MagicMock of QEInputConfig with empty control/system/kpoints."""
+    cfg = MagicMock()
+    cfg.control = {}
+    cfg.system = {}
+    kpts = MagicMock()
+    kpts.grid = [4, 4, 4]
+    cfg.kpoints = kpts
+    cfg.pseudo_dir = None
+    cfg.is_2d = False
+    return cfg
+
+
+@pytest.fixture
+def minimal_dos_data():
+    """Minimal DOSData for workflow integration tests (1-point)."""
+    import numpy as np
+    from shalom.backends.base import DOSData
+    return DOSData(
+        energies=np.array([0.0]),
+        dos=np.array([1.0]),
+        integrated_dos=np.array([0.0]),
+        source="qe",
+    )
+
+
+@pytest.fixture
+def setup_fermi_dirs(tmp_path):
+    """Factory: create 02_scf and 04_nscf dirs with Fermi energy pw.out files."""
+    def _factory(scf_fermi=5.0, nscf_fermi=5.1234, include_dos=True):
+        scf_dir = tmp_path / "02_scf"
+        scf_dir.mkdir(parents=True, exist_ok=True)
+        (scf_dir / "pw.out").write_text(
+            f"the Fermi energy is   {scf_fermi:.4f} ev\n"
+        )
+        nscf_dir = tmp_path / "04_nscf"
+        nscf_dir.mkdir(parents=True, exist_ok=True)
+        (nscf_dir / "pw.out").write_text(
+            f"the Fermi energy is   {nscf_fermi:.4f} ev\n"
+        )
+        if include_dos:
+            (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        return str(scf_dir), str(nscf_dir)
+    return _factory
