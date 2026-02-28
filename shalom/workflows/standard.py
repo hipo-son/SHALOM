@@ -134,9 +134,11 @@ class StandardWorkflow:
         wsl: bool = False,
         slurm_config: Optional[Any] = None,
     ) -> None:
+        from shalom.backends.qe_config import resolve_pseudo_dir
+
         self.atoms = atoms
         self.output_dir = os.path.abspath(output_dir)
-        self.pseudo_dir = pseudo_dir
+        self.pseudo_dir = resolve_pseudo_dir(pseudo_dir)
         self.nprocs = nprocs
         self.mpi_command = mpi_command
         self.pw_executable = pw_executable
@@ -554,15 +556,21 @@ class StandardWorkflow:
                 warnings.append(f"'{self.pw_executable}' not found in WSL.")
             if not detect_wsl_executable(self.dos_executable):
                 warnings.append(f"'{self.dos_executable}' not found in WSL.")
-            # Skip pseudo_dir check — Windows os.path.isdir() cannot
-            # resolve WSL-converted paths (e.g. /mnt/c/...).
+            # WSL: os.path.isdir() cannot verify WSL paths — log for manual check
+            logger.info(
+                "Pre-flight: pseudo_dir = '%s' (WSL mode — verify from WSL shell)",
+                self.pseudo_dir,
+            )
         else:
             if _shutil.which(self.pw_executable) is None:
                 warnings.append(f"'{self.pw_executable}' not found in PATH.")
             if _shutil.which(self.dos_executable) is None:
                 warnings.append(f"'{self.dos_executable}' not found in PATH.")
-            if self.pseudo_dir and not os.path.isdir(self.pseudo_dir):
-                warnings.append(f"pseudo_dir does not exist: {self.pseudo_dir}")
+            if not os.path.isdir(self.pseudo_dir):
+                warnings.append(
+                    f"pseudo_dir does not exist: {self.pseudo_dir}  "
+                    f"(set $SHALOM_PSEUDO_DIR or pass pseudo_dir=)"
+                )
         if warnings:
             for w in warnings:
                 logger.warning("Pre-flight: %s", w)

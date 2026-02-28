@@ -444,3 +444,176 @@ class TestQEErrorLog:
         result = backend.parse_output(str(tmp_path))
         assert result.ionic_energies is not None
         assert len(result.ionic_energies) <= 50
+
+
+# ---------------------------------------------------------------------------
+# HUBBARD card tests (QE 7.1+ syntax)
+# ---------------------------------------------------------------------------
+
+
+class TestHubbardCard:
+    """Verify QE 7.1+ HUBBARD (ortho-atomic) card generation."""
+
+    def _read_pw_in(self, tmp_path):
+        return (tmp_path / "pw.in").read_text(encoding="utf-8")
+
+    def test_fe2o3_precise_generates_hubbard_card(self, tmp_path):
+        """Fe2O3 with PRECISE accuracy → HUBBARD card with U Fe-3d 5.3."""
+        atoms = bulk("Fe", "bcc", a=2.87) * (1, 1, 1)
+        # Add O to make it an oxide (triggers GGA+U)
+        from ase import Atoms as AseAtoms
+        fe2o3 = AseAtoms(
+            "Fe2O3",
+            scaled_positions=[
+                (0.0, 0.0, 0.0),
+                (0.5, 0.5, 0.5),
+                (0.25, 0.25, 0.0),
+                (0.0, 0.25, 0.25),
+                (0.25, 0.0, 0.25),
+            ],
+            cell=[5.0, 5.0, 5.0],
+            pbc=True,
+        )
+        config = get_qe_preset(
+            atoms=fe2o3,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.PRECISE,
+        )
+        backend = QEBackend()
+        backend.write_input(fe2o3, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        assert "HUBBARD (ortho-atomic)" in content
+        assert "U Fe-3d 5.3" in content
+        # Old-style keys must NOT appear in namelists
+        assert "lda_plus_u" not in content
+        assert "Hubbard_U(" not in content
+
+    def test_hubbard_card_placement(self, tmp_path):
+        """HUBBARD card appears between ATOMIC_SPECIES and ATOMIC_POSITIONS."""
+        fe2o3 = Atoms(
+            "Fe2O3",
+            scaled_positions=[
+                (0.0, 0.0, 0.0),
+                (0.5, 0.5, 0.5),
+                (0.25, 0.25, 0.0),
+                (0.0, 0.25, 0.25),
+                (0.25, 0.0, 0.25),
+            ],
+            cell=[5.0, 5.0, 5.0],
+            pbc=True,
+        )
+        config = get_qe_preset(
+            atoms=fe2o3,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.PRECISE,
+        )
+        backend = QEBackend()
+        backend.write_input(fe2o3, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        species_pos = content.index("ATOMIC_SPECIES")
+        hubbard_pos = content.index("HUBBARD")
+        positions_pos = content.index("ATOMIC_POSITIONS")
+        assert species_pos < hubbard_pos < positions_pos
+
+    def test_multi_element_hubbard(self, tmp_path):
+        """Structure with Fe + Mn → two separate U entries."""
+        atoms = Atoms(
+            "FeMnO3",
+            scaled_positions=[
+                (0.0, 0.0, 0.0),
+                (0.5, 0.5, 0.5),
+                (0.25, 0.25, 0.0),
+                (0.0, 0.25, 0.25),
+                (0.25, 0.0, 0.25),
+            ],
+            cell=[5.0, 5.0, 5.0],
+            pbc=True,
+        )
+        config = get_qe_preset(
+            atoms=atoms,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.PRECISE,
+        )
+        backend = QEBackend()
+        backend.write_input(atoms, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        assert "U Fe-3d 5.3" in content
+        assert "U Mn-3d 3.9" in content
+
+    def test_pure_metal_no_hubbard(self, tmp_path):
+        """Pure Cu metal (no anion) → no HUBBARD card."""
+        cu = bulk("Cu", "fcc", a=3.6)
+        config = get_qe_preset(
+            atoms=cu,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.PRECISE,
+        )
+        backend = QEBackend()
+        backend.write_input(cu, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        assert "HUBBARD" not in content
+
+    def test_standard_accuracy_no_hubbard(self, tmp_path):
+        """Fe2O3 with STANDARD accuracy → GGA+U not applied."""
+        fe2o3 = Atoms(
+            "Fe2O3",
+            scaled_positions=[
+                (0.0, 0.0, 0.0),
+                (0.5, 0.5, 0.5),
+                (0.25, 0.25, 0.0),
+                (0.0, 0.25, 0.25),
+                (0.25, 0.0, 0.25),
+            ],
+            cell=[5.0, 5.0, 5.0],
+            pbc=True,
+        )
+        config = get_qe_preset(
+            atoms=fe2o3,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.STANDARD,
+        )
+        backend = QEBackend()
+        backend.write_input(fe2o3, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        assert "HUBBARD" not in content
+        assert "lda_plus_u" not in content
+
+    def test_semiconductor_no_hubbard(self, tmp_path):
+        """Si (semiconductor, no TM) → no HUBBARD card even at PRECISE."""
+        si = bulk("Si", "diamond", a=5.43)
+        config = get_qe_preset(
+            atoms=si,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.PRECISE,
+        )
+        backend = QEBackend()
+        backend.write_input(si, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        assert "HUBBARD" not in content
+
+    def test_orbital_label_includes_principal_quantum_number(self, tmp_path):
+        """Orbital label must be 'Fe-3d' (with n=3), not 'Fe-d'."""
+        fe2o3 = Atoms(
+            "FeO",
+            scaled_positions=[(0.0, 0.0, 0.0), (0.5, 0.5, 0.5)],
+            cell=[4.3, 4.3, 4.3],
+            pbc=True,
+        )
+        config = get_qe_preset(
+            atoms=fe2o3,
+            calc_type=QECalculationType.SCF,
+            accuracy=AccuracyLevel.PRECISE,
+        )
+        backend = QEBackend()
+        backend.write_input(fe2o3, str(tmp_path), config=config)
+        content = self._read_pw_in(tmp_path)
+
+        # Must contain principal quantum number (3d, not just d)
+        assert "Fe-3d" in content
+        assert "Fe-d " not in content

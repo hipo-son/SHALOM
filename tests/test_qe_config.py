@@ -1,6 +1,9 @@
 """Tests for shalom.backends.qe_config module."""
 
+import os
 import pytest
+from pathlib import Path
+from unittest.mock import patch
 from ase import Atoms
 from ase.build import bulk, fcc111
 
@@ -15,7 +18,43 @@ from shalom.backends.qe_config import (
     compute_ecutwfc,
     compute_ecutrho,
     detect_and_apply_qe_hints,
+    resolve_pseudo_dir,
 )
+
+
+# ---------------------------------------------------------------------------
+# resolve_pseudo_dir tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePseudoDir:
+    """Tests for the 3-tier pseudo_dir resolution utility."""
+
+    def test_explicit_override_wins(self):
+        result = resolve_pseudo_dir("/my/custom/pseudos")
+        assert result == "/my/custom/pseudos"
+
+    def test_env_var_when_no_explicit(self):
+        with patch.dict(os.environ, {"SHALOM_PSEUDO_DIR": "/env/pseudos"}):
+            result = resolve_pseudo_dir(None)
+        assert result == "/env/pseudos"
+
+    def test_empty_string_falls_through(self):
+        with patch.dict(os.environ, {"SHALOM_PSEUDO_DIR": "/env/pseudos"}):
+            result = resolve_pseudo_dir("")
+        assert result == "/env/pseudos"
+
+    def test_home_fallback_when_no_env(self):
+        env = os.environ.copy()
+        env.pop("SHALOM_PSEUDO_DIR", None)
+        with patch.dict(os.environ, env, clear=True):
+            result = resolve_pseudo_dir(None)
+        assert result == str(Path.home() / "pseudopotentials")
+
+    def test_explicit_overrides_env(self):
+        with patch.dict(os.environ, {"SHALOM_PSEUDO_DIR": "/env/pseudos"}):
+            result = resolve_pseudo_dir("/explicit/path")
+        assert result == "/explicit/path"
 
 
 # ---------------------------------------------------------------------------

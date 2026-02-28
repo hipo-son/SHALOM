@@ -123,7 +123,9 @@ class ConvergenceWorkflow(ABC):
     ) -> None:
         self.atoms = atoms
         self.output_dir = os.path.abspath(output_dir)
-        self.pseudo_dir = pseudo_dir
+        from shalom.backends.qe_config import resolve_pseudo_dir
+
+        self.pseudo_dir = resolve_pseudo_dir(pseudo_dir)
         self.nprocs = nprocs
         self.timeout = timeout
         self.mpi_command = mpi_command

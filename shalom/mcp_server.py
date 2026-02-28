@@ -774,10 +774,9 @@ def check_qe_setup(
         issues.append("dos.x not found in PATH.")
 
     # Check pseudo_dir
-    from shalom.backends.qe_config import SSSP_ELEMENTS, get_pseudo_filename
+    from shalom.backends.qe_config import SSSP_ELEMENTS, get_pseudo_filename, resolve_pseudo_dir
 
-    default_pseudo = str(Path.home() / "pseudopotentials")
-    pd = pseudo_dir or os.environ.get("SHALOM_PSEUDO_DIR", default_pseudo)
+    pd = resolve_pseudo_dir(pseudo_dir)
     pseudo_path = Path(pd).expanduser().resolve()
     info["pseudo_dir"] = str(pseudo_path)
 

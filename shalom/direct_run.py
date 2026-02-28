@@ -308,14 +308,9 @@ def _create_qe_config(
         atoms=atoms,
     )
     config.functional = functional
-    if pseudo_dir:
-        config.pseudo_dir = pseudo_dir
-    else:
-        resolved = os.environ.get(
-            "SHALOM_PSEUDO_DIR",
-            str(Path.home() / "pseudopotentials"),
-        )
-        config.pseudo_dir = resolved
+    from shalom.backends.qe_config import resolve_pseudo_dir
+
+    config.pseudo_dir = resolve_pseudo_dir(pseudo_dir)
     if user_settings:
         config.user_settings.update(user_settings)
     return config

@@ -37,6 +37,7 @@ from shalom.backends.qe_config import (
     get_qe_preset,
     generate_band_kpath,
     get_band_calc_atoms,
+    resolve_pseudo_dir,
 )
 from shalom.backends.qe_parser import (
     parse_xml_bands,
@@ -61,7 +62,7 @@ __all__ = [
     "VASPBackend", "QEBackend", "get_backend",
     "CalculationType", "AccuracyLevel", "VASPInputConfig", "KPointsConfig", "get_preset",
     "QECalculationType", "QEInputConfig", "QEKPointsConfig", "get_qe_preset",
-    "generate_band_kpath", "get_band_calc_atoms",
+    "generate_band_kpath", "get_band_calc_atoms", "resolve_pseudo_dir",
     "parse_xml_bands", "parse_dos_file", "find_xml_path",
     "extract_fermi_energy", "compute_nbnd", "HA_TO_EV", "QE_XML_NS",
     "ErrorRecoveryEngine", "VASPError", "Correction",

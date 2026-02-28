@@ -999,8 +999,9 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
 
     # 2. Resolve pseudo_dir
     print()
-    _default_pseudo = str(Path.home() / "pseudopotentials")
-    pseudo_dir_arg = args.pseudo_dir or os.environ.get("SHALOM_PSEUDO_DIR", _default_pseudo)
+    from shalom.backends.qe_config import resolve_pseudo_dir
+
+    pseudo_dir_arg = resolve_pseudo_dir(args.pseudo_dir)
     pseudo_path = Path(pseudo_dir_arg).expanduser().resolve()
     if pseudo_path.is_dir():
         print(f"  pseudo_dir  OK   {pseudo_path}")

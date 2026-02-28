@@ -44,6 +44,35 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+
+def resolve_pseudo_dir(pseudo_dir: Optional[str] = None) -> str:
+    """Resolve the pseudopotential directory using 3-tier priority.
+
+    1. ``pseudo_dir`` argument (explicit override from CLI or API).
+    2. ``$SHALOM_PSEUDO_DIR`` environment variable.
+    3. ``~/pseudopotentials`` (universal default).
+
+    Args:
+        pseudo_dir: Explicit override.  If truthy, returned as-is.
+
+    Returns:
+        Resolved path string for the pseudo_dir.
+    """
+    if pseudo_dir:
+        return pseudo_dir
+    import os
+    from pathlib import Path
+
+    return os.environ.get(
+        "SHALOM_PSEUDO_DIR",
+        str(Path.home() / "pseudopotentials"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
