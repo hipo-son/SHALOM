@@ -190,6 +190,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="MPI launcher command (default: mpirun).",
     )
     run_parser.add_argument(
+        "--pw-command",
+        default="pw.x",
+        help="pw.x executable name or path (default: pw.x).",
+    )
+    run_parser.add_argument(
+        "--dos-command",
+        default="dos.x",
+        help="dos.x executable name or path (default: dos.x).",
+    )
+    run_parser.add_argument(
         "--wsl",
         action="store_true",
         help="Run pw.x via WSL (Windows only). Requires QE installed in WSL.",
@@ -249,6 +259,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output file path for the plot (default: bands.png or dos.png in calc_dir).",
     )
+    plot_parser.add_argument(
+        "--combined",
+        action="store_true",
+        help="Create combined band structure + DOS plot (requires bands XML and pwscf.dos).",
+    )
+    plot_parser.add_argument(
+        "--bands-dir",
+        default=None,
+        metavar="DIR",
+        help="Bands calculation directory (for --combined when calc_dir is the NSCF dir).",
+    )
 
     # 'workflow' subcommand
     workflow_parser = subparsers.add_parser(
@@ -303,6 +324,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="MPI launcher (default: mpirun).",
     )
     workflow_parser.add_argument(
+        "--pw-command",
+        default="pw.x",
+        help="pw.x executable name or path (default: pw.x).",
+    )
+    workflow_parser.add_argument(
+        "--dos-command",
+        default="dos.x",
+        help="dos.x executable name or path (default: dos.x).",
+    )
+    workflow_parser.add_argument(
         "--wsl",
         action="store_true",
         help="Run pw.x via WSL (Windows only).",
@@ -327,9 +358,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="DOS energy window max in eV (default: 10).",
     )
     workflow_parser.add_argument(
+        "--nscf-kgrid",
+        default=None,
+        metavar="NxNyNz",
+        help="NSCF k-point grid (e.g. 6x6x6). Default: auto from DEFAULT_NSCF_KPR.",
+    )
+    workflow_parser.add_argument(
         "--is-2d",
         action="store_true",
         help="Treat structure as 2D (kz=0 k-path, 2D isolation flags).",
+    )
+    workflow_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume a previously interrupted workflow (skips completed steps).",
     )
 
     # 'converge' subcommand
@@ -1014,7 +1056,7 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
         total = len(elements)
         print()
         if missing:
-            print(f"  Pseudopotentials  {n_ok}/{total} OK -{len(missing)} missing")
+            print(f"  Pseudopotentials  {n_ok}/{total} OK - {len(missing)} missing")
             if len(missing) <= 10:
                 print()
                 for el, upf in missing:
@@ -1033,6 +1075,24 @@ def cmd_setup_qe(args: argparse.Namespace) -> int:
                 print("    python -m shalom setup-qe --download                     # all 60")
         else:
             print(f"  Pseudopotentials  {n_ok}/{total} OK")
+    else:
+        # Directory does not exist — treat all requested elements as missing
+        for el in elements:
+            if el not in SSSP_ELEMENTS:
+                continue
+            upf = get_pseudo_filename(el)
+            missing.append((el, upf))
+            issues += 1
+        if missing:
+            print()
+            print(f"  Pseudopotentials  0/{len(missing)} — directory does not exist: {pseudo_path}")
+            print()
+            print("  Download missing pseudopotentials:")
+            if args.elements:
+                print(f"    python -m shalom setup-qe --elements {args.elements} --download")
+            else:
+                print("    python -m shalom setup-qe --elements Si,Fe,O --download  # specific")
+                print("    python -m shalom setup-qe --download                     # all 60")
 
     # 5. Download if requested
     if args.download and missing:
@@ -1141,6 +1201,7 @@ def _execute_dft(output_dir: str, args: argparse.Namespace) -> int:
     print(f"\nExecuting QE ({mode}, nprocs={args.nprocs})...")
 
     exec_config = ExecutionConfig(
+        command=getattr(args, "pw_command", "pw.x"),
         nprocs=args.nprocs,
         mpi_command=args.mpi_command,
         timeout_seconds=args.timeout,
@@ -1192,8 +1253,8 @@ def cmd_plot(args: argparse.Namespace) -> int:
         find_xml_path, parse_xml_bands, parse_dos_file, extract_fermi_energy,
     )
 
-    if not args.bands and not args.dos:
-        print("Error: specify at least one of --bands or --dos.")
+    if not args.bands and not args.dos and not getattr(args, "combined", False):
+        print("Error: specify at least one of --bands, --dos, or --combined.")
         return 1
 
     calc_dir = os.path.abspath(args.calc_dir)
@@ -1249,6 +1310,33 @@ def cmd_plot(args: argparse.Namespace) -> int:
                 print("Error: matplotlib not installed. Run: pip install shalom[plotting]")
                 rc = 1
 
+    if getattr(args, "combined", False):
+        bands_calc_dir = getattr(args, "bands_dir", None) or calc_dir
+        xml_path = find_xml_path(bands_calc_dir)
+        dos_path = os.path.join(calc_dir, "pwscf.dos")
+        if xml_path is None:
+            print(f"Error: data-file-schema.xml not found in {bands_calc_dir}")
+            rc = 1
+        elif not os.path.isfile(dos_path):
+            print(f"Error: pwscf.dos not found in {calc_dir}")
+            rc = 1
+        else:
+            try:
+                from shalom.plotting.combined_plot import CombinedPlotter
+                bs = parse_xml_bands(xml_path, fermi_energy=fermi)
+                dos_data = parse_dos_file(dos_path)
+                dos_data.fermi_energy = fermi
+                out = args.output or os.path.join(calc_dir, "combined.png")
+                plotter = CombinedPlotter(bs, dos_data)
+                plotter.plot(
+                    output_path=out, title=args.title,
+                    energy_window=energy_window,
+                )
+                print(f"Combined plot saved: {out}")
+            except ImportError:
+                print("Error: matplotlib not installed. Run: pip install shalom[plotting]")
+                rc = 1
+
     return rc
 
 
@@ -1260,35 +1348,69 @@ def cmd_workflow(args: argparse.Namespace) -> int:
     if atoms is None:
         return 1
 
+    # Parse --nscf-kgrid (e.g. "6x6x6" or "6,6,6")
+    nscf_kmesh = None
+    nscf_kgrid_raw = getattr(args, "nscf_kgrid", None)
+    if nscf_kgrid_raw:
+        try:
+            nscf_kmesh = [int(n) for n in nscf_kgrid_raw.replace("x", ",").split(",")]
+            if len(nscf_kmesh) != 3 or any(n < 1 for n in nscf_kmesh):
+                raise ValueError
+        except ValueError:
+            print(f"Error: invalid --nscf-kgrid '{nscf_kgrid_raw}'. Use format NxNyNz (e.g. 6x6x6).")
+            return 1
+
     wf = StandardWorkflow(
         atoms=atoms,
         output_dir=args.output,
         pseudo_dir=args.pseudo_dir,
         nprocs=args.nprocs,
         mpi_command=args.mpi_command,
+        pw_executable=getattr(args, "pw_command", "pw.x"),
+        dos_executable=getattr(args, "dos_command", "dos.x"),
         timeout=args.timeout,
         accuracy=args.accuracy,
         skip_relax=args.skip_relax,
         is_2d=args.is_2d,
         dos_emin=args.dos_emin,
         dos_emax=args.dos_emax,
+        nscf_kmesh=nscf_kmesh,
+        resume=getattr(args, "resume", False),
         wsl=getattr(args, "wsl", False),
         slurm_config=_build_slurm_config(args),
     )
 
     try:
         result = wf.run()
-        print(f"Workflow complete: {args.output}")
-        if result.get("bands_png"):
-            print(f"  bands.png: {result['bands_png']}")
-        if result.get("dos_png"):
-            print(f"  dos.png:   {result['dos_png']}")
-        if result.get("fermi_energy") is not None:
-            print(f"  Fermi energy: {result['fermi_energy']:.4f} eV")
-        return 0
     except Exception as exc:
-        print(f"Error: workflow failed: {exc}")
+        print(f"Error: workflow failed unexpectedly: {exc}")
         return 1
+
+    failed = result.get("failed_step")
+    if failed:
+        print(f"Workflow PARTIALLY complete (failed at: {failed})")
+    else:
+        print(f"Workflow complete: {args.output}")
+
+    for sr in result.get("step_results", []):
+        status = "OK" if sr.success else f"FAILED: {sr.error_message}"
+        if sr.elapsed_seconds > 0:
+            mins, secs = divmod(sr.elapsed_seconds, 60)
+            if mins >= 1:
+                status += f" ({int(mins)}m{secs:.0f}s)"
+            else:
+                status += f" ({sr.elapsed_seconds:.1f}s)"
+        if sr.summary and sr.success:
+            status += f" — {sr.summary}"
+        print(f"  [{sr.step_number}/5] {sr.name}: {status}")
+
+    if result.get("bands_png"):
+        print(f"  bands.png: {result['bands_png']}")
+    if result.get("dos_png"):
+        print(f"  dos.png:   {result['dos_png']}")
+    if result.get("fermi_energy") is not None:
+        print(f"  Fermi energy: {result['fermi_energy']:.4f} eV")
+    return 0 if not failed else 1
 
 
 def cmd_converge(args: argparse.Namespace) -> int:

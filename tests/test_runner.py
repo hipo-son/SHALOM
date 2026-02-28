@@ -949,6 +949,8 @@ class TestPatchInputPathsForWSL:
         _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
         content = pw_in.read_text()
         assert "/mnt/c/Users/Sejong/pseudopotentials" in content
+        # outdir should also have been converted (Bug 5)
+        assert "'./tmp'" not in content
 
     def test_patches_outdir_absolute(self, tmp_path):
         pw_in = tmp_path / "pw.in"
@@ -961,7 +963,8 @@ class TestPatchInputPathsForWSL:
         content = pw_in.read_text()
         assert "/mnt/d/data/calc/tmp" in content
 
-    def test_relative_outdir_unchanged(self, tmp_path):
+    def test_relative_outdir_converted_to_absolute_wsl(self, tmp_path):
+        """Relative ./tmp should be converted to absolute WSL path."""
         pw_in = tmp_path / "pw.in"
         pw_in.write_text(
             "&CONTROL\n"
@@ -970,7 +973,50 @@ class TestPatchInputPathsForWSL:
         )
         _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
         content = pw_in.read_text()
-        assert "'./tmp'" in content
+        # Compute expected WSL-converted path
+        expected_wsl_dir = _windows_to_wsl_path(os.path.abspath(str(tmp_path)))
+        expected_outdir = f"{expected_wsl_dir}/tmp"
+        assert f"outdir = '{expected_outdir}'" in content
+        assert "'./tmp'" not in content
+
+    def test_relative_outdir_nested_path(self, tmp_path):
+        """Nested relative path ./foo/bar is converted correctly."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n"
+            "  outdir = './subdir/tmp'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        content = pw_in.read_text()
+        expected_wsl_dir = _windows_to_wsl_path(os.path.abspath(str(tmp_path)))
+        assert f"outdir = '{expected_wsl_dir}/subdir/tmp'" in content
+
+    def test_relative_pseudo_dir_converted(self, tmp_path):
+        """Relative pseudo_dir = './pseudo' is also converted."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n"
+            "  pseudo_dir = './pseudo'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        content = pw_in.read_text()
+        expected_wsl_dir = _windows_to_wsl_path(os.path.abspath(str(tmp_path)))
+        assert f"pseudo_dir = '{expected_wsl_dir}/pseudo'" in content
+
+    def test_parent_relative_path_unchanged(self, tmp_path):
+        """Parent-relative paths (../tmp) are NOT converted (unsupported)."""
+        pw_in = tmp_path / "pw.in"
+        pw_in.write_text(
+            "&CONTROL\n"
+            "  outdir = '../tmp'\n"
+            "/\n"
+        )
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+        content = pw_in.read_text()
+        # ../tmp doesn't start with "./" so it passes through unchanged
+        assert "'../tmp'" in content
 
     def test_dos_in_outdir_patched(self, tmp_path):
         dos_in = tmp_path / "dos.in"

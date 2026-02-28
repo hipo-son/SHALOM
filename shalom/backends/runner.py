@@ -129,9 +129,18 @@ def _patch_input_paths_for_wsl(directory: str, input_file: str = "pw.in") -> Non
                 changed = True
                 logger.debug("WSL path patch: %s = '%s' → '%s'", key, old_val, new_val)
             elif old_val.startswith("./"):
-                # Relative paths work fine under WSL — leave them as-is.
-                # WSL inherits the Windows CWD, so ./tmp resolves correctly.
-                pass
+                # Convert relative paths to absolute WSL paths so that
+                # chained calculations (bands/nscf reusing SCF charge
+                # density) resolve correctly regardless of WSL CWD.
+                abs_dir_wsl = _windows_to_wsl_path(os.path.abspath(directory))
+                rel_part = old_val[2:]  # strip "./"
+                new_val = f"{abs_dir_wsl}/{rel_part}"
+                content = content[:match.start(3)] + new_val + content[match.end(3):]
+                changed = True
+                logger.debug(
+                    "WSL path patch (relative): %s = '%s' → '%s'",
+                    key, old_val, new_val,
+                )
 
     if changed:
         with open(input_path, "w") as f:

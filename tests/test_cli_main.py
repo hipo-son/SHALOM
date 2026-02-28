@@ -963,9 +963,14 @@ class TestCmdWorkflow:
         defaults = dict(
             material="Si", structure=None, output=output_dir,
             pseudo_dir=None, nprocs=1, mpi_command="mpirun",
+            pw_command="pw.x", dos_command="dos.x",
             timeout=3600, accuracy="standard", skip_relax=True,
             is_2d=False, dos_emin=None, dos_emax=None,
-            command="workflow",
+            nscf_kgrid=None, resume=False, wsl=False,
+            command="workflow", slurm=False,
+            partition="compute", account=None, nodes=1,
+            ntasks_per_node=None, walltime="24:00:00",
+            qos=None, mem=None, module_loads=[], slurm_extras=[],
         )
         defaults.update(overrides)
         return argparse.Namespace(**defaults)
@@ -1395,3 +1400,564 @@ class TestCmdRunNonMPSource:
         out = capsys.readouterr().out
         assert "Source:" in out
         assert "ase_builder" in out
+
+
+# ---------------------------------------------------------------------------
+# CLI new args tests (--pw-command, --dos-command, --nscf-kgrid, --resume,
+# --combined)
+# ---------------------------------------------------------------------------
+
+
+class TestCLINewArgs:
+    """Test new CLI argument parsing for recent feature additions."""
+
+    # -- run parser: --pw-command, --dos-command --------------------------
+
+    def test_run_pw_command_default(self):
+        """run --pw-command defaults to 'pw.x'."""
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717"])
+        assert args.pw_command == "pw.x"
+
+    def test_run_pw_command_custom(self):
+        """run --pw-command accepts custom executable."""
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "--pw-command", "/opt/qe/bin/pw.x"])
+        assert args.pw_command == "/opt/qe/bin/pw.x"
+
+    def test_run_dos_command_default(self):
+        """run --dos-command defaults to 'dos.x'."""
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717"])
+        assert args.dos_command == "dos.x"
+
+    def test_run_dos_command_custom(self):
+        """run --dos-command accepts custom executable."""
+        parser = build_parser()
+        args = parser.parse_args(["run", "mp-19717", "--dos-command", "/opt/qe/bin/dos.x"])
+        assert args.dos_command == "/opt/qe/bin/dos.x"
+
+    # -- workflow parser: --pw-command, --dos-command ----------------------
+
+    def test_workflow_pw_command_default(self):
+        """workflow --pw-command defaults to 'pw.x'."""
+        parser = build_parser()
+        args = parser.parse_args(["workflow", "Si", "-o", "/tmp/wf"])
+        assert args.pw_command == "pw.x"
+
+    def test_workflow_pw_command_custom(self):
+        """workflow --pw-command accepts custom executable."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "workflow", "Si", "-o", "/tmp/wf",
+            "--pw-command", "/usr/local/bin/pw.x",
+        ])
+        assert args.pw_command == "/usr/local/bin/pw.x"
+
+    def test_workflow_dos_command_default(self):
+        """workflow --dos-command defaults to 'dos.x'."""
+        parser = build_parser()
+        args = parser.parse_args(["workflow", "Si", "-o", "/tmp/wf"])
+        assert args.dos_command == "dos.x"
+
+    def test_workflow_dos_command_custom(self):
+        """workflow --dos-command accepts custom executable."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "workflow", "Si", "-o", "/tmp/wf",
+            "--dos-command", "/usr/local/bin/dos.x",
+        ])
+        assert args.dos_command == "/usr/local/bin/dos.x"
+
+    # -- workflow parser: --nscf-kgrid ------------------------------------
+
+    def test_workflow_nscf_kgrid_default(self):
+        """workflow --nscf-kgrid defaults to None."""
+        parser = build_parser()
+        args = parser.parse_args(["workflow", "Si", "-o", "/tmp/wf"])
+        assert args.nscf_kgrid is None
+
+    def test_workflow_nscf_kgrid_parsed(self):
+        """workflow --nscf-kgrid accepts NxNyNz format."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "workflow", "Si", "-o", "/tmp/wf", "--nscf-kgrid", "6x6x6",
+        ])
+        assert args.nscf_kgrid == "6x6x6"
+
+    def test_workflow_nscf_kgrid_asymmetric(self):
+        """workflow --nscf-kgrid accepts asymmetric grid like 8x8x4."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "workflow", "Si", "-o", "/tmp/wf", "--nscf-kgrid", "8x8x4",
+        ])
+        assert args.nscf_kgrid == "8x8x4"
+
+    # -- workflow parser: --resume ----------------------------------------
+
+    def test_workflow_resume_default_false(self):
+        """workflow --resume defaults to False."""
+        parser = build_parser()
+        args = parser.parse_args(["workflow", "Si", "-o", "/tmp/wf"])
+        assert args.resume is False
+
+    def test_workflow_resume_flag(self):
+        """workflow --resume sets True."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "workflow", "Si", "-o", "/tmp/wf", "--resume",
+        ])
+        assert args.resume is True
+
+    # -- plot parser: --combined ------------------------------------------
+
+    def test_plot_combined_default_false(self):
+        """plot --combined defaults to False."""
+        parser = build_parser()
+        args = parser.parse_args(["plot", "/tmp/calc", "--bands"])
+        assert args.combined is False
+
+    def test_plot_combined_flag(self):
+        """plot --combined sets True."""
+        parser = build_parser()
+        args = parser.parse_args(["plot", "/tmp/calc", "--combined"])
+        assert args.combined is True
+
+    def test_plot_bands_dir_flag(self):
+        """plot --bands-dir accepts a directory path."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "plot", "/tmp/nscf", "--combined", "--bands-dir", "/tmp/bands",
+        ])
+        assert args.bands_dir == "/tmp/bands"
+
+    def test_plot_bands_dir_default_none(self):
+        """plot --bands-dir defaults to None."""
+        parser = build_parser()
+        args = parser.parse_args(["plot", "/tmp/calc", "--bands"])
+        assert args.bands_dir is None
+
+    # -- cmd_workflow passes pw_command/dos_command to StandardWorkflow ----
+
+    def test_cmd_workflow_passes_pw_command(self, tmp_path):
+        """cmd_workflow forwards --pw-command to StandardWorkflow."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        import argparse
+
+        si = bulk("Si", "diamond", a=5.43)
+        mock_wf_cls = MagicMock()
+        mock_wf_cls.return_value.run.return_value = {
+            "bands_png": None, "dos_png": None,
+            "fermi_energy": None, "failed_step": None,
+            "step_results": [], "completed_steps": [],
+        }
+
+        args = argparse.Namespace(
+            material="Si", structure=None, output=str(tmp_path),
+            pseudo_dir=None, nprocs=1, mpi_command="mpirun",
+            pw_command="/custom/pw.x", dos_command="/custom/dos.x",
+            timeout=3600, accuracy="standard", skip_relax=True,
+            is_2d=False, dos_emin=-20.0, dos_emax=10.0,
+            nscf_kgrid=None, resume=False, wsl=False,
+            command="workflow", slurm=False,
+            partition="compute", account=None, nodes=1,
+            ntasks_per_node=None, walltime="24:00:00",
+            qos=None, mem=None, module_loads=[], slurm_extras=[],
+        )
+        with patch("shalom.__main__._load_atoms", return_value=si), \
+             patch("shalom.workflows.standard.StandardWorkflow", mock_wf_cls):
+            cmd_workflow(args)
+
+        call_kwargs = mock_wf_cls.call_args.kwargs
+        assert call_kwargs["pw_executable"] == "/custom/pw.x"
+        assert call_kwargs["dos_executable"] == "/custom/dos.x"
+
+    # -- cmd_workflow passes resume flag -----------------------------------
+
+    def test_cmd_workflow_passes_resume(self, tmp_path):
+        """cmd_workflow forwards --resume to StandardWorkflow."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        import argparse
+
+        si = bulk("Si", "diamond", a=5.43)
+        mock_wf_cls = MagicMock()
+        mock_wf_cls.return_value.run.return_value = {
+            "bands_png": None, "dos_png": None,
+            "fermi_energy": None, "failed_step": None,
+            "step_results": [], "completed_steps": [],
+        }
+
+        args = argparse.Namespace(
+            material="Si", structure=None, output=str(tmp_path),
+            pseudo_dir=None, nprocs=1, mpi_command="mpirun",
+            pw_command="pw.x", dos_command="dos.x",
+            timeout=3600, accuracy="standard", skip_relax=True,
+            is_2d=False, dos_emin=-20.0, dos_emax=10.0,
+            nscf_kgrid=None, resume=True, wsl=False,
+            command="workflow", slurm=False,
+            partition="compute", account=None, nodes=1,
+            ntasks_per_node=None, walltime="24:00:00",
+            qos=None, mem=None, module_loads=[], slurm_extras=[],
+        )
+        with patch("shalom.__main__._load_atoms", return_value=si), \
+             patch("shalom.workflows.standard.StandardWorkflow", mock_wf_cls):
+            cmd_workflow(args)
+
+        call_kwargs = mock_wf_cls.call_args.kwargs
+        assert call_kwargs["resume"] is True
+
+    # -- cmd_workflow passes nscf_kgrid -----------------------------------
+
+    def test_cmd_workflow_passes_nscf_kgrid(self, tmp_path):
+        """cmd_workflow parses --nscf-kgrid and passes nscf_kmesh."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        import argparse
+
+        si = bulk("Si", "diamond", a=5.43)
+        mock_wf_cls = MagicMock()
+        mock_wf_cls.return_value.run.return_value = {
+            "bands_png": None, "dos_png": None,
+            "fermi_energy": None, "failed_step": None,
+            "step_results": [], "completed_steps": [],
+        }
+
+        args = argparse.Namespace(
+            material="Si", structure=None, output=str(tmp_path),
+            pseudo_dir=None, nprocs=1, mpi_command="mpirun",
+            pw_command="pw.x", dos_command="dos.x",
+            timeout=3600, accuracy="standard", skip_relax=True,
+            is_2d=False, dos_emin=-20.0, dos_emax=10.0,
+            nscf_kgrid="6x6x6", resume=False, wsl=False,
+            command="workflow", slurm=False,
+            partition="compute", account=None, nodes=1,
+            ntasks_per_node=None, walltime="24:00:00",
+            qos=None, mem=None, module_loads=[], slurm_extras=[],
+        )
+        with patch("shalom.__main__._load_atoms", return_value=si), \
+             patch("shalom.workflows.standard.StandardWorkflow", mock_wf_cls):
+            cmd_workflow(args)
+
+        call_kwargs = mock_wf_cls.call_args.kwargs
+        assert call_kwargs["nscf_kmesh"] == [6, 6, 6]
+
+    # -- cmd_workflow invalid nscf-kgrid returns 1 -------------------------
+
+    def test_cmd_workflow_invalid_nscf_kgrid(self, tmp_path, capsys):
+        """Invalid --nscf-kgrid format returns 1 with error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        import argparse
+
+        si = bulk("Si", "diamond", a=5.43)
+
+        args = argparse.Namespace(
+            material="Si", structure=None, output=str(tmp_path),
+            pseudo_dir=None, nprocs=1, mpi_command="mpirun",
+            pw_command="pw.x", dos_command="dos.x",
+            timeout=3600, accuracy="standard", skip_relax=True,
+            is_2d=False, dos_emin=-20.0, dos_emax=10.0,
+            nscf_kgrid="bad_value", resume=False, wsl=False,
+            command="workflow", slurm=False,
+            partition="compute", account=None, nodes=1,
+            ntasks_per_node=None, walltime="24:00:00",
+            qos=None, mem=None, module_loads=[], slurm_extras=[],
+        )
+        with patch("shalom.__main__._load_atoms", return_value=si):
+            rc = cmd_workflow(args)
+        assert rc == 1
+        assert "invalid --nscf-kgrid" in capsys.readouterr().out
+
+    # -- cmd_plot --combined dispatched ------------------------------------
+
+    def test_cmd_plot_combined_dispatched(self, tmp_path, capsys):
+        """cmd_plot with --combined calls CombinedPlotter."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_plot
+        from shalom.backends.base import BandStructureData, DOSData
+        import numpy as np
+        import argparse
+
+        fake_bs = BandStructureData(
+            eigenvalues=np.zeros((5, 3)),
+            kpoint_coords=np.zeros((5, 3)),
+            kpath_distances=np.linspace(0, 1, 5),
+        )
+        fake_dos = DOSData(
+            energies=np.array([0.0]),
+            dos=np.array([1.0]),
+            integrated_dos=np.array([0.5]),
+        )
+
+        (tmp_path / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        mock_plotter = MagicMock()
+
+        args = argparse.Namespace(
+            calc_dir=str(tmp_path), bands=False, dos=False, combined=True,
+            bands_dir=None, fermi_from=None, output=None,
+            title=None, emin=-6.0, emax=6.0, command="plot",
+        )
+        with patch("shalom.backends.qe_parser.find_xml_path", return_value="/x.xml"), \
+             patch("shalom.backends.qe_parser.parse_xml_bands", return_value=fake_bs), \
+             patch("shalom.backends.qe_parser.parse_dos_file", return_value=fake_dos), \
+             patch("shalom.backends.qe_parser.extract_fermi_energy", return_value=5.0), \
+             patch("shalom.plotting.combined_plot.CombinedPlotter", return_value=mock_plotter):
+            rc = cmd_plot(args)
+        assert rc == 0
+        mock_plotter.plot.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Combined plot saved" in out
+
+
+# ---------------------------------------------------------------------------
+# setup-qe pseudo_dir creation on --download
+# ---------------------------------------------------------------------------
+
+
+class TestCmdSetupQeDownloadCreatesPseudoDir:
+    """Test that setup-qe --download creates pseudo_dir when missing."""
+
+    def _make_args(self, **overrides):
+        import argparse
+        defaults = dict(pseudo_dir=None, elements=None, download=False, command="setup-qe")
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_download_creates_missing_pseudo_dir(self, tmp_path, capsys):
+        """--download with non-existent pseudo_dir creates the directory."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "new_pseudo_dir"
+        assert not pseudo_dir.exists()
+
+        args = self._make_args(
+            pseudo_dir=str(pseudo_dir), elements="Si", download=True,
+        )
+        with patch("shutil.which", return_value="/usr/bin/pw.x"), \
+             patch("urllib.request.urlretrieve"):
+            cmd_setup_qe(args)
+
+        # Directory should now exist
+        assert pseudo_dir.is_dir()
+
+    def test_no_download_does_not_create_dir(self, tmp_path, capsys):
+        """Without --download, missing pseudo_dir is NOT created."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "nonexistent_pseudo"
+        args = self._make_args(pseudo_dir=str(pseudo_dir), elements="Si")
+        with patch("shutil.which", return_value="/usr/bin/pw.x"):
+            cmd_setup_qe(args)
+
+        assert not pseudo_dir.exists()
+
+    def test_download_with_missing_dir_lists_all_as_missing(self, tmp_path, capsys):
+        """When pseudo_dir doesn't exist, all requested elements are listed as missing."""
+        from unittest.mock import patch, call
+        from shalom.__main__ import cmd_setup_qe
+
+        pseudo_dir = tmp_path / "no_such_dir"
+        args = self._make_args(
+            pseudo_dir=str(pseudo_dir), elements="Si,Fe", download=True,
+        )
+        with patch("shutil.which", return_value="/usr/bin/pw.x"), \
+             patch("urllib.request.urlretrieve") as mock_urlretrieve:
+            cmd_setup_qe(args)
+
+        out = capsys.readouterr().out
+        assert "Downloading" in out
+        # urlretrieve should have been called exactly twice (Si + Fe)
+        assert mock_urlretrieve.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Additional CLI edge case tests
+# ---------------------------------------------------------------------------
+
+
+class TestCLIEdgeCases:
+    """Test invalid inputs and error paths for new CLI arguments."""
+
+    def _make_workflow_args(self, tmp_path, **overrides):
+        import argparse
+        defaults = dict(
+            material="Si", structure=None, output=str(tmp_path),
+            pseudo_dir=None, nprocs=1, mpi_command="mpirun",
+            pw_command="pw.x", dos_command="dos.x",
+            timeout=3600, accuracy="standard", skip_relax=True,
+            is_2d=False, dos_emin=-20.0, dos_emax=10.0,
+            nscf_kgrid=None, resume=False, wsl=False,
+            command="workflow", slurm=False,
+            partition="compute", account=None, nodes=1,
+            ntasks_per_node=None, walltime="24:00:00",
+            qos=None, mem=None, module_loads=[], slurm_extras=[],
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_nscf_kgrid_two_components_returns_1(self, tmp_path, capsys):
+        """--nscf-kgrid with only 2 components returns error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        si = bulk("Si", "diamond", a=5.43)
+        args = self._make_workflow_args(tmp_path, nscf_kgrid="6x6")
+        with patch("shalom.__main__._load_atoms", return_value=si):
+            rc = cmd_workflow(args)
+        assert rc == 1
+        assert "invalid --nscf-kgrid" in capsys.readouterr().out
+
+    def test_nscf_kgrid_four_components_returns_1(self, tmp_path, capsys):
+        """--nscf-kgrid with 4 components returns error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        si = bulk("Si", "diamond", a=5.43)
+        args = self._make_workflow_args(tmp_path, nscf_kgrid="6x6x6x6")
+        with patch("shalom.__main__._load_atoms", return_value=si):
+            rc = cmd_workflow(args)
+        assert rc == 1
+        assert "invalid --nscf-kgrid" in capsys.readouterr().out
+
+    def test_nscf_kgrid_zero_value_returns_1(self, tmp_path, capsys):
+        """--nscf-kgrid with zero value returns error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        si = bulk("Si", "diamond", a=5.43)
+        args = self._make_workflow_args(tmp_path, nscf_kgrid="0x6x6")
+        with patch("shalom.__main__._load_atoms", return_value=si):
+            rc = cmd_workflow(args)
+        assert rc == 1
+        assert "invalid --nscf-kgrid" in capsys.readouterr().out
+
+    def test_nscf_kgrid_negative_value_returns_1(self, tmp_path, capsys):
+        """--nscf-kgrid with negative value returns error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        si = bulk("Si", "diamond", a=5.43)
+        args = self._make_workflow_args(tmp_path, nscf_kgrid="-1x6x6")
+        with patch("shalom.__main__._load_atoms", return_value=si):
+            rc = cmd_workflow(args)
+        assert rc == 1
+        assert "invalid --nscf-kgrid" in capsys.readouterr().out
+
+    def test_nscf_kgrid_comma_separated_format(self, tmp_path):
+        """--nscf-kgrid with comma-separated format (6,6,6) is parsed."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_workflow
+        from ase.build import bulk
+        si = bulk("Si", "diamond", a=5.43)
+        mock_wf_cls = MagicMock()
+        mock_wf_cls.return_value.run.return_value = {
+            "bands_png": None, "dos_png": None,
+            "fermi_energy": None, "failed_step": None,
+            "step_results": [], "completed_steps": [],
+        }
+        args = self._make_workflow_args(tmp_path, nscf_kgrid="8,8,4")
+        with patch("shalom.__main__._load_atoms", return_value=si), \
+             patch("shalom.workflows.standard.StandardWorkflow", mock_wf_cls):
+            rc = cmd_workflow(args)
+        assert rc == 0
+        assert mock_wf_cls.call_args.kwargs["nscf_kmesh"] == [8, 8, 4]
+
+    def test_combined_plot_missing_xml_returns_1(self, tmp_path, capsys):
+        """--combined when no band XML found returns error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_plot
+        import argparse
+
+        (tmp_path / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+        args = argparse.Namespace(
+            calc_dir=str(tmp_path), bands=False, dos=False, combined=True,
+            bands_dir=None, fermi_from=None, output=None,
+            title=None, emin=-6.0, emax=6.0, command="plot",
+        )
+        with patch("shalom.backends.qe_parser.find_xml_path", return_value=None):
+            rc = cmd_plot(args)
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "xml" in out.lower() or "band" in out.lower()
+
+    def test_combined_plot_missing_dos_returns_1(self, tmp_path, capsys):
+        """--combined when pwscf.dos is missing returns error."""
+        from unittest.mock import patch
+        from shalom.__main__ import cmd_plot
+        from shalom.backends.base import BandStructureData
+        import numpy as np
+        import argparse
+
+        fake_bs = BandStructureData(
+            eigenvalues=np.zeros((5, 3)),
+            kpoint_coords=np.zeros((5, 3)),
+            kpath_distances=np.linspace(0, 1, 5),
+        )
+        # No pwscf.dos file in tmp_path
+        args = argparse.Namespace(
+            calc_dir=str(tmp_path), bands=False, dos=False, combined=True,
+            bands_dir=None, fermi_from=None, output=None,
+            title=None, emin=-6.0, emax=6.0, command="plot",
+        )
+        with patch("shalom.backends.qe_parser.find_xml_path", return_value="/x.xml"), \
+             patch("shalom.backends.qe_parser.parse_xml_bands", return_value=fake_bs), \
+             patch("shalom.backends.qe_parser.extract_fermi_energy", return_value=5.0):
+            rc = cmd_plot(args)
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "dos" in out.lower()
+
+    def test_combined_plot_with_bands_dir(self, tmp_path, capsys):
+        """--combined --bands-dir uses bands_dir for XML lookup."""
+        from unittest.mock import patch, MagicMock
+        from shalom.__main__ import cmd_plot
+        from shalom.backends.base import BandStructureData, DOSData
+        import numpy as np
+        import argparse
+
+        bands_dir = tmp_path / "03_bands"
+        bands_dir.mkdir()
+        nscf_dir = tmp_path / "04_nscf"
+        nscf_dir.mkdir()
+        (nscf_dir / "pwscf.dos").write_text("# DOS\n0.0 1.0 0.5\n")
+
+        fake_bs = BandStructureData(
+            eigenvalues=np.zeros((5, 3)),
+            kpoint_coords=np.zeros((5, 3)),
+            kpath_distances=np.linspace(0, 1, 5),
+        )
+        fake_dos = DOSData(
+            energies=np.array([0.0]),
+            dos=np.array([1.0]),
+            integrated_dos=np.array([0.5]),
+        )
+        mock_plotter = MagicMock()
+
+        xml_calls = []
+        def tracking_find_xml(path):
+            xml_calls.append(path)
+            return "/x.xml"
+
+        args = argparse.Namespace(
+            calc_dir=str(nscf_dir), bands=False, dos=False, combined=True,
+            bands_dir=str(bands_dir), fermi_from=None, output=None,
+            title=None, emin=-6.0, emax=6.0, command="plot",
+        )
+        with patch("shalom.backends.qe_parser.find_xml_path", side_effect=tracking_find_xml), \
+             patch("shalom.backends.qe_parser.parse_xml_bands", return_value=fake_bs), \
+             patch("shalom.backends.qe_parser.parse_dos_file", return_value=fake_dos), \
+             patch("shalom.backends.qe_parser.extract_fermi_energy", return_value=5.0), \
+             patch("shalom.plotting.combined_plot.CombinedPlotter", return_value=mock_plotter):
+            rc = cmd_plot(args)
+
+        assert rc == 0
+        # find_xml_path should have been called with bands_dir, not nscf_dir
+        assert any(str(bands_dir) in c for c in xml_calls)

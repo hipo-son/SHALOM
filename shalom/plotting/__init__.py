@@ -12,12 +12,14 @@ Usage::
 """
 
 from shalom.plotting.band_plot import BandStructurePlotter
+from shalom.plotting.combined_plot import CombinedPlotter
 from shalom.plotting.dos_plot import DOSPlotter
 from shalom.plotting.phonon_plot import PhononBandPlotter, PhononDOSPlotter
 from shalom.plotting.xrd_plot import XRDPlotter
 
 __all__ = [
     "BandStructurePlotter",
+    "CombinedPlotter",
     "DOSPlotter",
     "PhononBandPlotter",
     "PhononDOSPlotter",

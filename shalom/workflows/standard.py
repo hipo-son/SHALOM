@@ -30,8 +30,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ase.io import read as ase_read
 
@@ -60,6 +63,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # dos.x Emin/Emax/DeltaE are in eV (QE divides by Ry internally).
+
+
+@dataclass
+class StepStatus:
+    """Status of a single workflow step."""
+
+    name: str
+    step_number: int
+    success: bool
+    error_message: Optional[str] = None
+    elapsed_seconds: float = 0.0
+    summary: str = ""
 
 
 class StandardWorkflow:
@@ -93,6 +108,10 @@ class StandardWorkflow:
         dos_emin: DOS energy window minimum in eV (dos.x expects eV directly).
         dos_emax: DOS energy window maximum in eV (dos.x expects eV directly).
         dos_deltaE: DOS energy step in eV (dos.x expects eV directly).
+        nscf_kmesh: Explicit NSCF k-point grid, e.g. ``[6, 6, 6]``.
+            If ``None`` (default), computed from ``DEFAULT_NSCF_KPR``.
+        resume: If ``True``, load checkpoint from output_dir and skip
+            already-completed steps.
     """
 
     def __init__(
@@ -113,6 +132,8 @@ class StandardWorkflow:
         dos_emin: float = -20.0,
         dos_emax: float = 10.0,
         dos_deltaE: float = 0.01,
+        nscf_kmesh: Optional[list] = None,
+        resume: bool = False,
         wsl: bool = False,
         slurm_config: Optional[Any] = None,
     ) -> None:
@@ -124,6 +145,8 @@ class StandardWorkflow:
         self.pw_executable = pw_executable
         self.dos_executable = dos_executable
         self.timeout = timeout
+        self.nscf_kmesh = nscf_kmesh
+        self.resume = resume
         self.wsl = wsl
         self.slurm_config = slurm_config
         if accuracy not in ("standard", "precise"):
@@ -155,15 +178,17 @@ class StandardWorkflow:
         """Execute the full workflow.
 
         Returns:
-            Dict with keys:
-            - ``"atoms"`` — seekpath standardized primitive cell used for SCF,
-              bands, and NSCF (``get_band_calc_atoms(relaxed)`` when seekpath
-              is available, otherwise the post-vc-relax or original structure).
+            Dict with keys (backward-compatible):
+            - ``"atoms"`` — seekpath standardized primitive cell.
             - ``"fermi_energy"`` — Fermi energy in eV (NSCF > SCF priority).
-            - ``"bands_png"`` — absolute path to the band structure plot, or
-              ``None`` if plotting failed.
-            - ``"dos_png"`` — absolute path to the DOS plot, or ``None``.
+            - ``"bands_png"`` — path to band structure plot, or ``None``.
+            - ``"dos_png"`` — path to DOS plot, or ``None``.
             - ``"calc_dirs"`` — dict mapping step names to directories.
+
+            New keys (v2):
+            - ``"step_results"`` — list of :class:`StepStatus` objects.
+            - ``"completed_steps"`` — list of step names that succeeded.
+            - ``"failed_step"`` — first step that failed, or ``None``.
         """
         self._validate_environment()
         os.makedirs(self.output_dir, exist_ok=True)
@@ -176,14 +201,51 @@ class StandardWorkflow:
         # Absolute SCF tmp dir — shared by bands & nscf
         scf_tmp_dir = os.path.abspath(os.path.join(scf_dir, "tmp"))
 
+        step_results: List[StepStatus] = []
+        failed_step: Optional[str] = None
+        scf_ok = False
+        bands_ok = False
+        nscf_ok = False
+
+        # Resume support: load checkpoint and determine which steps to skip.
+        done: set = set()
+        if self.resume:
+            ckpt = self._load_checkpoint()
+            if ckpt:
+                done = set(ckpt.get("completed_steps", []))
+                logger.info("Resuming workflow — completed steps: %s", sorted(done))
+
         # ------------------------------------------------------------------
         # Step 1: vc-relax (optional)
         # ------------------------------------------------------------------
         current_atoms = self.atoms
-        if not self.skip_relax:
-            logger.info("[1/5] vc-relax")
-            current_atoms = self._run_vc_relax(relax_dir, current_atoms)
+        if "vc_relax" in done:
+            step_results.append(StepStatus("vc_relax", 1, True, summary="resumed"))
+            logger.info("[1/5] vc-relax — already complete (resumed)")
+            # Recover relaxed structure from pw.out if available
+            pw_out = os.path.join(relax_dir, "pw.out")
+            if os.path.isfile(pw_out):
+                try:
+                    current_atoms = ase_read(pw_out, format="espresso-out", index=-1)
+                except Exception:
+                    pass
+        elif not self.skip_relax:
+            t0 = self._log_step_start(1, 5, "vc-relax")
+            try:
+                current_atoms = self._run_vc_relax(relax_dir, current_atoms)
+                summary = self._extract_pw_summary(os.path.join(relax_dir, "pw.out"))
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("vc_relax", 1, True,
+                                               elapsed_seconds=elapsed, summary=summary))
+                self._log_step_end(1, 5, "vc-relax", t0, summary)
+                self._save_checkpoint(["vc_relax"])
+            except RuntimeError as exc:
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("vc_relax", 1, False, str(exc), elapsed))
+                logger.error("[1/5] vc-relax FAILED (%s) — using input geometry", exc)
+                # vc-relax failure is non-fatal: continue with input atoms
         else:
+            step_results.append(StepStatus("vc_relax", 1, True, summary="skipped"))
             logger.info("[1/5] vc-relax SKIPPED")
 
         # Convert to seekpath standardized primitive cell so that the k-path
@@ -197,60 +259,163 @@ class StandardWorkflow:
         )
 
         # ------------------------------------------------------------------
-        # Step 2: scf
+        # Step 2: scf (fatal — prerequisite for everything)
         # ------------------------------------------------------------------
-        logger.info("[2/5] scf")
-        self._run_scf(scf_dir, calc_atoms)
-
-        # ------------------------------------------------------------------
-        # Step 3: bands
-        # ------------------------------------------------------------------
-        logger.info("[3/5] bands")
-        self._run_bands(bands_dir, calc_atoms, scf_tmp_dir)
-
-        # Preserve bands XML before NSCF overwrites it in scf_tmp_dir.
-        bands_xml_src = find_xml_path(scf_tmp_dir)
-        if bands_xml_src and os.path.isfile(bands_xml_src):
-            import shutil as _shutil
-            bands_xml_dst = os.path.join(bands_dir, "data-file-schema.xml")
+        if "scf" in done:
+            step_results.append(StepStatus("scf", 2, True, summary="resumed"))
+            logger.info("[2/5] scf — already complete (resumed)")
+            scf_ok = True
+        else:
+            t0 = self._log_step_start(2, 5, "scf")
             try:
-                _shutil.copy2(bands_xml_src, bands_xml_dst)
-                logger.debug("Copied bands XML to %s", bands_xml_dst)
-            except OSError as exc:
-                logger.warning(
-                    "Failed to preserve bands XML (%s); "
-                    "band plot may show NSCF data.", exc
+                self._run_scf(scf_dir, calc_atoms)
+                summary = self._extract_pw_summary(os.path.join(scf_dir, "pw.out"))
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("scf", 2, True,
+                                               elapsed_seconds=elapsed, summary=summary))
+                self._log_step_end(2, 5, "scf", t0, summary)
+                scf_ok = True
+                self._save_checkpoint(
+                    [s.name for s in step_results if s.success])
+            except RuntimeError as exc:
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("scf", 2, False, str(exc), elapsed))
+                logger.error("[2/5] scf FAILED — %s", exc)
+                failed_step = "scf"
+                return self._build_result(
+                    calc_atoms, None, None, None,
+                    relax_dir, scf_dir, bands_dir, nscf_dir,
+                    step_results, failed_step,
                 )
 
         # ------------------------------------------------------------------
-        # Step 4: nscf
+        # Step 3: bands (depends on SCF)
         # ------------------------------------------------------------------
-        logger.info("[4/5] nscf")
-        self._run_nscf(nscf_dir, calc_atoms, scf_tmp_dir)
+        if "bands" in done:
+            step_results.append(StepStatus("bands", 3, True, summary="resumed"))
+            logger.info("[3/5] bands — already complete (resumed)")
+            bands_ok = True
+        else:
+            t0 = self._log_step_start(3, 5, "bands")
+            try:
+                self._run_bands(bands_dir, calc_atoms, scf_tmp_dir)
+
+                # Preserve bands XML before NSCF overwrites it in scf_tmp_dir.
+                bands_xml_src = find_xml_path(scf_tmp_dir)
+                if bands_xml_src and os.path.isfile(bands_xml_src):
+                    import shutil as _shutil
+                    bands_xml_dst = os.path.join(bands_dir, "data-file-schema.xml")
+                    try:
+                        _shutil.copy2(bands_xml_src, bands_xml_dst)
+                        logger.debug("Copied bands XML to %s", bands_xml_dst)
+                    except OSError as copy_exc:
+                        logger.warning(
+                            "Failed to preserve bands XML (%s); "
+                            "band plot may show NSCF data.", copy_exc
+                        )
+
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("bands", 3, True,
+                                               elapsed_seconds=elapsed))
+                self._log_step_end(3, 5, "bands", t0)
+                bands_ok = True
+                self._save_checkpoint(
+                    [s.name for s in step_results if s.success])
+            except RuntimeError as exc:
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("bands", 3, False, str(exc), elapsed))
+                logger.error("[3/5] bands FAILED — %s", exc)
+                if not failed_step:
+                    failed_step = "bands"
 
         # ------------------------------------------------------------------
-        # Step 5: dos.x
+        # Step 4: nscf (depends on SCF, independent of bands)
         # ------------------------------------------------------------------
-        logger.info("[5/5] dos.x")
-        self._run_dos(nscf_dir, scf_tmp_dir)
+        if "nscf" in done:
+            step_results.append(StepStatus("nscf", 4, True, summary="resumed"))
+            logger.info("[4/5] nscf — already complete (resumed)")
+            nscf_ok = True
+        else:
+            t0 = self._log_step_start(4, 5, "nscf")
+            try:
+                self._run_nscf(nscf_dir, calc_atoms, scf_tmp_dir)
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("nscf", 4, True,
+                                               elapsed_seconds=elapsed))
+                self._log_step_end(4, 5, "nscf", t0)
+                nscf_ok = True
+                self._save_checkpoint(
+                    [s.name for s in step_results if s.success])
+            except RuntimeError as exc:
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("nscf", 4, False, str(exc), elapsed))
+                logger.error("[4/5] nscf FAILED — %s", exc)
+                if not failed_step:
+                    failed_step = "nscf"
+
+        # ------------------------------------------------------------------
+        # Step 5: dos.x (depends on NSCF)
+        # ------------------------------------------------------------------
+        if "dos" in done:
+            step_results.append(StepStatus("dos", 5, True, summary="resumed"))
+            logger.info("[5/5] dos.x — already complete (resumed)")
+        elif nscf_ok:
+            t0 = self._log_step_start(5, 5, "dos.x")
+            self._run_dos(nscf_dir, scf_tmp_dir)
+            elapsed = time.monotonic() - t0
+            step_results.append(StepStatus("dos", 5, True,
+                                           elapsed_seconds=elapsed))
+            self._log_step_end(5, 5, "dos.x", t0)
+            self._save_checkpoint(
+                [s.name for s in step_results if s.success])
+        else:
+            step_results.append(StepStatus("dos", 5, False,
+                                           "skipped: NSCF failed"))
+            logger.info("[5/5] dos.x SKIPPED (NSCF failed)")
 
         # ------------------------------------------------------------------
         # Fermi energy (NSCF preferred)
         # ------------------------------------------------------------------
-        fermi = self._get_best_fermi_energy(scf_dir, nscf_dir)
-        if fermi is None:
+        fermi = self._get_best_fermi_energy(scf_dir, nscf_dir) if scf_ok else None
+        if scf_ok and fermi is None:
             logger.warning(
                 "Fermi energy not found in NSCF or SCF output; "
                 "band/DOS plots will use 0 eV."
             )
 
         # ------------------------------------------------------------------
-        # Plotting
+        # Plotting (best-effort)
         # ------------------------------------------------------------------
-        bands_png = self._plot_bands(bands_dir, fermi, scf_tmp_dir)
-        dos_png   = self._plot_dos(nscf_dir, fermi)
+        bands_png = self._plot_bands(bands_dir, fermi, scf_tmp_dir) if bands_ok else None
+        dos_png   = self._plot_dos(nscf_dir, fermi) if nscf_ok else None
 
+        return self._build_result(
+            calc_atoms, fermi, bands_png, dos_png,
+            relax_dir, scf_dir, bands_dir, nscf_dir,
+            step_results, failed_step,
+        )
+
+    # ------------------------------------------------------------------
+    # Result builder
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_result(
+        calc_atoms: Any,
+        fermi: Optional[float],
+        bands_png: Optional[str],
+        dos_png: Optional[str],
+        relax_dir: str,
+        scf_dir: str,
+        bands_dir: str,
+        nscf_dir: str,
+        step_results: List["StepStatus"],
+        failed_step: Optional[str],
+    ) -> Dict[str, Any]:
+        """Build the result dict (backward-compatible + new keys)."""
+        completed = [s.name for s in step_results if s.success]
         return {
+            # Existing keys (unchanged API)
             "atoms": calc_atoms,
             "fermi_energy": fermi,
             "bands_png": bands_png,
@@ -261,7 +426,96 @@ class StandardWorkflow:
                 "bands": bands_dir,
                 "nscf": nscf_dir,
             },
+            # New keys
+            "step_results": step_results,
+            "completed_steps": completed,
+            "failed_step": failed_step,
         }
+
+    # ------------------------------------------------------------------
+    # Checkpoint (resume support)
+    # ------------------------------------------------------------------
+
+    _CHECKPOINT_FILE = "workflow_state.json"
+
+    def _save_checkpoint(self, completed_steps: List[str]) -> None:
+        """Write workflow state to output_dir/workflow_state.json."""
+        import json
+        from datetime import datetime
+        state = {
+            "version": 1,
+            "completed_steps": completed_steps,
+            "timestamp": datetime.now().isoformat(),
+        }
+        path = os.path.join(self.output_dir, self._CHECKPOINT_FILE)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2)
+        logger.debug("Checkpoint saved: %s (steps: %s)", path, completed_steps)
+
+    def _load_checkpoint(self) -> Optional[Dict[str, Any]]:
+        """Load checkpoint from output_dir.  Returns ``None`` if not found."""
+        import json
+        path = os.path.join(self.output_dir, self._CHECKPOINT_FILE)
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Could not load checkpoint %s: %s", path, exc)
+            return None
+
+    # ------------------------------------------------------------------
+    # Progress helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _log_step_start(step_num: int, total: int, name: str) -> float:
+        """Log step start and return monotonic timestamp."""
+        logger.info("[%d/%d] %s — starting", step_num, total, name)
+        return time.monotonic()
+
+    @staticmethod
+    def _log_step_end(
+        step_num: int, total: int, name: str,
+        t0: float, summary: str = "",
+    ) -> None:
+        """Log step completion with elapsed time and optional summary."""
+        elapsed = time.monotonic() - t0
+        minutes, seconds = divmod(elapsed, 60)
+        if minutes >= 1:
+            time_str = f"{int(minutes)}m{seconds:.1f}s"
+        else:
+            time_str = f"{elapsed:.1f}s"
+        msg = f"[{step_num}/{total}] {name} — done ({time_str})"
+        if summary:
+            msg += f" — {summary}"
+        logger.info(msg)
+
+    @staticmethod
+    def _extract_pw_summary(pw_out_path: str) -> str:
+        """Extract one-line summary from pw.out (best-effort, never raises)."""
+        try:
+            if not os.path.isfile(pw_out_path):
+                return ""
+            with open(pw_out_path, encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()[-200:]
+            text = "".join(lines)
+            parts: List[str] = []
+            m = re.search(r"!\s+total energy\s+=\s+([-\d.]+)\s+Ry", text)
+            if m:
+                parts.append(f"E={float(m.group(1)) * 13.6057:.4f} eV")
+            m = re.search(r"the Fermi energy is\s+([-\d.]+)\s+ev", text, re.IGNORECASE)
+            if m:
+                parts.append(f"Ef={m.group(1)} eV")
+            iterations = re.findall(r"iteration #\s*(\d+)", text)
+            if iterations:
+                parts.append(f"{iterations[-1]} SCF iter")
+            if "convergence has been achieved" in text.lower():
+                parts.append("converged")
+            return ", ".join(parts)
+        except Exception:
+            return ""
 
     # ------------------------------------------------------------------
     # Pre-flight validation
@@ -272,12 +526,22 @@ class StandardWorkflow:
         import shutil as _shutil
 
         warnings = []
-        if _shutil.which(self.pw_executable) is None:
-            warnings.append(f"'{self.pw_executable}' not found in PATH.")
-        if _shutil.which(self.dos_executable) is None:
-            warnings.append(f"'{self.dos_executable}' not found in PATH.")
-        if self.pseudo_dir and not os.path.isdir(self.pseudo_dir):
-            warnings.append(f"pseudo_dir does not exist: {self.pseudo_dir}")
+        if self.wsl:
+            # WSL mode: check inside WSL, not the Windows PATH
+            from shalom.backends.runner import detect_wsl_executable
+            if not detect_wsl_executable(self.pw_executable):
+                warnings.append(f"'{self.pw_executable}' not found in WSL.")
+            if not detect_wsl_executable(self.dos_executable):
+                warnings.append(f"'{self.dos_executable}' not found in WSL.")
+            # Skip pseudo_dir check — Windows os.path.isdir() cannot
+            # resolve WSL-converted paths (e.g. /mnt/c/...).
+        else:
+            if _shutil.which(self.pw_executable) is None:
+                warnings.append(f"'{self.pw_executable}' not found in PATH.")
+            if _shutil.which(self.dos_executable) is None:
+                warnings.append(f"'{self.dos_executable}' not found in PATH.")
+            if self.pseudo_dir and not os.path.isdir(self.pseudo_dir):
+                warnings.append(f"pseudo_dir does not exist: {self.pseudo_dir}")
         if warnings:
             for w in warnings:
                 logger.warning("Pre-flight: %s", w)
@@ -357,6 +621,15 @@ class StandardWorkflow:
 
         # Share scf charge density (absolute path required!)
         config.control["outdir"] = scf_tmp_dir
+
+        # Override k-mesh: explicit user value or reduced default for NSCF
+        if self.nscf_kmesh is not None:
+            config.kpoints.grid = list(self.nscf_kmesh)
+        else:
+            from shalom.backends._physics import DEFAULT_NSCF_KPR, compute_kpoints_grid
+            config.kpoints.grid = compute_kpoints_grid(
+                atoms, kpr=DEFAULT_NSCF_KPR, is_2d=config.is_2d,
+            )
 
         backend = QEBackend()
         backend.write_input(atoms, calc_dir, config=config)

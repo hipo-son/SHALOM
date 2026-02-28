@@ -13,6 +13,7 @@ Constants provided
 
 **DFT / validation thresholds** (shared across all backends):
     DEFAULT_KPR              — k-point resolution (2π/Å)
+    DEFAULT_NSCF_KPR         — NSCF/DOS k-point resolution (2π/Å)
     DEFAULT_BAND_NPOINTS     — k-points per band segment
     DEFAULT_VACUUM_THRESHOLD — 2D detection vacuum (Å)
     MIN_INTERATOMIC_DISTANCE — atomic overlap floor (Å)
@@ -116,6 +117,7 @@ RY_PER_BOHR_TO_EV_PER_ANG: float = 25.7112    # force unit: Ry/Bohr → eV/Ang
 # ---------------------------------------------------------------------------
 
 DEFAULT_KPR: float = 30.0                        # k-point resolution (2π/Å)
+DEFAULT_NSCF_KPR: float = 20.0                   # NSCF/DOS k-point resolution (2π/Å)
 DEFAULT_BAND_NPOINTS: int = 40                    # k-points per band segment
 DEFAULT_VACUUM_THRESHOLD: float = 5.0             # 2D detection vacuum (Å)
 MIN_INTERATOMIC_DISTANCE: float = 0.8             # atomic overlap floor (Å)
