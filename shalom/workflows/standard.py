@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ase.io import read as ase_read
 
-from shalom.backends._physics import AccuracyLevel, DEFAULT_BAND_NPOINTS
+from shalom.backends._physics import AccuracyLevel, DEFAULT_BAND_NPOINTS, RY_TO_EV
 from shalom.backends.qe import QEBackend
 from shalom.backends.qe_config import (
     QECalculationType,
@@ -145,6 +145,11 @@ class StandardWorkflow:
         self.pw_executable = pw_executable
         self.dos_executable = dos_executable
         self.timeout = timeout
+        if nscf_kmesh is not None:
+            if len(nscf_kmesh) != 3 or any(n < 1 for n in nscf_kmesh):
+                raise ValueError(
+                    f"nscf_kmesh must be [Nx, Ny, Nz] with positive ints, got {nscf_kmesh}"
+                )
         self.nscf_kmesh = nscf_kmesh
         self.resume = resume
         self.wsl = wsl
@@ -154,6 +159,10 @@ class StandardWorkflow:
                 f"accuracy must be 'standard' or 'precise', got '{accuracy}'"
             )
         self.accuracy = accuracy
+        self._accuracy_level = (
+            AccuracyLevel.PRECISE if accuracy == "precise"
+            else AccuracyLevel.STANDARD
+        )
         self.skip_relax = skip_relax
         self.npoints_kpath = npoints_kpath
         self.is_2d = is_2d
@@ -262,10 +271,17 @@ class StandardWorkflow:
         # Step 2: scf (fatal — prerequisite for everything)
         # ------------------------------------------------------------------
         if "scf" in done:
-            step_results.append(StepStatus("scf", 2, True, summary="resumed"))
-            logger.info("[2/5] scf — already complete (resumed)")
-            scf_ok = True
-        else:
+            scf_pw_out = os.path.join(scf_dir, "pw.out")
+            if os.path.isfile(scf_pw_out):
+                step_results.append(StepStatus("scf", 2, True, summary="resumed"))
+                logger.info("[2/5] scf — already complete (resumed)")
+                scf_ok = True
+            else:
+                logger.warning(
+                    "Checkpoint says SCF done but pw.out missing; re-running SCF"
+                )
+                done.discard("scf")
+        if "scf" not in done:
             t0 = self._log_step_start(2, 5, "scf")
             try:
                 self._run_scf(scf_dir, calc_atoms)
@@ -361,13 +377,18 @@ class StandardWorkflow:
             logger.info("[5/5] dos.x — already complete (resumed)")
         elif nscf_ok:
             t0 = self._log_step_start(5, 5, "dos.x")
-            self._run_dos(nscf_dir, scf_tmp_dir)
-            elapsed = time.monotonic() - t0
-            step_results.append(StepStatus("dos", 5, True,
-                                           elapsed_seconds=elapsed))
-            self._log_step_end(5, 5, "dos.x", t0)
-            self._save_checkpoint(
-                [s.name for s in step_results if s.success])
+            try:
+                self._run_dos(nscf_dir, scf_tmp_dir)
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("dos", 5, True,
+                                               elapsed_seconds=elapsed))
+                self._log_step_end(5, 5, "dos.x", t0)
+                self._save_checkpoint(
+                    [s.name for s in step_results if s.success])
+            except Exception as exc:
+                elapsed = time.monotonic() - t0
+                step_results.append(StepStatus("dos", 5, False, str(exc), elapsed))
+                logger.error("[5/5] dos.x FAILED — %s", exc)
         else:
             step_results.append(StepStatus("dos", 5, False,
                                            "skipped: NSCF failed"))
@@ -448,9 +469,12 @@ class StandardWorkflow:
             "timestamp": datetime.now().isoformat(),
         }
         path = os.path.join(self.output_dir, self._CHECKPOINT_FILE)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(state, fh, indent=2)
-        logger.debug("Checkpoint saved: %s (steps: %s)", path, completed_steps)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=2)
+            logger.debug("Checkpoint saved: %s (steps: %s)", path, completed_steps)
+        except OSError as exc:
+            logger.warning("Could not save checkpoint: %s", exc)
 
     def _load_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Load checkpoint from output_dir.  Returns ``None`` if not found."""
@@ -504,7 +528,7 @@ class StandardWorkflow:
             parts: List[str] = []
             m = re.search(r"!\s+total energy\s+=\s+([-\d.]+)\s+Ry", text)
             if m:
-                parts.append(f"E={float(m.group(1)) * 13.6057:.4f} eV")
+                parts.append(f"E={float(m.group(1)) * RY_TO_EV:.4f} eV")
             m = re.search(r"the Fermi energy is\s+([-\d.]+)\s+ev", text, re.IGNORECASE)
             if m:
                 parts.append(f"Ef={m.group(1)} eV")
@@ -553,7 +577,7 @@ class StandardWorkflow:
     def _run_vc_relax(self, calc_dir: str, atoms: "Atoms") -> "Atoms":
         """Run vc-relax and return the relaxed structure."""
         os.makedirs(calc_dir, exist_ok=True)
-        acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
+        acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.VC_RELAX, accuracy=acc, atoms=atoms)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
@@ -578,7 +602,7 @@ class StandardWorkflow:
     def _run_scf(self, calc_dir: str, atoms: "Atoms") -> None:
         """Run scf calculation."""
         os.makedirs(calc_dir, exist_ok=True)
-        acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
+        acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.SCF, accuracy=acc, atoms=atoms)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
@@ -590,7 +614,7 @@ class StandardWorkflow:
     def _run_bands(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> None:
         """Run bands calculation using the scf charge density."""
         os.makedirs(calc_dir, exist_ok=True)
-        acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
+        acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.BANDS, accuracy=acc, atoms=atoms)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
@@ -614,7 +638,7 @@ class StandardWorkflow:
     def _run_nscf(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> None:
         """Run nscf calculation using the scf charge density."""
         os.makedirs(calc_dir, exist_ok=True)
-        acc = AccuracyLevel.PRECISE if self.accuracy == "precise" else AccuracyLevel.STANDARD
+        acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.NSCF, accuracy=acc, atoms=atoms)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir

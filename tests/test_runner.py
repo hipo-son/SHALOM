@@ -1076,3 +1076,57 @@ class TestBuildCommandWSL:
         config = ExecutionConfig(command="pw.x", nprocs=1, wsl=True)
         cmd = ExecutionRunner.build_command(config)
         assert cmd == ["wsl", "-e", "bash", "-c", "pw.x"]
+
+    def test_wsl_build_command_with_spaces_in_path(self):
+        """Paths with spaces are properly shlex.quoted for WSL bash -c."""
+        config = ExecutionConfig(
+            command="/opt/qe 7.2/bin/pw.x", wsl=True, nprocs=1,
+        )
+        cmd = ExecutionRunner.build_command(config)
+        shell_cmd = cmd[-1]
+        # shlex.quote wraps the space-containing path in single quotes
+        assert "'/opt/qe 7.2/bin/pw.x'" in shell_cmd
+
+    def test_wsl_build_command_with_spaces_parallel(self):
+        """Both mpi_command and command with spaces are quoted."""
+        config = ExecutionConfig(
+            command="/opt/qe 7.2/bin/pw.x",
+            mpi_command="/opt/open mpi/bin/mpirun",
+            nprocs=4,
+            wsl=True,
+        )
+        cmd = ExecutionRunner.build_command(config)
+        shell_cmd = cmd[-1]
+        assert "'/opt/qe 7.2/bin/pw.x'" in shell_cmd
+        assert "'/opt/open mpi/bin/mpirun'" in shell_cmd
+        assert "-np 4" in shell_cmd
+
+
+# ---------------------------------------------------------------------------
+# H6: WSL patcher encoding
+# ---------------------------------------------------------------------------
+
+
+class TestWSLPatcherEncoding:
+    """_patch_input_paths_for_wsl uses UTF-8 encoding."""
+
+    def test_wsl_patcher_reads_utf8(self, tmp_path):
+        """Input file with UTF-8 content (e.g. comments) is read correctly."""
+        pw_in = tmp_path / "pw.in"
+        # Write UTF-8 content with non-ASCII chars (Korean comment)
+        content = (
+            "&CONTROL\n"
+            "  pseudo_dir = 'C:/Users/Test/pseudos'\n"
+            "  ! 한국어 주석\n"
+            "/\n"
+        )
+        pw_in.write_text(content, encoding="utf-8")
+
+        # Should not raise even with non-ASCII content
+        _patch_input_paths_for_wsl(str(tmp_path), "pw.in")
+
+        # Verify the file was modified (pseudo_dir converted)
+        result = pw_in.read_text(encoding="utf-8")
+        assert "/mnt/c/" in result
+        # Non-ASCII preserved
+        assert "한국어" in result

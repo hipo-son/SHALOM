@@ -100,8 +100,17 @@ class CombinedPlotter:
         shift_dos = dd.fermi_energy if zero_at_fermi else 0.0
 
         # ── Left panel: Band structure ──────────────────────────────────
-        x = bd.kpath_distances
+        x = np.array(bd.kpath_distances, dtype=float)
         evals = bd.eigenvalues - shift_band
+
+        # Collapse gaps at discontinuous k-path breaks ("X|K" labels)
+        if bd.high_sym_labels and len(x) > 1:
+            for idx in sorted(bd.high_sym_labels):
+                lbl = bd.high_sym_labels[idx]
+                if "|" in lbl and idx + 1 < len(x):
+                    gap = x[idx + 1] - x[idx]
+                    if gap > 0.0:
+                        x[idx + 1:] -= gap
 
         if (bd.is_spin_polarized
                 and bd.spin_up is not None and bd.spin_down is not None):

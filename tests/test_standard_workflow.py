@@ -1791,3 +1791,240 @@ class TestResumeEdgeCases:
         # Currently no version validation — data is returned as-is
         assert ckpt is not None
         assert ckpt["completed_steps"] == ["vc_relax"]
+
+
+# ---------------------------------------------------------------------------
+# C1: dos.x failure does not crash workflow
+# ---------------------------------------------------------------------------
+
+
+class TestDosFailureHandling:
+    """Verify dos.x errors are caught and recorded in step_results."""
+
+    def test_dos_failure_does_not_crash_workflow(self, tmp_path):
+        """OSError in _run_dos is caught; step_results records failure."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), skip_relax=True,
+        )
+
+        scf_dir = tmp_path / "02_scf"
+        scf_dir.mkdir(parents=True)
+        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
+        nscf_dir = tmp_path / "04_nscf"
+        nscf_dir.mkdir(parents=True)
+        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
+
+        with patch.object(wf, "_pw_run"), \
+             patch.object(wf, "_run_dos", side_effect=OSError("disk full")), \
+             patch("shalom.workflows.standard.find_xml_path", return_value=None):
+            result = wf.run()
+
+        # dos step should be recorded as failed
+        dos_step = [s for s in result["step_results"] if s.name == "dos"]
+        assert len(dos_step) == 1
+        assert dos_step[0].success is False
+        assert "disk full" in dos_step[0].error_message
+        # Workflow should still complete (not crash)
+        assert result["step_results"] is not None
+
+    def test_dos_failure_does_not_block_plotting(self, tmp_path):
+        """Even if dos.x fails, band plot is still attempted."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), skip_relax=True,
+        )
+
+        scf_dir = tmp_path / "02_scf"
+        scf_dir.mkdir(parents=True)
+        (scf_dir / "pw.out").write_text("the Fermi energy is   5.0000 ev\n")
+        nscf_dir = tmp_path / "04_nscf"
+        nscf_dir.mkdir(parents=True)
+        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.1234 ev\n")
+
+        plot_bands_called = []
+
+        def mock_plot_bands(*args, **kwargs):
+            plot_bands_called.append(True)
+            return None
+
+        with patch.object(wf, "_pw_run"), \
+             patch.object(wf, "_run_dos", side_effect=RuntimeError("dos crash")), \
+             patch.object(wf, "_plot_bands", side_effect=mock_plot_bands), \
+             patch("shalom.workflows.standard.find_xml_path", return_value=None):
+            result = wf.run()
+
+        # _plot_bands should still have been called (bands succeeded)
+        assert len(plot_bands_called) == 1
+
+
+# ---------------------------------------------------------------------------
+# H1: _save_checkpoint OSError handling
+# ---------------------------------------------------------------------------
+
+
+class TestCheckpointOSError:
+    """_save_checkpoint should not crash on OSError."""
+
+    def test_save_checkpoint_disk_error_does_not_crash(self, tmp_path):
+        """OSError during checkpoint write logs a warning, doesn't raise."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            # Should not raise
+            wf._save_checkpoint(["scf"])
+
+
+# ---------------------------------------------------------------------------
+# H2: RY_TO_EV constant usage
+# ---------------------------------------------------------------------------
+
+
+class TestRyToEvConstant:
+    """_extract_pw_summary uses RY_TO_EV constant, not magic number."""
+
+    def test_ry_to_ev_import(self):
+        """RY_TO_EV is imported in standard module."""
+        from shalom.workflows import standard
+        assert hasattr(standard, "RY_TO_EV")
+        assert standard.RY_TO_EV == 13.6057
+
+
+# ---------------------------------------------------------------------------
+# H3: nscf_kmesh validation
+# ---------------------------------------------------------------------------
+
+
+class TestNscfKmeshValidation:
+    """nscf_kmesh must be [Nx, Ny, Nz] with positive ints."""
+
+    def test_nscf_kmesh_invalid_length_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="nscf_kmesh must be"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test",
+                nscf_kmesh=[6, 6],
+            )
+
+    def test_nscf_kmesh_four_elements_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="nscf_kmesh must be"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test",
+                nscf_kmesh=[6, 6, 6, 6],
+            )
+
+    def test_nscf_kmesh_zero_value_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="nscf_kmesh must be"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test",
+                nscf_kmesh=[6, 0, 6],
+            )
+
+    def test_nscf_kmesh_negative_value_raises(self):
+        si = bulk("Si", "diamond", a=5.43)
+        with pytest.raises(ValueError, match="nscf_kmesh must be"):
+            StandardWorkflow(
+                atoms=si, output_dir="/tmp/test",
+                nscf_kmesh=[6, -1, 6],
+            )
+
+    def test_nscf_kmesh_valid_accepted(self):
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir="/tmp/test",
+            nscf_kmesh=[8, 8, 8],
+        )
+        assert wf.nscf_kmesh == [8, 8, 8]
+
+
+# ---------------------------------------------------------------------------
+# H5: Resume missing SCF output reruns
+# ---------------------------------------------------------------------------
+
+
+class TestResumeMissingSCFOutput:
+    """Resume detects missing pw.out and re-runs SCF."""
+
+    def test_resume_missing_scf_output_reruns(self, tmp_path):
+        """Checkpoint says SCF done but pw.out missing → SCF is re-run."""
+        import json
+        si = bulk("Si", "diamond", a=5.43)
+
+        os.makedirs(str(tmp_path), exist_ok=True)
+        ckpt_path = os.path.join(str(tmp_path), "workflow_state.json")
+        with open(ckpt_path, "w") as f:
+            json.dump({
+                "version": 1,
+                "completed_steps": ["vc_relax", "scf"],
+            }, f)
+
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path),
+            skip_relax=False, resume=True,
+        )
+
+        pw_run_dirs = []
+
+        def tracking_pw_run(calc_dir):
+            pw_run_dirs.append(calc_dir)
+
+        # Create 02_scf dir but do NOT create pw.out
+        scf_dir = tmp_path / "02_scf"
+        scf_dir.mkdir(parents=True, exist_ok=True)
+        # Create nscf dir with output for downstream steps
+        nscf_dir = tmp_path / "04_nscf"
+        nscf_dir.mkdir(parents=True, exist_ok=True)
+        (nscf_dir / "pw.out").write_text("the Fermi energy is   5.0 ev\n")
+
+        import numpy as np
+        from shalom.backends.base import DOSData
+        fake_dos = DOSData(
+            energies=np.array([0.0]),
+            dos=np.array([1.0]),
+            integrated_dos=np.array([0.0]),
+            source="qe",
+        )
+
+        with patch.object(wf, "_pw_run", side_effect=tracking_pw_run), \
+             patch.object(wf, "_dos_run"), \
+             patch("shalom.workflows.standard.parse_dos_file", return_value=fake_dos), \
+             patch("shalom.workflows.standard.find_xml_path", return_value=None):
+            # Write pw.out after _pw_run is called (simulate SCF producing output)
+            original_side = tracking_pw_run
+
+            def pw_run_then_write(calc_dir):
+                original_side(calc_dir)
+                if "02_scf" in calc_dir:
+                    pw_out_path = os.path.join(calc_dir, "pw.out")
+                    with open(pw_out_path, "w") as f:
+                        f.write("the Fermi energy is   5.0 ev\n")
+
+            with patch.object(wf, "_pw_run", side_effect=pw_run_then_write):
+                result = wf.run()
+
+        # SCF should have been re-run (not just resumed)
+        assert any("02_scf" in d for d in pw_run_dirs)
+
+
+# ---------------------------------------------------------------------------
+# H7: AccuracyLevel cached
+# ---------------------------------------------------------------------------
+
+
+class TestAccuracyLevelCached:
+    """_accuracy_level attribute is set in __init__."""
+
+    def test_accuracy_level_standard(self):
+        from shalom.backends._physics import AccuracyLevel
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir="/tmp/test", accuracy="standard")
+        assert wf._accuracy_level == AccuracyLevel.STANDARD
+
+    def test_accuracy_level_precise(self):
+        from shalom.backends._physics import AccuracyLevel
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir="/tmp/test", accuracy="precise")
+        assert wf._accuracy_level == AccuracyLevel.PRECISE

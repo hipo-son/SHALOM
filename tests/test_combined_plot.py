@@ -364,6 +364,46 @@ class TestCombinedPlotter:
         import matplotlib.pyplot as plt
         plt.close(fig)
 
+    def test_gap_collapse_at_discontinuity(self):
+        """Gap-collapse removes artificial gaps at 'X|K' path breaks."""
+        bs = _make_band_data(nkpts=30)
+        # Set up a discontinuity at k-point 15
+        # Manually create kpath_distances with a jump at index 15
+        raw_dist = np.linspace(0, 2, 30)
+        # Insert artificial gap at break point
+        raw_dist[16:] += 0.5
+        bs.kpath_distances = raw_dist
+        bs.high_sym_labels = {0: "G", 15: "X|K", 29: "L"}
+
+        dos = _make_dos_data()
+        plotter = CombinedPlotter(bs, dos)
+        fig = plotter.plot()
+        ax_band = fig.get_axes()[0]
+
+        # After gap-collapse, x-axis extent should be smaller than raw
+        xlim = ax_band.get_xlim()
+        assert xlim[1] - xlim[0] < raw_dist[-1] - raw_dist[0]
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+    def test_no_gap_collapse_without_pipe_label(self):
+        """Normal labels (no '|') do not trigger gap collapse."""
+        bs = _make_band_data(nkpts=30)
+        raw_dist = np.linspace(0, 2, 30)
+        bs.kpath_distances = raw_dist.copy()
+        bs.high_sym_labels = {0: "G", 15: "X", 29: "L"}
+
+        dos = _make_dos_data()
+        plotter = CombinedPlotter(bs, dos)
+        fig = plotter.plot()
+        ax_band = fig.get_axes()[0]
+
+        # No collapse → x extent unchanged
+        xlim = ax_band.get_xlim()
+        assert abs((xlim[1] - xlim[0]) - (raw_dist[-1] - raw_dist[0])) < 1e-6
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
 
 # ---------------------------------------------------------------------------
 # Import / export from shalom.plotting

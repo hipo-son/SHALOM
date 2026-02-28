@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -111,7 +112,7 @@ def _patch_input_paths_for_wsl(directory: str, input_file: str = "pw.in") -> Non
     if not os.path.isfile(input_path):
         return
 
-    with open(input_path, "r") as f:
+    with open(input_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     changed = False
@@ -143,7 +144,7 @@ def _patch_input_paths_for_wsl(directory: str, input_file: str = "pw.in") -> Non
                 )
 
     if changed:
-        with open(input_path, "w") as f:
+        with open(input_path, "w", encoding="utf-8") as f:
             f.write(content)
 
 
@@ -202,11 +203,11 @@ class ExecutionRunner:
             # Use "wsl -e bash -c ..." to avoid MSYS2 path mangling
             # (Git Bash rewrites /opt/... to C:/Program Files/Git/opt/...)
             if config.nprocs <= 1:
-                shell_cmd = config.command
+                shell_cmd = shlex.quote(config.command)
             else:
                 shell_cmd = (
-                    f"{config.mpi_command} --allow-run-as-root"
-                    f" -np {config.nprocs} {config.command}"
+                    f"{shlex.quote(config.mpi_command)} --allow-run-as-root"
+                    f" -np {config.nprocs} {shlex.quote(config.command)}"
                 )
             return ["wsl", "-e", "bash", "-c", shell_cmd]
 
