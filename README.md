@@ -31,9 +31,10 @@ Existing LLM-agent systems are either too general (lacking domain primitives for
 - **Hierarchical agent composition** — Nest agents in configurable layers (planning, execution, evaluation, auditing) that communicate via typed Pydantic schemas.
 - **Secure sandboxed execution** — Run LLM-generated Python/ASE code safely with whitelist-only builtins, import restrictions, timeouts, and audit logging.
 - **Pluggable LLM backends** — Swap between OpenAI, Anthropic, or local/self-hosted models (Ollama, vLLM, llama.cpp) via `base_url` parameter.
-- **Dual DFT backend support** — Quantum ESPRESSO (open-source, personal workstations) and VASP (licensed, HPC clusters) as first-class DFT solvers, with a unified abstraction layer.
+- **Dual DFT backend support** — Quantum ESPRESSO (open-source, personal workstations) and VASP (licensed, HPC clusters) as first-class DFT solvers, with a unified abstraction layer. QE 7.1+ HUBBARD card syntax supported natively.
 - **HPC-native design** — First-class Slurm integration for submitting and monitoring jobs on supercomputers.
 - **MCP server for Claude Code** — 16 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
+- **Hands-on tutorials** — Jupyter notebooks for Si (convergence, bands, DOS, phonons, XRD) and Fe2O3 (spin-polarized, GGA+U, magnetic analysis) with real QE calculations.
 - **Deterministic reproducibility** — Seed-locked prompts and structured outputs ensure every run is traceable and repeatable.
 
 ### Proof of Concept: Autonomous Material Discovery
@@ -322,6 +323,17 @@ After setup, tell Claude Code things like:
 
 The `run_pipeline` tool runs the full multi-agent LLM pipeline and supports `base_url` for local LLM servers as an alternative to external API keys.
 
+## Tutorials
+
+Step-by-step Jupyter notebooks with real QE calculations — see [`tutorials/`](tutorials/):
+
+| Notebook | Material | What You'll Learn | Time |
+|----------|----------|-------------------|------|
+| `01_silicon_complete_study.ipynb` | Si | Convergence tests, bands, DOS, phonons, XRD | ~30 min |
+| `02_fe2o3_magnetic_oxide.ipynb` | Fe2O3 | Spin-polarized DFT, GGA+U (Hubbard), magnetic analysis | ~45-60 min |
+
+Prerequisites: QE 7.1+, SSSP pseudopotentials, `pip install -e ".[all]"`. See [tutorials/README.md](tutorials/README.md) for details.
+
 ## Python API
 
 ```python
@@ -363,7 +375,7 @@ docker pull ghcr.io/hipo-son/shalom:latest
 
 | Phase | Target | Key Features | Status |
 |-------|--------|-------------|--------|
-| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (16 tools), local LLM support, token-aware compression, band/DOS/XRD plotting, convergence tests, 5-step workflow, 6 post-DFT analysis modules, audit logging | Code complete (1390+ tests, 94.6% coverage) |
+| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (16 tools), local LLM support, token-aware compression, band/DOS/XRD plotting, convergence tests, 5-step workflow, 6 post-DFT analysis modules, DFT tutorials, audit logging | Code complete (1536 tests, 13 skipped) |
 | **Phase 2** | Engine expansion | VASP-Slurm HPC, LAMMPS/AIMD integration, Dynamic Recipe Generator, 100+ self-correction benchmarks | Planned |
 | **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) | Planned |
 
@@ -378,6 +390,7 @@ See the [Master Design Document](docs/master_design_document.md) for detailed mi
 | [Architecture](docs/architecture.rst) | System design: agents, backends, workflows |
 | [API Reference](docs/api_reference.rst) | Full autodoc for every public module |
 | [Master Design Document](docs/master_design_document.md) | Roadmap, milestones, publication strategy |
+| [Tutorials](tutorials/) | Hands-on Jupyter notebooks (Si, Fe2O3) with real QE calculations |
 
 **Build docs locally:**
 

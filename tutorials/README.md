@@ -75,7 +75,18 @@ Each notebook saves all plots and data under `~/Desktop/shalom-tutorials/`:
 At the top of each notebook, adjust these variables:
 
 ```python
-PSEUDO_DIR = r"C:\Users\Sejong\pseudopotentials"  # your pseudopotential directory
-WSL = True       # Set False for native Linux/macOS
-NPROCS = 2       # MPI processes (increase for faster runs)
+# Windows (WSL):
+PSEUDO_DIR = r"C:\Users\<username>\pseudopotentials"
+WSL = True
+NPROCS = 2
+
+# Linux / macOS (native QE):
+PSEUDO_DIR = "/home/<username>/pseudopotentials"
+WSL = False
+NPROCS = 4
+```
+
+Or set the `SHALOM_PSEUDO_DIR` environment variable globally:
+```bash
+export SHALOM_PSEUDO_DIR=~/pseudopotentials
 ```

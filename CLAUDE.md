@@ -8,13 +8,13 @@ SHALOM (System of Hierarchical Agents for Logical Orchestration of Materials) �
 shalom/
 ├── agents/           # LLM agent layers (Design, Simulation, Review)
 ├── backends/         # DFT backends (VASP, QE) + error recovery + execution
-│   ├── _physics.py   # Shared constants index (unit conversions, DFT thresholds, AccuracyLevel, detect_2d)
+│   ├── _physics.py   # Shared constants (unit conversions, DFT thresholds, AccuracyLevel, HUBBARD_U_VALUES, detect_2d)
 │   ├── _compression.py # Token-aware error log compression + postprocess_parse_result helper
 │   ├── base.py       # Backend-agnostic dataclasses: DFTResult, BandStructureData, DOSData
 │   ├── vasp.py       # VASP backend (write_input, parse_output)
 │   ├── vasp_config.py # VASP config (VASPInputConfig, get_preset)
-│   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out, parse_output_bands)
-│   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, generate_band_kpath, SSSP metadata)
+│   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out, HUBBARD card migration)
+│   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, generate_band_kpath, resolve_pseudo_dir, SSSP metadata)
 │   ├── qe_parser.py  # QE output parsers (parse_xml_bands, parse_dos_file, find_xml_path,
 │   │                 #   extract_fermi_energy, compute_nbnd, QE_XML_NS)
 │   ├── qe_error_recovery.py # QE error recovery (progressive correction, S-matrix diagnostic)
@@ -57,6 +57,11 @@ shalom/
 ├── mcp_server.py     # MCP server for Claude Code integration (16 tools)
 ├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/analyze/pipeline
 └── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
+
+tutorials/
+├── 01_silicon_complete_study.ipynb   # Si: convergence, bands, DOS, phonons, XRD (~30 min)
+├── 02_fe2o3_magnetic_oxide.ipynb     # Fe2O3: spin-polarized, GGA+U, magnetic analysis (~45 min)
+└── README.md                         # Prerequisites, configuration, output directory structure
 ```
 
 ## Key Conventions
@@ -83,7 +88,7 @@ shalom/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: 1390 tests, coverage ≥85%
+pytest tests/                          # default: 1536 tests, coverage ≥85%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```
@@ -165,6 +170,8 @@ All magic numbers are named constants. `_physics.py` docstring has the full inde
 - VASP "relaxation" (ISIF=3) maps to QE "vc-relax" (not "relax")
 - ecutrho from SSSP per-element metadata (not blanket 8x ecutwfc)
 - 2D: assume_isolated='2D', vdw_corr='dft-d3', dftd3_version=4 (BJ), cell_dofree='2Dxy'
+- HUBBARD: QE 7.1+ card syntax (`HUBBARD (ortho-atomic)` + `U Fe-3d 5.3`), auto-migrated from old `lda_plus_u`/`Hubbard_U(i)` namelist entries; PRECISE accuracy only
+- pseudo_dir: `resolve_pseudo_dir()` 3-tier resolution — explicit arg → `$SHALOM_PSEUDO_DIR` → `~/pseudopotentials`
 
 ### CLI Usage
 ```bash

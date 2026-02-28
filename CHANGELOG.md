@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **DFT Tutorial Notebooks** (`tutorials/`)
+  - `01_silicon_complete_study.ipynb`: Si convergence tests (ecutwfc + kpoints), 5-step workflow (vc-relax→scf→bands→nscf→dos), phonon analysis (bands, DOS, thermal properties), XRD pattern, combined band+DOS figure
+  - `02_fe2o3_magnetic_oxide.ipynb`: Fe2O3 spin-polarized DFT with GGA+U (Hubbard), magnetic analysis (site moments, Löwdin charges), DOS gap estimation, XRD pattern
+  - `tutorials/README.md`: prerequisites, configuration, output directory structure
+- **QE 7.1+ HUBBARD card syntax** (`shalom/backends/qe.py`)
+  - Automatic migration from old `lda_plus_u` / `Hubbard_U(i)` namelist entries to `HUBBARD (ortho-atomic)` card
+  - Orbital labels include principal quantum number (`Fe-3d`, not `Fe-d`)
+  - Card placed between `ATOMIC_SPECIES` and `ATOMIC_POSITIONS` per QE 7.1+ spec
+  - 7 unit tests covering Fe2O3/multi-element/pure metal/semiconductor/orbital labels
+- **`resolve_pseudo_dir()` shared utility** (`shalom/backends/qe_config.py`)
+  - 3-tier pseudopotential directory resolution: explicit arg → `$SHALOM_PSEUDO_DIR` → `~/pseudopotentials`
+  - Applied consistently across all 6 call sites: `StandardWorkflow`, `ConvergenceWorkflow`, `direct_run`, `mcp_server`, `__main__` (setup-qe)
+  - Exported via `shalom.backends` public API
+  - 5 unit tests for resolution logic
+- **Preflight warning improvements** (`shalom/workflows/standard.py`)
+  - WSL mode: logs resolved pseudo_dir path at INFO level for verification
+  - Non-WSL: actionable guidance (`set $SHALOM_PSEUDO_DIR or pass pseudo_dir=`) in warning messages
+- **12 new tests** (1536 passed, 13 skipped): `TestHubbardCard` (7), `TestResolvePseudoDir` (5)
 - **MCP Server — Claude Code Integration** (`shalom/mcp_server.py`)
   - FastMCP v1.x server exposing 10 DFT tools via Model Context Protocol
   - 9 deterministic tools (no API key needed): `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`
@@ -37,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full multi-agent material discovery from the command line
   - `--provider`, `--model`, `--material`, `--steps`, `--selector-mode`, `--max-loops` flags
   - `--base-url` for local LLM servers
-- **80 new tests** (1124 total, 94.6% coverage): MCP server tools (54 tests in `test_mcp_server.py`), LLMProvider base_url (4), SafeExecutor hardening (6), audit logging (2), pipeline base_url integration (14)
+- **80 new tests** (1124 total): MCP server tools (54 tests in `test_mcp_server.py`), LLMProvider base_url (4), SafeExecutor hardening (6), audit logging (2), pipeline base_url integration (14)
 - **Materials Project (MP) API Integration Router** (`shalom/pipeline.py`)
   - Added Fast Track routing to bypass AI generation and fetch accurate structures directly via `mp_client.fetch_structure`
   - Seamless fallback logic to `GeometryGenerator` if the requested material is novel or MP search fails
@@ -85,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `nosym: true`, `noinv: true` — full BZ sampling required for DOS
 - **`[plotting]` optional dependency extra** (`pyproject.toml`): `matplotlib>=3.5.0`, `seekpath>=2.0.0`
 - **63 new tests** (922 passed, 1 skipped): `test_qe_parser.py` (26), `test_band_plot.py` (13), `test_dos_plot.py` (6), `test_convergence.py` (13), `test_standard_workflow.py` (9), `test_qe_config.py` (11 new: `TestGetBandCalcAtoms`, `TestGenerateBandKpath`); fixtures: `mock_bands_xml.xml`, `mock_dos.dat`, `mock_dos_spin.dat`
-- **122 new tests** (1044 passed, 1 skipped; 94.6% coverage) closing coverage gaps across CLI, workflows, parsers, and plotting:
+- **122 new tests** (1044 total) closing coverage gaps across CLI, workflows, parsers, and plotting:
   - `test_cli_main.py`: 10 new test classes covering `cmd_plot`, `cmd_workflow`, `cmd_converge`, `_load_atoms`, `_execute_dft`, `_detect_wsl_distros`, `_print_install_guide_windows/linux`, `main()` dispatcher (~50 tests)
   - `test_standard_workflow.py`: 66 tests for `StandardWorkflow` lifecycle, step isolation, error propagation, and `_plot_bands()` gap-collapse logic
   - `test_convergence.py`: 28 tests for `CutoffConvergence`/`KpointConvergence` including parallel path, `_run_single` error handling, `summary()` output, and plot creation

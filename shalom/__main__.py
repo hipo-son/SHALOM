@@ -959,7 +959,6 @@ def _print_install_guide_linux() -> None:
 
 def cmd_setup_qe(args: argparse.Namespace) -> int:
     """Execute the 'setup-qe' subcommand."""
-    import os
     import platform
     import shutil
     from pathlib import Path
