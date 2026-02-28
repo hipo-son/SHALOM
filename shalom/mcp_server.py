@@ -69,8 +69,6 @@ def _load_atoms(
         ``(atoms, source)`` where *source* is one of ``"structure_file"``,
         ``"materials_project"``, or ``"ase_bulk_fallback"``.
     """
-    from ase import Atoms  # noqa: F811
-
     if structure_file:
         from ase.io import read as ase_read
         return ase_read(structure_file), "structure_file"

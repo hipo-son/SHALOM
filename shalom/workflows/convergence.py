@@ -37,7 +37,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from shalom.backends._physics import CONVERGENCE_THRESHOLD_PER_ATOM

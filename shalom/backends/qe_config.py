@@ -33,8 +33,6 @@ from shalom.backends._physics import (
     DEFAULT_MAGMOM,
     HUBBARD_U_VALUES,
     ANION_ELEMENTS,
-    RY_TO_EV,
-    EV_TO_RY,
     DEFAULT_KPR,
     DEFAULT_BAND_NPOINTS,
     _is_pure_metal,

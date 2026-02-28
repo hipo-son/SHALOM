@@ -101,7 +101,7 @@ class TestCombinedPlotter:
         dos = _make_dos_data()
         plotter = CombinedPlotter(bs, dos)
         out = str(tmp_path / "combined.png")
-        fig = plotter.plot(output_path=out)
+        plotter.plot(output_path=out)
         assert os.path.isfile(out)
         assert os.path.getsize(out) > 0
 
@@ -127,7 +127,7 @@ class TestCombinedPlotter:
         dos = _make_dos_data(spin=True)
         plotter = CombinedPlotter(bs, dos)
         out = str(tmp_path / "combined_spin.png")
-        fig = plotter.plot(output_path=out)
+        plotter.plot(output_path=out)
         assert os.path.isfile(out)
         assert os.path.getsize(out) > 100  # not a trivially empty file
 

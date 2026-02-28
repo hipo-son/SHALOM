@@ -173,11 +173,11 @@ def _write_output_readme(
         potcar_spec = f"{output_dir}/POTCAR.spec"
         lines += [
             f"1. Obtain POTCAR files listed in `{potcar_spec}`",
-            f"2. Run VASP:",
-            f"   ```bash",
+            "2. Run VASP:",
+            "   ```bash",
             f"   cd {output_dir}",
-            f"   mpirun -np 4 vasp_std > vasp.log 2>&1",
-            f"   ```",
+            "   mpirun -np 4 vasp_std > vasp.log 2>&1",
+            "   ```",
         ]
     else:
         lines += [
@@ -185,11 +185,11 @@ def _write_output_readme(
             "   ```bash",
             "   python -m shalom setup-qe --elements <ELEMENTS> --download",
             "   ```",
-            f"2. Run Quantum ESPRESSO:",
-            f"   ```bash",
+            "2. Run Quantum ESPRESSO:",
+            "   ```bash",
             f"   cd {output_dir}",
-            f"   mpirun -np 4 pw.x < pw.in > pw.out 2>&1",
-            f"   ```",
+            "   mpirun -np 4 pw.x < pw.in > pw.out 2>&1",
+            "   ```",
             "   (On Windows, run from inside WSL2)",
         ]
     lines.append("")

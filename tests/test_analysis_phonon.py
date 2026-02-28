@@ -18,7 +18,6 @@ from shalom.analysis.phonon import (
     _ase_to_phonopy,
     _phonopy_to_ase,
     _normalize_label,
-    _run_phonon_analysis,
 )
 
 
@@ -439,7 +438,6 @@ class TestCLI:
     def test_generate_displacements_cli(self, tmp_path):
         """Test displacement generation via CLI."""
         from shalom.__main__ import build_parser
-        from ase.build import bulk
         from ase.io import write as ase_write
 
         # Write a POSCAR

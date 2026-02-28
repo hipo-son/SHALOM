@@ -209,7 +209,6 @@ class TestDosRun:
         """_dos_run logs warning on failure instead of raising."""
         wf = make_workflow()
         from unittest.mock import MagicMock, patch
-        import logging
 
         mock_result = MagicMock()
         mock_result.success = False
@@ -231,7 +230,7 @@ class TestRunVcRelax:
         """When ase_read succeeds, returns the relaxed atoms."""
         wf = make_workflow()
 
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
         from ase.build import bulk as ase_bulk
 
         relaxed = ase_bulk("Si", "diamond", a=5.50)
@@ -313,7 +312,7 @@ class TestRunScf:
         wf = make_workflow()
 
         scf_dir = str(tmp_path / "02_scf")
-        from unittest.mock import patch, MagicMock, call
+        from unittest.mock import patch
 
         write_calls = []
 
@@ -1344,8 +1343,6 @@ class TestNscfKmeshOverride:
         """Explicit nscf_kmesh is used as the k-grid."""
         wf = make_workflow(nscf_kmesh=[8, 8, 8])
 
-        captured_grid = {}
-
         config_obj = MagicMock()
         config_obj.control = {}
         config_obj.system = {}
@@ -1508,7 +1505,7 @@ class TestResumeEdgeCases:
              patch.object(wf, "_dos_run"), \
              patch("shalom.workflows.standard.parse_dos_file", return_value=fake_dos), \
              patch("shalom.workflows.standard.find_xml_path", return_value=None):
-            result = wf.run()
+            wf.run()
 
         # SCF should have run (not skipped)
         assert any("02_scf" in d for d in pw_run_dirs)
@@ -1570,7 +1567,7 @@ class TestDosFailureHandling:
              patch.object(wf, "_run_dos", side_effect=RuntimeError("dos crash")), \
              patch.object(wf, "_plot_bands", side_effect=mock_plot_bands), \
              patch("shalom.workflows.standard.find_xml_path", return_value=None):
-            result = wf.run()
+            wf.run()
 
         # _plot_bands should still have been called (bands succeeded)
         assert len(plot_bands_called) == 1
@@ -1688,7 +1685,7 @@ class TestResumeMissingSCFOutput:
                         f.write("the Fermi energy is   5.0 ev\n")
 
             with patch.object(wf, "_pw_run", side_effect=pw_run_then_write):
-                result = wf.run()
+                wf.run()
 
         # SCF should have been re-run (not just resumed)
         assert any("02_scf" in d for d in pw_run_dirs)

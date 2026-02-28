@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
-from unittest.mock import MagicMock, patch
+from typing import List
 
 import pytest
 from ase.build import bulk
@@ -206,7 +205,7 @@ class TestKpointConvergence:
             return ConvergenceResult(val, -100.0, True, calc_dir)
 
         conv._run_single = fake_run_single  # type: ignore[method-assign]
-        result = conv.run()
+        conv.run()
         assert len(call_count) == 2
 
 
@@ -282,7 +281,7 @@ class TestCutoffRunSingle:
             kgrid=[4, 4, 4],
         )
 
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
 
         mock_runner_result = self._make_mock_runner_result(success=True)
         mock_dft_result = self._make_mock_dft_result(energy=-200.0, converged=True)
@@ -380,7 +379,7 @@ class TestCutoffRunSingle:
             pseudo_dir="/my/pseudos",
         )
 
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
 
         captured_config = {}
 
@@ -607,7 +606,7 @@ class TestConvergenceBaseHelpers:
 
         # Override _run_single to be picklable (no mock) for multiprocessing
         # Instead, patch the pool to avoid spawning actual processes
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         results_data = [
             ConvergenceResult(30.0, -100.0, True),
@@ -633,7 +632,7 @@ class TestConvergenceBaseHelpers:
             parallel=True,
         )
 
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
 
         results_data = [ConvergenceResult(30.0, -100.0, True)]
 

@@ -606,7 +606,7 @@ class TestGenerateBandKpathSeekpathTier1:
 class TestDetectBravais:
     def test_exception_returns_cub(self):
         """_detect_bravais falling through exception → 'CUB' default returned."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from shalom.backends.qe_config import _detect_bravais
         from ase.build import bulk
 

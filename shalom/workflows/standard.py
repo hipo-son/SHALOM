@@ -31,9 +31,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ase.io import read as ase_read
@@ -42,8 +41,6 @@ from shalom.backends._physics import AccuracyLevel, DEFAULT_BAND_NPOINTS, RY_TO_
 from shalom.backends.qe import QEBackend
 from shalom.backends.qe_config import (
     QECalculationType,
-    QEKPointsConfig,
-    compute_ecutrho,
     generate_band_kpath,
     get_band_calc_atoms,
     get_qe_preset,
@@ -663,7 +660,6 @@ class StandardWorkflow:
         """Write dos.in and run dos.x (all energies in eV)."""
         os.makedirs(calc_dir, exist_ok=True)
         dos_in_path = os.path.join(calc_dir, "dos.in")
-        dos_out_path = os.path.join(calc_dir, "dos.out")
 
         dos_in_content = (
             "&DOS\n"
@@ -746,7 +742,6 @@ class StandardWorkflow:
             # reset the distance counter at discontinuities so the sub-paths
             # are plotted side by side with no artificial gap.
             if len(bs.kpath_distances) > 1:
-                import numpy as np
                 dist = bs.kpath_distances.copy()
                 for k_idx in sorted(label_by_idx):
                     if "|" in label_by_idx[k_idx] and k_idx + 1 < len(dist):

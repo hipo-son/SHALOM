@@ -4,8 +4,6 @@ All tests are pure unit tests -- no DFT execution required.
 Uses mock QE pw.out content for site magnetization and Lowdin charge parsing.
 """
 
-import pytest
-
 from shalom.backends.base import DFTResult
 from shalom.analysis._base import MagneticResult
 from shalom.analysis.magnetic import (

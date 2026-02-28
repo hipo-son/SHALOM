@@ -482,7 +482,6 @@ class TestCmdSetupQE:
 class TestDetectWslDistros:
     def test_successful_utf16le_output(self):
         """Successful wsl --list --quiet → list of distro names."""
-        import subprocess
         from unittest.mock import patch, MagicMock
         from shalom.__main__ import _detect_wsl_distros
 
@@ -628,7 +627,7 @@ class TestCmdSetupQeAdditional:
 
         args = self._make_args(pseudo_dir=str(pseudo_dir), elements="Si")
         with patch("shutil.which", return_value="/usr/bin/pw.x"):
-            rc = cmd_setup_qe(args)
+            cmd_setup_qe(args)
         out = capsys.readouterr().out
         # The file was found via case-insensitive match → it's not in [MISSING]
         assert "[MISSING]" not in out
@@ -822,7 +821,7 @@ class TestCmdPlot:
 
     def test_bands_import_error(self, tmp_path, capsys):
         """matplotlib not installed for bands → error + return 1."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from shalom.__main__ import cmd_plot
         from shalom.backends.base import BandStructureData
         import numpy as np
@@ -1111,7 +1110,7 @@ class TestCmdConverge:
         args = self._make_args(str(tmp_path), test="kpoints", values=None)
         with patch("shalom.__main__._load_atoms", return_value=si), \
              patch("shalom.workflows.convergence.KpointConvergence", return_value=mock_conv):
-            rc = cmd_converge(args)
+            cmd_converge(args)
         out = capsys.readouterr().out
         assert "default k-point" in out
 
@@ -1305,10 +1304,9 @@ class TestMainDispatcher:
 
     def test_quiet_flag_sets_info_logging(self):
         """main() without quiet flag sets INFO logging."""
-        import sys, logging
+        import sys
         from unittest.mock import patch, MagicMock
         from shalom.__main__ import main
-        from ase.build import bulk
 
         mock_result = MagicMock()
         mock_result.success = False
@@ -1720,7 +1718,7 @@ class TestCmdSetupQeDownloadCreatesPseudoDir:
 
     def test_download_with_missing_dir_lists_all_as_missing(self, tmp_path, capsys):
         """When pseudo_dir doesn't exist, all requested elements are listed as missing."""
-        from unittest.mock import patch, call
+        from unittest.mock import patch
         from shalom.__main__ import cmd_setup_qe
 
         pseudo_dir = tmp_path / "no_such_dir"

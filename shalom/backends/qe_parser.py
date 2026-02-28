@@ -27,13 +27,9 @@ import glob
 import math
 import os
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-if TYPE_CHECKING:
-    import numpy as np
-    from ase import Atoms
-
-from shalom.backends._physics import HA_TO_EV, RY_TO_EV, EV_TO_RY
+from shalom.backends._physics import HA_TO_EV
 from shalom.backends.base import BandStructureData, DOSData
 
 # QE XML namespace for ElementTree queries.

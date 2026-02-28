@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shalom.backends.runner import ExecutionConfig, ExecutionResult
+from shalom.backends.runner import ExecutionConfig
 from shalom.backends.slurm import (
     SlurmConfig,
     SlurmJobState,
