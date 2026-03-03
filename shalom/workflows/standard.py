@@ -409,11 +409,14 @@ class StandardWorkflow:
         bands_png = self._plot_bands(bands_dir, fermi, scf_tmp_dir) if bands_ok else None
         dos_png   = self._plot_dos(nscf_dir, fermi) if nscf_ok else None
 
-        return self._build_result(
+        result = self._build_result(
             calc_atoms, fermi, bands_png, dos_png,
             relax_dir, scf_dir, bands_dir, nscf_dir,
             step_results, failed_step,
         )
+
+        self._save_results_summary(result, step_results)
+        return result
 
     # ------------------------------------------------------------------
     # Result builder
@@ -487,6 +490,57 @@ class StandardWorkflow:
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Could not load checkpoint %s: %s", path, exc)
             return None
+
+    _RESULTS_FILE = "results_summary.json"
+
+    def _save_results_summary(
+        self,
+        result: Dict[str, Any],
+        step_results: List["StepStatus"],
+    ) -> None:
+        """Write results_summary.json with parsed data (best-effort)."""
+        import json
+        from datetime import datetime
+
+        atoms = result.get("atoms")
+        formula = None
+        if atoms is not None:
+            try:
+                formula = atoms.get_chemical_formula(mode="reduce")
+            except Exception:
+                pass
+
+        summary: Dict[str, Any] = {
+            "version": 1,
+            "timestamp": datetime.now().isoformat(),
+            "material_formula": formula,
+            "fermi_energy_eV": result.get("fermi_energy"),
+            "bands_png": result.get("bands_png"),
+            "dos_png": result.get("dos_png"),
+            "calc_dirs": result.get("calc_dirs", {}),
+            "completed_steps": result.get("completed_steps", []),
+            "failed_step": result.get("failed_step"),
+            "steps": [
+                {
+                    "name": sr.name,
+                    "step_number": sr.step_number,
+                    "success": sr.success,
+                    "elapsed_seconds": round(sr.elapsed_seconds, 2)
+                    if sr.elapsed_seconds else 0,
+                    "summary": sr.summary or "",
+                    "error_message": sr.error_message or "",
+                }
+                for sr in step_results
+            ],
+        }
+
+        path = os.path.join(self.output_dir, self._RESULTS_FILE)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(summary, fh, indent=2, default=str)
+            logger.info("Results summary saved: %s", path)
+        except OSError as exc:
+            logger.warning("Could not save results summary: %s", exc)
 
     # ------------------------------------------------------------------
     # Progress helpers

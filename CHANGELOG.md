@@ -8,9 +8,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **LAMMPS Classical MD Backend** (`shalom/backends/lammps.py`, `lammps_config.py`)
+  - `LAMMPSBackend`: `write_input()` (data.lammps + in.lammps script), `parse_output()` (log.lammps), `parse_trajectory()` (dump.lammpstrj → MDTrajectoryData)
+  - `LAMMPSInputConfig` dataclass: ensemble, pair_style, pair_coeff, timestep, temperature, boundary, thermo/dump intervals
+  - `detect_force_field(atoms)`: element-composition-based FF auto-selection from `lammps_potentials.yaml` (EAM priority 90, Tersoff 85, LJ 30)
+  - `detect_and_apply_lammps_hints(atoms, config)`: full auto-configuration (pair_style, pair_coeff, timestep, thermostat damping, 2D boundary)
+  - `resolve_potential_dir()`: 3-tier resolution — explicit arg → `$SHALOM_LAMMPS_POTENTIALS` → `~/lammps-potentials`
+  - Lorentz-Berthelot mixing for LJ cross-pair interactions
+  - User override: `--pair-style` / `--pair-coeff` set → auto-detection skipped
+  - 65 tests in `test_lammps_backend.py` + `test_lammps_config.py`
+- **LAMMPS Force Field Database** (`shalom/config/lammps_potentials.yaml`)
+  - EAM/alloy: Al, Cu, Ni, Fe, Co, Cr, Mn, Ti, Zr, Nb, Mo, W, Ag, Au, Pt, Pd
+  - Tersoff: Si, C, Ge, B, N
+  - LJ/cut: Ar, Ne, Kr, Xe, He (with per-element sigma/epsilon)
+  - Per-FF timestep, thermostat damping, units, atom_style defaults
+  - Fallback copy in `_defaults.py`
+- **VASP AIMD Support** (`shalom/backends/vasp_config.py`, `vasp.py`)
+  - `CalculationType.AIMD` enum value (IBRION=0, ISYM=0, Nosé-Hoover NVT via SMASS=0)
+  - `aimd:standard` and `aimd:precise` presets in `incar_presets.yaml`
+  - `parse_xdatcar()`: XDATCAR parser (frame-by-frame fractional→Cartesian conversion)
+  - `_parse_oszicar_md()`: per-step T/E extraction from OSZICAR
+  - `parse_md_output()`: combines OUTCAR + XDATCAR → DFTResult with md_trajectory
+  - `CALC_TYPE_ALIASES`: "aimd" and "md" aliases
+  - 22 tests in `test_vasp_aimd.py`
+- **MD Trajectory Data Layer** (`shalom/backends/base.py`, `shalom/analysis/_base.py`)
+  - `MDTrajectoryData` dataclass: positions, energies, temperatures, times, species, cell_vectors, velocities, forces, kinetic/potential energies, ensemble, timestep, source
+  - `MDResult` dataclass: RDF (r, g, pairs), MSD (t, msd), diffusion coefficient, VACF, thermodynamic averages, equilibration detection
+- **MD Analysis Module** (`shalom/analysis/md.py`)
+  - `compute_rdf()`: radial distribution function with minimum image convention, pair-specific support
+  - `compute_msd()`: mean square displacement (Einstein relation), species filtering
+  - `compute_vacf()`: normalized velocity autocorrelation function
+  - `compute_diffusion_coefficient()`: linear fit to MSD → cm²/s (D = slope/6)
+  - `detect_equilibration()`: block averaging with running mean derivative threshold
+  - `analyze_md_trajectory()`: full analysis pipeline → MDResult
+  - Pure numpy, no extra dependencies
+  - 32 tests in `test_analysis_md.py`
+- **MD Plotting** (`shalom/plotting/md_plot.py`)
+  - `MDEnergyPlotter`: energy vs time with optional kinetic/potential components
+  - `MDTemperaturePlotter`: temperature vs time with running average and target line
+  - `MSDPlotter`: MSD vs time with diffusion fit line and D value annotation
+  - `RDFPlotter`: g(r) with fill_between and g=1 reference line
+  - 21 tests in `test_md_plot.py`
+- **CLI LAMMPS/AIMD Integration** (`shalom/__main__.py`)
+  - `--backend lammps` option on `run` and `pipeline` subcommands
+  - LAMMPS arg group: `--pair-style`, `--pair-coeff`, `--md-ensemble` (nve/nvt/npt), `--temperature`, `--md-steps`, `--timestep`, `--potential-dir`
+  - `--calc aimd` for VASP AIMD
+  - `analyze md` subcommand: `--calc-dir`, `--backend`, `--r-max`, `-o`
+  - 21 tests in `test_cli_lammps.py`
+- **MCP MD Tools** (`shalom/mcp_server.py`)
+  - `run_md()`: run LAMMPS or VASP AIMD molecular dynamics
+  - `analyze_md_trajectory()`: parse trajectory and run full analysis (RDF, MSD, diffusion)
+  - Total MCP tools: 16 → 18
 - **DFT Tutorial Notebooks** (`tutorials/`)
   - `01_silicon_complete_study.ipynb`: Si convergence tests (ecutwfc + kpoints), 5-step workflow (vc-relax→scf→bands→nscf→dos), phonon analysis (bands, DOS, thermal properties), XRD pattern, combined band+DOS figure
   - `02_fe2o3_magnetic_oxide.ipynb`: Fe2O3 spin-polarized DFT with GGA+U (Hubbard), magnetic analysis (site moments, Löwdin charges), DOS gap estimation, XRD pattern
+  - `03_multiscale_md_pipeline.ipynb`: Fe/Si/Ar LAMMPS MD + VASP AIMD input generation, synthetic trajectory analysis (RDF, MSD, VACF, diffusion), MD plotting — no external software required (~5 min)
   - `tutorials/README.md`: prerequisites, configuration, output directory structure
 - **QE 7.1+ HUBBARD card syntax** (`shalom/backends/qe.py`)
   - Automatic migration from old `lda_plus_u` / `Hubbard_U(i)` namelist entries to `HUBBARD (ortho-atomic)` card
@@ -26,9 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - WSL mode: logs resolved pseudo_dir path at INFO level for verification
   - Non-WSL: actionable guidance (`set $SHALOM_PSEUDO_DIR or pass pseudo_dir=`) in warning messages
 - **12 new tests** (1536 passed, 13 skipped): `TestHubbardCard` (7), `TestResolvePseudoDir` (5)
+- **Result Serialization & Auto-Save** (`shalom/analysis/_base.py`, `shalom/__main__.py`, `shalom/workflows/standard.py`, `shalom/direct_run.py`)
+  - `to_dict()` method on all 7 Result dataclasses (Elastic, Phonon, Electronic, XRD, Symmetry, Magnetic, MD) — numpy→list conversion, `raw` field excluded, unit suffixes in keys (e.g. `bulk_modulus_vrh_GPa`, `bandgap_eV`)
+  - `save_result_json(data, path)` helper: best-effort JSON save (never crashes), auto-creates parent dirs, `default=str` fallback
+  - `_to_list()` helper: duck-typed numpy array → nested Python list conversion
+  - `StandardWorkflow`: auto-saves `results_summary.json` after run (formula, fermi_energy, step details, elapsed times)
+  - `direct_run`: auto-saves `run_info.json` (backend, calc_type, structure_info, auto_detected, files_generated)
+  - CLI `analyze` subcommand: `--save-json / -j PATH` flag for all 7 handlers; `-o` output dir auto-saves `{type}_results.json` alongside plots
+  - MCP `analyze_md_trajectory`: auto-saves `md_analysis_results.json` in calc_dir
+  - 29 tests in `test_result_serialization.py`
 - **MCP Server — Claude Code Integration** (`shalom/mcp_server.py`)
-  - FastMCP v1.x server exposing 10 DFT tools via Model Context Protocol
-  - 9 deterministic tools (no API key needed): `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`
+  - FastMCP v1.x server exposing 18 tools via Model Context Protocol
+  - 17 deterministic tools (no API key needed): `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `analyze_elastic`, `analyze_phonon_properties`, `analyze_electronic_structure`, `analyze_xrd_pattern`, `analyze_symmetry_properties`, `analyze_magnetic_properties`, `run_md`, `analyze_md_trajectory`
   - 1 LLM-driven tool: `run_pipeline` (full multi-agent pipeline; requires API key or `base_url`)
   - `.mcp.json` project-scoped config for auto-registration in Claude Code
   - `[mcp]` optional dependency extra: `pip install "shalom[mcp]"`

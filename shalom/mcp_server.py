@@ -1471,6 +1471,123 @@ def analyze_magnetic_properties(
         return {"success": False, "error": str(exc)}
 
 
+@mcp.tool()
+def run_md(
+    material: str,
+    backend: str = "lammps",
+    ensemble: str = "nvt",
+    temperature: float = 300.0,
+    nsteps: int = 100000,
+    pair_style: str = "",
+    pair_coeff: str = "",
+    accuracy: str = "standard",
+    output_dir: str = "",
+) -> dict:
+    """Run a classical MD simulation using LAMMPS or VASP AIMD.
+
+    Auto-detects force field from element composition (EAM for metals,
+    Tersoff for covalent semiconductors, LJ for noble gases).
+    Use pair_style/pair_coeff to override auto-detection.
+
+    Args:
+        material: Chemical formula, MP ID, or structure file path.
+        backend: "lammps" or "vasp" (AIMD).
+        ensemble: MD ensemble — "nve", "nvt", or "npt".
+        temperature: Target temperature in K.
+        nsteps: Number of MD timesteps.
+        pair_style: LAMMPS pair_style (empty = auto-detect).
+        pair_coeff: LAMMPS pair_coeff line (empty = auto-detect).
+        accuracy: "standard" or "precise".
+        output_dir: Output directory (empty = auto).
+
+    Returns:
+        Dict with success, output_dir, files_generated, auto_detected.
+    """
+    from shalom.direct_run import direct_run, DirectRunConfig
+
+    user_settings = {"ensemble": ensemble, "temperature": temperature, "nsteps": nsteps}
+    if pair_style:
+        user_settings["pair_style"] = pair_style
+    if pair_coeff:
+        user_settings["pair_coeff"] = [pair_coeff]
+
+    calc_type = "aimd" if backend == "vasp" else None
+
+    config = DirectRunConfig(
+        backend_name=backend,
+        calc_type=calc_type,
+        accuracy=accuracy,
+        output_dir=output_dir or None,
+        user_settings=user_settings,
+    )
+
+    try:
+        result = direct_run(material, config)
+        return {
+            "success": result.success,
+            "output_dir": result.output_dir,
+            "files_generated": result.files_generated,
+            "auto_detected": result.auto_detected,
+            "error": result.error,
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@mcp.tool()
+def analyze_md_trajectory(
+    calc_dir: str,
+    backend: str = "lammps",
+    r_max: float = 10.0,
+) -> dict:
+    """Analyze an MD trajectory — compute RDF, MSD, VACF, diffusion, thermodynamics.
+
+    Args:
+        calc_dir: Directory containing trajectory files (dump.lammpstrj or XDATCAR).
+        backend: "lammps" or "vasp".
+        r_max: Maximum distance for RDF in Angstrom.
+
+    Returns:
+        Dict with avg_temperature, diffusion_coefficient, is_equilibrated, etc.
+    """
+    try:
+        from shalom.backends import get_backend
+        from shalom.analysis.md import analyze_md_trajectory as _analyze
+
+        be = get_backend(backend)
+        traj = be.parse_trajectory(calc_dir)
+        result = _analyze(traj, r_max=r_max)
+
+        response = {
+            "success": True,
+            "n_frames": traj.n_frames,
+            "n_atoms": traj.n_atoms,
+            "source": traj.source,
+            "avg_temperature_K": result.avg_temperature,
+            "temperature_std_K": result.temperature_std,
+            "avg_energy_eV": result.avg_energy,
+            "avg_pressure_kBar": result.avg_pressure,
+            "diffusion_coefficient_cm2_per_s": result.diffusion_coefficient,
+            "energy_drift_eV_per_atom_per_ps": result.energy_drift_per_atom,
+            "is_equilibrated": result.is_equilibrated,
+            "equilibration_step": result.equilibration_step,
+        }
+
+        # Auto-save full results JSON to calc_dir
+        try:
+            from shalom.analysis._base import save_result_json
+            json_path = os.path.join(calc_dir, "md_analysis_results.json")
+            saved = save_result_json(result.to_dict(), json_path)
+            if saved:
+                response["results_json_path"] = saved
+        except Exception:
+            pass  # best-effort
+
+        return response
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

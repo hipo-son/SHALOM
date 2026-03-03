@@ -84,15 +84,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--backend", "-b",
         default="vasp",
-        choices=["vasp", "qe"],
-        help="DFT backend (default: vasp).",
+        choices=["vasp", "qe", "lammps"],
+        help="DFT/MD backend (default: vasp).",
     )
     run_parser.add_argument(
         "--calc", "-c",
         default=None,
         help=(
-            "Calculation type. VASP: relaxation/static/band_structure/dos. "
-            "QE: scf/relax/vc-relax/bands/nscf. Default: relaxation."
+            "Calculation type. VASP: relaxation/static/band_structure/dos/aimd. "
+            "QE: scf/relax/vc-relax/bands/nscf. "
+            "LAMMPS: md (default). Default: relaxation."
         ),
     )
     run_parser.add_argument(
@@ -204,6 +205,50 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run pw.x via WSL (Windows only). Requires QE installed in WSL.",
     )
+
+    # LAMMPS-specific args
+    lammps_grp = run_parser.add_argument_group("lammps", "LAMMPS MD options")
+    lammps_grp.add_argument(
+        "--pair-style",
+        default=None,
+        help="LAMMPS pair_style (skips auto-detection). E.g. 'eam/alloy'.",
+    )
+    lammps_grp.add_argument(
+        "--pair-coeff",
+        action="append",
+        default=[],
+        help="LAMMPS pair_coeff line (repeatable). E.g. '* * Fe.eam.alloy Fe'.",
+    )
+    lammps_grp.add_argument(
+        "--md-ensemble",
+        default="nvt",
+        choices=["nve", "nvt", "npt"],
+        help="MD ensemble for LAMMPS (default: nvt).",
+    )
+    lammps_grp.add_argument(
+        "--temperature",
+        type=float,
+        default=300.0,
+        help="MD temperature in K (default: 300).",
+    )
+    lammps_grp.add_argument(
+        "--md-steps",
+        type=int,
+        default=None,
+        help="Number of MD steps (default: from preset).",
+    )
+    lammps_grp.add_argument(
+        "--timestep",
+        type=float,
+        default=None,
+        help="MD timestep in fs (default: auto-detected from force field).",
+    )
+    lammps_grp.add_argument(
+        "--potential-dir",
+        default=None,
+        help="Directory containing LAMMPS potential files.",
+    )
+
     _add_slurm_args(run_parser)
 
     # 'plot' subcommand
@@ -505,8 +550,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline_parser.add_argument(
         "--backend", "-b",
         default="qe",
-        choices=["vasp", "qe"],
-        help="DFT backend (default: qe).",
+        choices=["vasp", "qe", "lammps"],
+        help="DFT/MD backend (default: qe).",
     )
     pipeline_parser.add_argument(
         "--provider",
@@ -597,6 +642,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Supports: elastic (pymatgen), phonon (phonopy), electronic (numpy), "
             "XRD (pymatgen), symmetry (spglib), magnetic (text parsing)."
         ),
+    )
+    analyze_parser.add_argument(
+        "--save-json", "-j",
+        default=None,
+        metavar="PATH",
+        help="Save analysis results as JSON to this file path.",
     )
     analyze_sub = analyze_parser.add_subparsers(dest="analyze_type", help="Analysis type")
 
@@ -763,6 +814,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to structure file for element identification (optional).",
     )
 
+    # analyze md
+    md_parser = analyze_sub.add_parser(
+        "md",
+        help="Analyze MD trajectory (RDF, MSD, VACF, diffusion, thermodynamics).",
+    )
+    md_parser.add_argument(
+        "--calc-dir",
+        required=True,
+        metavar="DIR",
+        help="Calculation directory with trajectory files.",
+    )
+    md_parser.add_argument(
+        "--backend",
+        default="lammps",
+        choices=["lammps", "vasp"],
+        help="Backend that produced the trajectory (default: lammps).",
+    )
+    md_parser.add_argument(
+        "--r-max",
+        type=float,
+        default=10.0,
+        help="Maximum distance for RDF in Angstrom (default: 10).",
+    )
+    md_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Output directory for analysis plots.",
+    )
+
     return parser
 
 
@@ -777,7 +857,23 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("  3. Local structure file:  python -m shalom run --structure POSCAR")
         return 1
 
-    user_settings = _parse_set_values(args.set_values)
+    user_settings = _parse_set_values(args.set_values) or {}
+
+    # Forward LAMMPS-specific CLI args into user_settings
+    if args.backend == "lammps":
+        user_settings.setdefault("ensemble", args.md_ensemble)
+        if args.pair_style:
+            user_settings["pair_style"] = args.pair_style
+        if args.pair_coeff:
+            user_settings["pair_coeff"] = args.pair_coeff
+        if args.temperature != 300.0:
+            user_settings["temperature"] = args.temperature
+        if args.md_steps is not None:
+            user_settings["nsteps"] = args.md_steps
+        if args.timestep is not None:
+            user_settings["timestep"] = args.timestep
+        if args.potential_dir:
+            user_settings["potential_dir"] = args.potential_dir
 
     config = DirectRunConfig(
         backend_name=args.backend,
@@ -830,6 +926,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             if result.backend_name == "vasp":
                 print(f"  1. Obtain POTCARs listed in {result.output_dir}/POTCAR.spec")
                 print(f"  2. cd {result.output_dir} && mpirun vasp_std")
+            elif result.backend_name == "lammps":
+                print("  1. Ensure potential files are in the calculation directory")
+                print(f"  2. cd {result.output_dir} && lmp -in in.lammps")
             else:
                 print("  1. Ensure pseudopotentials are in the pseudo_dir")
                 print(f"  2. cd {result.output_dir} && mpirun pw.x < pw.in > pw.out")
@@ -1620,7 +1719,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     """Execute the 'analyze' subcommand."""
     if not getattr(args, "analyze_type", None):
         print("Error: specify an analysis type.")
-        print("  Available: elastic, phonon, electronic, xrd, symmetry, magnetic")
+        print("  Available: elastic, phonon, electronic, xrd, symmetry, magnetic, md")
         print()
         print("  python -m shalom analyze elastic --tensor '[[...]]'")
         print("  python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 ...")
@@ -1628,6 +1727,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print("  python -m shalom analyze xrd --structure POSCAR")
         print("  python -m shalom analyze symmetry --structure POSCAR")
         print("  python -m shalom analyze magnetic --pw-out pw.out")
+        print("  python -m shalom analyze md --calc-dir <dir> --backend lammps")
         return 1
 
     handlers = {
@@ -1637,6 +1737,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         "xrd": _cmd_analyze_xrd,
         "symmetry": _cmd_analyze_symmetry,
         "magnetic": _cmd_analyze_magnetic,
+        "md": _cmd_analyze_md,
     }
     handler = handlers.get(args.analyze_type)
     if handler:
@@ -1707,6 +1808,14 @@ def _cmd_analyze_elastic(args: argparse.Namespace) -> int:
             print(f"    - {v}")
     print()
     print("=" * 50)
+
+    # Save JSON if requested
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        saved = save_result_json(result.to_dict(), save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
 
     return 0
 
@@ -1864,6 +1973,21 @@ def _cmd_analyze_phonon(args: argparse.Namespace) -> int:
         except ImportError:
             print("  Note: matplotlib not installed, skipping plots.")
 
+        # Auto-save JSON alongside plots
+        from shalom.analysis._base import save_result_json
+        json_path = os.path.join(args.output, "phonon_results.json")
+        saved = save_result_json(result.to_dict(), json_path)
+        if saved:
+            print(f"  Saved: {saved}")
+
+    # Save JSON to explicit path if requested
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        saved = save_result_json(result.to_dict(), save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
     return 0
 
 
@@ -1936,6 +2060,15 @@ def _cmd_analyze_electronic(args: argparse.Namespace) -> int:
     print(f"  Occupied bands:    {result.n_occupied_bands}")
     print()
     print("=" * 50)
+
+    # Save JSON if requested
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        saved = save_result_json(result.to_dict(), save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
     return 0
 
 
@@ -2008,6 +2141,21 @@ def _cmd_analyze_xrd(args: argparse.Namespace) -> int:
         except ImportError:
             print("  Note: matplotlib not installed, skipping plot.")
 
+        # Auto-save JSON alongside plot
+        from shalom.analysis._base import save_result_json
+        json_path = args.output.rsplit(".", 1)[0] + "_results.json"
+        saved = save_result_json(result.to_dict(), json_path)
+        if saved:
+            print(f"  Saved: {saved}")
+
+    # Save JSON to explicit path if requested
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        saved = save_result_json(result.to_dict(), save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
     return 0
 
 
@@ -2051,6 +2199,15 @@ def _cmd_analyze_symmetry(args: argparse.Namespace) -> int:
         print(f"  Wyckoff:        {wyckoff_str}")
     print()
     print("=" * 50)
+
+    # Save JSON if requested
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        saved = save_result_json(result.to_dict(), save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
     return 0
 
 
@@ -2102,6 +2259,7 @@ def _cmd_analyze_magnetic(args: argparse.Namespace) -> int:
         print()
 
     # Full analysis if structure is provided
+    mag_result = None
     if args.structure:
         try:
             from ase.io import read as ase_read
@@ -2111,25 +2269,151 @@ def _cmd_analyze_magnetic(args: argparse.Namespace) -> int:
 
             total_mag = extract_total_magnetization(pw_out)
             dft_result = DFTResult(magnetization=total_mag, is_converged=True)
-            result = analyze_magnetism(dft_result, atoms, pw_out_path=pw_out)
+            mag_result = analyze_magnetism(dft_result, atoms, pw_out_path=pw_out)
 
             print("  Total magnetization: ", end="")
-            if result.total_magnetization is not None:
-                print(f"{result.total_magnetization:.4f} Bohr mag/cell")
+            if mag_result.total_magnetization is not None:
+                print(f"{mag_result.total_magnetization:.4f} Bohr mag/cell")
             else:
                 print("N/A")
-            print(f"  Is magnetic:         {result.is_magnetic}")
-            print(f"  Spin polarized:      {result.is_spin_polarized}")
-            if result.magnetic_elements:
-                print(f"  Magnetic elements:   {', '.join(result.magnetic_elements)}")
-            if result.dominant_moment_element:
-                print(f"  Dominant element:    {result.dominant_moment_element}")
+            print(f"  Is magnetic:         {mag_result.is_magnetic}")
+            print(f"  Spin polarized:      {mag_result.is_spin_polarized}")
+            if mag_result.magnetic_elements:
+                print(f"  Magnetic elements:   {', '.join(mag_result.magnetic_elements)}")
+            if mag_result.dominant_moment_element:
+                print(f"  Dominant element:    {mag_result.dominant_moment_element}")
             print()
         except Exception as exc:
             print(f"  Warning: full analysis failed: {exc}")
             print()
 
     print("=" * 50)
+
+    # Save JSON if requested (build a simple dict for the raw parsing case)
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        mag_dict: Dict[str, Any] = {
+            "site_magnetizations_bohr_mag": site_mags,
+            "lowdin_charges": lowdin,
+        }
+        # Include full analysis result if it was computed
+        if mag_result is not None:
+            try:
+                mag_dict.update(mag_result.to_dict())
+            except Exception:
+                pass
+        saved = save_result_json(mag_dict, save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
+    return 0
+
+
+def _cmd_analyze_md(args: argparse.Namespace) -> int:
+    """Run MD trajectory analysis."""
+    calc_dir = os.path.abspath(args.calc_dir)
+    if not os.path.isdir(calc_dir):
+        print(f"Error: directory not found: {calc_dir}")
+        return 1
+
+    try:
+        from shalom.backends import get_backend
+        from shalom.analysis.md import analyze_md_trajectory
+
+        backend = get_backend(args.backend)
+
+        # Parse trajectory
+        traj = backend.parse_trajectory(calc_dir)
+
+        # Run analysis
+        result = analyze_md_trajectory(traj, r_max=args.r_max)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        return 1
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    # Display results
+    print("=" * 50)
+    print("  MD Trajectory Analysis")
+    print("=" * 50)
+    print()
+    print(f"  Frames:            {traj.n_frames}")
+    print(f"  Atoms:             {traj.n_atoms}")
+    print(f"  Source:             {traj.source}")
+    print(f"  Ensemble:          {traj.ensemble}")
+    print(f"  Timestep:          {traj.timestep_fs} fs")
+    print()
+    if result.avg_temperature is not None:
+        print(f"  Avg temperature:   {result.avg_temperature:.1f} K")
+    if result.temperature_std is not None:
+        print(f"  Temp std:          {result.temperature_std:.1f} K")
+    if result.avg_energy is not None:
+        print(f"  Avg energy:        {result.avg_energy:.4f} eV")
+    if result.avg_pressure is not None:
+        print(f"  Avg pressure:      {result.avg_pressure:.2f} kBar")
+    if result.diffusion_coefficient is not None:
+        print(f"  Diffusion coeff:   {result.diffusion_coefficient:.2e} cm^2/s")
+    if result.energy_drift_per_atom is not None:
+        print(f"  Energy drift:      {result.energy_drift_per_atom:.2e} eV/atom/ps")
+    print(f"  Equilibrated:      {result.is_equilibrated}")
+    if result.equilibration_step is not None:
+        print(f"  Equilibration at:  frame {result.equilibration_step}")
+    print()
+    print("=" * 50)
+
+    # Save plots if output requested
+    if args.output:
+        os.makedirs(args.output, exist_ok=True)
+        try:
+            from shalom.plotting.md_plot import (
+                MDEnergyPlotter, MDTemperaturePlotter, MSDPlotter, RDFPlotter,
+            )
+
+            # Energy
+            energy_path = os.path.join(args.output, "md_energy.png")
+            MDEnergyPlotter(traj).plot(output_path=energy_path)
+            print(f"  Saved: {energy_path}")
+
+            # Temperature
+            temp_path = os.path.join(args.output, "md_temperature.png")
+            MDTemperaturePlotter(traj).plot(output_path=temp_path)
+            print(f"  Saved: {temp_path}")
+
+            # RDF
+            if result.rdf_r is not None:
+                rdf_path = os.path.join(args.output, "md_rdf.png")
+                RDFPlotter(result).plot(output_path=rdf_path)
+                print(f"  Saved: {rdf_path}")
+
+            # MSD
+            if result.msd_t is not None:
+                msd_path = os.path.join(args.output, "md_msd.png")
+                MSDPlotter(result).plot(output_path=msd_path)
+                print(f"  Saved: {msd_path}")
+
+            import matplotlib.pyplot as plt
+            plt.close("all")
+        except ImportError:
+            print("  Note: matplotlib not installed, skipping plots.")
+
+        # Auto-save JSON alongside plots
+        from shalom.analysis._base import save_result_json
+        json_path = os.path.join(args.output, "md_analysis_results.json")
+        saved = save_result_json(result.to_dict(), json_path)
+        if saved:
+            print(f"  Saved: {saved}")
+
+    # Save JSON to explicit path if requested
+    save_path = getattr(args, "save_json", None)
+    if save_path:
+        from shalom.analysis._base import save_result_json
+        saved = save_result_json(result.to_dict(), save_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
     return 0
 
 

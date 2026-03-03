@@ -16,7 +16,9 @@ Example::
 
 from typing import Union
 
-from shalom.backends.base import DFTBackend, DFTResult, BandStructureData, DOSData
+from shalom.backends.base import (
+    DFTBackend, DFTResult, BandStructureData, DOSData, MDTrajectoryData,
+)
 from shalom.backends.vasp import VASPBackend
 from shalom.backends.qe import QEBackend
 from shalom.backends.vasp_config import (
@@ -56,10 +58,17 @@ from shalom.backends.runner import (
     create_runner,
 )
 from shalom.backends.slurm import SlurmConfig, SlurmRunner
+from shalom.backends.lammps import LAMMPSBackend
+from shalom.backends.lammps_config import (
+    LAMMPSInputConfig,
+    detect_force_field,
+    get_lammps_preset,
+    resolve_potential_dir as resolve_lammps_potential_dir,
+)
 
 __all__ = [
-    "DFTBackend", "DFTResult", "BandStructureData", "DOSData",
-    "VASPBackend", "QEBackend", "get_backend",
+    "DFTBackend", "DFTResult", "BandStructureData", "DOSData", "MDTrajectoryData",
+    "VASPBackend", "QEBackend", "LAMMPSBackend", "get_backend",
     "CalculationType", "AccuracyLevel", "VASPInputConfig", "KPointsConfig", "get_preset",
     "QECalculationType", "QEInputConfig", "QEKPointsConfig", "get_qe_preset",
     "generate_band_kpath", "get_band_calc_atoms", "resolve_pseudo_dir",
@@ -70,14 +79,19 @@ __all__ = [
     "ExecutionConfig", "ExecutionResult", "ExecutionRunner", "execute_with_recovery",
     "create_runner",
     "SlurmConfig", "SlurmRunner",
+    "LAMMPSInputConfig", "detect_force_field", "get_lammps_preset",
+    "resolve_lammps_potential_dir",
 ]
 
 
-def get_backend(name: str = "vasp") -> Union[VASPBackend, QEBackend]:
-    """Factory function to instantiate a DFT backend by name.
+def get_backend(
+    name: str = "vasp",
+) -> Union[VASPBackend, QEBackend, LAMMPSBackend]:
+    """Factory function to instantiate a simulation backend by name.
 
     Args:
-        name: Backend identifier. Supported values: "vasp", "qe".
+        name: Backend identifier. Supported values: ``"vasp"``, ``"qe"``,
+            ``"lammps"``.
 
     Returns:
         An instance implementing the DFTBackend protocol.
@@ -89,4 +103,8 @@ def get_backend(name: str = "vasp") -> Union[VASPBackend, QEBackend]:
         return VASPBackend()
     elif name == "qe":
         return QEBackend()
-    raise ValueError(f"Unknown backend: '{name}'. Supported backends: ['vasp', 'qe']")
+    elif name == "lammps":
+        return LAMMPSBackend()
+    raise ValueError(
+        f"Unknown backend: '{name}'. Supported backends: ['vasp', 'qe', 'lammps']"
+    )

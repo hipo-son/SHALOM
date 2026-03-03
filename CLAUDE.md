@@ -1,38 +1,42 @@
 # SHALOM Project Guide
 
 ## Project Overview
-SHALOM (System of Hierarchical Agents for Logical Orchestration of Materials) — a multi-agent framework for computational materials science. Uses LLM-driven agents for autonomous material discovery with DFT (VASP/QE) validation.
+SHALOM (System of Hierarchical Agents for Logical Orchestration of Materials) — a multi-agent framework for computational materials science. Uses LLM-driven agents for autonomous material discovery with DFT (VASP/QE) and classical MD (LAMMPS) validation.
 
 ## Architecture
 ```
 shalom/
 ├── agents/           # LLM agent layers (Design, Simulation, Review)
-├── backends/         # DFT backends (VASP, QE) + error recovery + execution
+├── backends/         # DFT/MD backends (VASP, QE, LAMMPS) + error recovery + execution
 │   ├── _physics.py   # Shared constants (unit conversions, DFT thresholds, AccuracyLevel, HUBBARD_U_VALUES, detect_2d)
 │   ├── _compression.py # Token-aware error log compression + postprocess_parse_result helper
-│   ├── base.py       # Backend-agnostic dataclasses: DFTResult, BandStructureData, DOSData
-│   ├── vasp.py       # VASP backend (write_input, parse_output)
-│   ├── vasp_config.py # VASP config (VASPInputConfig, get_preset)
+│   ├── base.py       # Backend-agnostic dataclasses: DFTResult, BandStructureData, DOSData, MDTrajectoryData
+│   ├── vasp.py       # VASP backend (write_input, parse_output, parse_xdatcar for AIMD)
+│   ├── vasp_config.py # VASP config (VASPInputConfig, CalculationType incl. AIMD, get_preset)
 │   ├── qe.py         # QE backend (write_input pw.in, parse_output pw.out, HUBBARD card migration)
 │   ├── qe_config.py  # QE config (QEInputConfig, get_qe_preset, generate_band_kpath, resolve_pseudo_dir, SSSP metadata)
 │   ├── qe_parser.py  # QE output parsers (parse_xml_bands, parse_dos_file, find_xml_path,
 │   │                 #   extract_fermi_energy, compute_nbnd, QE_XML_NS)
 │   ├── qe_error_recovery.py # QE error recovery (progressive correction, S-matrix diagnostic)
+│   ├── lammps.py     # LAMMPS backend (write_input data+script, parse_output log, parse_trajectory dump)
+│   ├── lammps_config.py # LAMMPS config (LAMMPSInputConfig, detect_force_field, detect_and_apply_lammps_hints)
 │   ├── runner.py     # DFT execution runner (subprocess pw.x, error recovery loop, create_runner)
 │   └── slurm.py      # Slurm HPC job submission/monitoring (SlurmConfig, SlurmRunner)
 ├── analysis/         # Post-DFT analysis wrapping external libraries
-│   ├── _base.py      # Result dataclasses (Elastic/Phonon/Electronic/XRD/Symmetry/MagneticResult)
+│   ├── _base.py      # Result dataclasses (Elastic/Phonon/Electronic/XRD/Symmetry/Magnetic/MDResult)
 │   ├── elastic.py    # Elastic tensor analysis via pymatgen (bulk/shear/Young's modulus, stability)
 │   ├── phonon.py     # Phonon analysis via phonopy (band structure, DOS, thermal props, stability)
 │   ├── electronic.py # Electronic structure (band gap, VBM/CBM, effective mass, DOS@Ef)
 │   ├── xrd.py        # XRD pattern calculation via pymatgen XRDCalculator
 │   ├── symmetry.py   # Crystal symmetry analysis via spglib (space/point group, Wyckoff)
-│   └── magnetic.py   # Magnetic/charge analysis from QE pw.out (site moments, Löwdin charges)
+│   ├── magnetic.py   # Magnetic/charge analysis from QE pw.out (site moments, Löwdin charges)
+│   └── md.py         # MD trajectory analysis (RDF, MSD, VACF, diffusion, equilibration)
 ├── plotting/         # Matplotlib visualisation (optional: pip install shalom[plotting])
 │   ├── band_plot.py  # BandStructurePlotter — band structure with high-sym labels, spin
 │   ├── dos_plot.py   # DOSPlotter — total/spin-polarised DOS with Fermi level marker
 │   ├── phonon_plot.py # PhononBandPlotter, PhononDOSPlotter — phonon dispersion & DOS
-│   └── xrd_plot.py   # XRDPlotter — XRD stem plot with hkl labels
+│   ├── xrd_plot.py   # XRDPlotter — XRD stem plot with hkl labels
+│   └── md_plot.py    # MDEnergyPlotter, MDTemperaturePlotter, MSDPlotter, RDFPlotter
 ├── workflows/        # High-level multi-step workflows
 │   ├── base.py       # ConvergenceWorkflow ABC, ConvergenceResult, ConvergenceTestResult
 │   ├── convergence.py # CutoffConvergence (ecutwfc sweep), KpointConvergence (k-mesh sweep)
@@ -47,6 +51,8 @@ shalom/
 ├── config/           # Physics/DFT settings (.yaml files)
 │   ├── sssp_metadata.yaml  # SSSP Efficiency v1.3.0 pseudopotential metadata
 │   ├── qe_presets.yaml     # QE pw.x presets (scf/relax/vc-relax/bands/nscf)
+│   ├── incar_presets.yaml  # VASP INCAR presets (relaxation/static/bands/dos/elastic/aimd)
+│   ├── lammps_potentials.yaml # LAMMPS force field metadata (EAM/Tersoff/LJ, per-element params)
 │   ├── qe_error_patterns.yaml     # QE error patterns (14 verified against QE 7.x)
 │   └── qe_correction_strategies.yaml  # Progressive correction strategies (10 error types)
 ├── _config_loader.py # load_prompt(), load_config()
@@ -54,13 +60,14 @@ shalom/
 ├── _defaults.py      # Hardcoded fallback values
 ├── mp_client.py      # Materials Project API client (optional: pip install mp-api)
 ├── direct_run.py     # Direct material run (structure -> DFT input files)
-├── mcp_server.py     # MCP server for Claude Code integration (16 tools)
+├── mcp_server.py     # MCP server for Claude Code integration (18 tools)
 ├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/analyze/pipeline
 └── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
 
 tutorials/
 ├── 01_silicon_complete_study.ipynb   # Si: convergence, bands, DOS, phonons, XRD (~30 min)
 ├── 02_fe2o3_magnetic_oxide.ipynb     # Fe2O3: spin-polarized, GGA+U, magnetic analysis (~45 min)
+├── 03_multiscale_md_pipeline.ipynb  # Fe/Si/Ar: LAMMPS MD, VASP AIMD, RDF, MSD, diffusion (~5 min)
 └── README.md                         # Prerequisites, configuration, output directory structure
 ```
 
@@ -88,7 +95,7 @@ tutorials/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: 1536 tests, coverage ≥85%
+pytest tests/                          # default: ~1724 tests, coverage ≥85%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```
@@ -142,18 +149,27 @@ All magic numbers are named constants. `_physics.py` docstring has the full inde
 - **XRD** (pymatgen): `pip install shalom[analysis]` — powder diffraction pattern from structure
 - **Symmetry** (spglib): `pip install shalom[symmetry]` — space/point group, crystal system, Wyckoff
 - **Magnetic** (builtin): no extra deps — site magnetization & Löwdin charges from QE pw.out
+- **MD** (numpy): no extra deps — RDF, MSD, VACF, diffusion coefficient, equilibration detection
 - Pattern: `_AVAILABLE` flag + `_ensure_available()` guard (same as `mp_client.py`)
-- Result dataclasses in `analysis/_base.py`: `ElasticResult`, `PhononResult`, `ElectronicResult`, `XRDResult`, `SymmetryResult`, `MagneticResult`
-- Import: `from shalom.analysis import analyze_elastic_tensor, analyze_phonon, analyze_band_structure, calculate_xrd, analyze_symmetry, analyze_magnetism`
+- Result dataclasses in `analysis/_base.py`: `ElasticResult`, `PhononResult`, `ElectronicResult`, `XRDResult`, `SymmetryResult`, `MagneticResult`, `MDResult`
+- All result dataclasses have `to_dict()` → JSON-serializable dict (numpy→list, `raw` excluded, units in key names)
+- `save_result_json(data, path)` — best-effort JSON writer (try/except, never crashes)
+- Import: `from shalom.analysis import analyze_elastic_tensor, analyze_phonon, analyze_band_structure, calculate_xrd, analyze_symmetry, analyze_magnetism, analyze_md_trajectory, save_result_json`
+
+**Auto-saved result files:**
+- `run_info.json` — written by `direct_run()` alongside README.md (backend, calc_type, auto_detected, structure_info)
+- `results_summary.json` — written by `StandardWorkflow.run()` (fermi_energy, step timings, plot paths)
+- `{type}_results.json` — written by CLI `analyze` with `-o` flag (phonon, xrd, md auto-save alongside plots)
+- `--save-json PATH` — explicit JSON save flag on any `analyze` subcommand
 
 **When adding a new analysis module:**
 1. Create `shalom/analysis/<property>.py` with optional dep guard
-2. Add result dataclass to `_base.py`
+2. Add result dataclass to `_base.py` **with `to_dict()` method**
 3. Export from `__init__.py`
 4. Add MCP tool to `mcp_server.py`
-5. Add CLI subcommand to `__main__.py` (under `analyze` parser)
+5. Add CLI subcommand to `__main__.py` (under `analyze` parser) — include `--save-json` support
 6. Add `[<property>]` optional dep group in `pyproject.toml`
-7. Write tests in `tests/test_analysis_<property>.py`
+7. Write tests in `tests/test_analysis_<property>.py` (include `to_dict()` + JSON round-trip tests)
 
 ### Physics Constants
 - POTCAR mappings: PBE_54 dataset (version metadata in YAML)
@@ -172,6 +188,23 @@ All magic numbers are named constants. `_physics.py` docstring has the full inde
 - 2D: assume_isolated='2D', vdw_corr='dft-d3', dftd3_version=4 (BJ), cell_dofree='2Dxy'
 - HUBBARD: QE 7.1+ card syntax (`HUBBARD (ortho-atomic)` + `U Fe-3d 5.3`), auto-migrated from old `lda_plus_u`/`Hubbard_U(i)` namelist entries; PRECISE accuracy only
 - pseudo_dir: `resolve_pseudo_dir()` 3-tier resolution — explicit arg → `$SHALOM_PSEUDO_DIR` → `~/pseudopotentials`
+
+### LAMMPS Config Conventions
+- Force field auto-detection: `detect_force_field(atoms)` queries `lammps_potentials.yaml` by element composition, selects highest-priority matching FF (EAM > Tersoff > LJ)
+- User override priority: `--pair-style` set → auto-detection skipped entirely; `--set timestep=0.5` → individual parameter override
+- potential_dir: `resolve_potential_dir()` 3-tier resolution — explicit arg → `$SHALOM_LAMMPS_POTENTIALS` → `~/lammps-potentials`
+- Units: LAMMPS "metal" units (eV, Å, ps, K, bar)
+- Lorentz-Berthelot mixing for LJ cross-pair interactions
+- 2D detection reused from `_physics.detect_2d()` → boundary "p p f"
+- Timestep auto-selection: light elements (H, Li, Be) → shorter timestep (from YAML per-FF)
+- Thermostat damping: per-FF optimal values from `lammps_potentials.yaml`
+
+### VASP AIMD Conventions
+- `CalculationType.AIMD`: IBRION=0, ISYM=0, Nosé-Hoover NVT (SMASS=0)
+- Presets: `aimd:standard` (POTIM=1.0 fs, NSW=5000) and `aimd:precise` (POTIM=0.5 fs, NSW=10000)
+- NPT via user override: `--set ISIF=3`
+- XDATCAR parser: reads frame-by-frame fractional→Cartesian, OSZICAR for per-step T/E
+- CLI: `python -m shalom run Si --backend vasp --calc aimd`
 
 ### CLI Usage
 ```bash
@@ -216,6 +249,19 @@ python -m shalom analyze symmetry --structure POSCAR           # Space group, po
 python -m shalom analyze symmetry --structure POSCAR --symprec 1e-3
 python -m shalom analyze magnetic --pw-out ./02_scf/pw.out     # Site magnetization, Löwdin
 python -m shalom analyze magnetic --pw-out pw.out --structure POSCAR
+python -m shalom analyze md --calc-dir ./lammps_calc --backend lammps  # MD trajectory analysis
+python -m shalom analyze md --calc-dir ./aimd --backend vasp -o ./md_plots/  # VASP AIMD analysis
+
+# ── LAMMPS classical MD ─────────────────────────────────────────────────────
+python -m shalom run Fe --backend lammps                     # Auto-detect EAM
+python -m shalom run Si --backend lammps                     # Auto-detect Tersoff
+python -m shalom run Ar --backend lammps                     # Auto-detect LJ
+python -m shalom run Fe --backend lammps --md-ensemble npt --temperature 500
+python -m shalom run Fe -b lammps --pair-style "eam/alloy" --pair-coeff "* * Fe.eam.alloy Fe"
+
+# ── VASP AIMD ───────────────────────────────────────────────────────────────
+python -m shalom run Si --backend vasp --calc aimd           # Standard AIMD preset
+python -m shalom run Si -b vasp -c aimd --accuracy precise   # Precise AIMD (smaller timestep)
 
 # ── Slurm HPC execution ──────────────────────────────────────────────────────
 python -m shalom run Si -b qe -x --slurm --partition=compute --account=mat_sci
@@ -258,7 +304,7 @@ After setup, tell Claude Code things like:
 - "mp-1040425 그래핀 밴드 구조 계산해줘"
 - "QE 환경이 설정되어 있는지 확인해줘"
 
-**16 MCP tools** (15 deterministic + 1 LLM-driven):
+**18 MCP tools** (17 deterministic + 1 LLM-driven):
 
 | Tool | Description | Requires API Key? |
 |------|-------------|:-----------------:|
@@ -277,6 +323,8 @@ After setup, tell Claude Code things like:
 | `analyze_xrd_pattern` | Powder XRD pattern from crystal structure | No |
 | `analyze_symmetry_properties` | Space group, point group, crystal system, Wyckoff | No |
 | `analyze_magnetic_properties` | Site magnetization and Löwdin charges from QE pw.out | No |
+| `run_md` | Run LAMMPS/VASP AIMD molecular dynamics | No |
+| `analyze_md_trajectory` | MD trajectory analysis (RDF, MSD, diffusion) | No |
 | `run_pipeline` | Full multi-agent LLM pipeline | Yes (or `base_url`) |
 
 The `run_pipeline` tool supports `base_url` for local LLM servers (Ollama, vLLM, etc.)

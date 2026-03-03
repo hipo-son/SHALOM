@@ -1,7 +1,7 @@
-# SHALOM DFT Tutorials
+# SHALOM Tutorials
 
-Hands-on Jupyter notebooks that run real Quantum ESPRESSO calculations and
-generate publication-quality analyses and figures using the SHALOM framework.
+Hands-on Jupyter notebooks demonstrating computational materials science workflows
+with publication-quality analyses and figures using the SHALOM framework.
 
 ## Notebooks
 
@@ -9,6 +9,7 @@ generate publication-quality analyses and figures using the SHALOM framework.
 |----------|----------|----------|------|
 | `01_silicon_complete_study.ipynb` | Si (diamond) | Convergence, bands, DOS, phonons, XRD | ~30 min |
 | `02_fe2o3_magnetic_oxide.ipynb` | Fe2O3 (hematite) | Spin-polarized DOS, GGA+U, magnetic analysis | ~45-60 min |
+| `03_multiscale_md_pipeline.ipynb` | Fe (BCC) + Si + Ar | LAMMPS MD, VASP AIMD, RDF, MSD, diffusion | ~5 min |
 
 ## Prerequisites
 
@@ -68,7 +69,19 @@ Each notebook saves all plots and data under `~/Desktop/shalom-tutorials/`:
     workflow/{02_scf,03_bands,04_nscf,dos.png}
     fe2o3_dos_spin.png
     fe2o3_dos_shalom.png
+  fe_md_study/
+    fe_xrd.png
+    02_vasp_relax/{INCAR,POSCAR,KPOINTS}
+    03_qe_scf/pw.in
+    04_lammps_fe/{data.lammps,in.lammps}
+    05_lammps_si/{data.lammps,in.lammps}
+    06_lammps_ar/{data.lammps,in.lammps}
+    07_vasp_aimd/{INCAR,POSCAR,KPOINTS}
+    08_analysis/{fe_md_energy,fe_md_temperature,fe_md_msd,fe_md_rdf,fe_md_vacf}.png
 ```
+
+> **Note**: Tutorial 03 does not require external software (QE, VASP, LAMMPS).
+> It generates input files and uses synthetic trajectories for analysis/plotting.
 
 ## Configuration
 

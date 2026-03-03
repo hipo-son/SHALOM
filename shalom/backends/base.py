@@ -128,6 +128,56 @@ class DOSData:
     source: str = "unknown"
 
 
+@dataclass
+class MDTrajectoryData:
+    """Backend-agnostic MD trajectory container.
+
+    Produced by VASP AIMD (XDATCAR), LAMMPS (dump file), or QE MD.
+    Stored in ``DFTResult.raw["md_trajectory"]`` by convention.
+
+    Attributes:
+        positions: Shape ``(n_frames, n_atoms, 3)`` atomic positions in Angstrom.
+        energies: Shape ``(n_frames,)`` total energies in eV.
+        temperatures: Shape ``(n_frames,)`` instantaneous temperatures in K.
+        times: Shape ``(n_frames,)`` simulation times in fs.
+        species: Element symbols per atom (length ``n_atoms``).
+        cell_vectors: Shape ``(n_frames, 3, 3)`` or ``(3, 3)`` cell vectors in Angstrom.
+        pressures: Shape ``(n_frames,)`` pressures in kBar.
+        forces: Shape ``(n_frames, n_atoms, 3)`` forces in eV/Angstrom.
+        velocities: Shape ``(n_frames, n_atoms, 3)`` velocities in Angstrom/fs.
+        kinetic_energies: Shape ``(n_frames,)`` kinetic energies in eV.
+        potential_energies: Shape ``(n_frames,)`` potential energies in eV.
+        ensemble: Thermodynamic ensemble (``"NVE"``, ``"NVT"``, ``"NPT"``).
+        timestep_fs: MD timestep in femtoseconds.
+        source: Backend that produced this data (``"vasp"``, ``"lammps"``, ``"qe"``).
+    """
+
+    positions: Any  # np.ndarray (n_frames, n_atoms, 3), Å
+    energies: Any  # np.ndarray (n_frames,), eV
+    temperatures: Any  # np.ndarray (n_frames,), K
+    times: Any  # np.ndarray (n_frames,), fs
+    species: List[str]  # (n_atoms,)
+    cell_vectors: Any = None  # (n_frames, 3, 3) or (3, 3), Å
+    pressures: Optional[Any] = None  # (n_frames,), kBar
+    forces: Optional[Any] = None  # (n_frames, n_atoms, 3), eV/Å
+    velocities: Optional[Any] = None  # (n_frames, n_atoms, 3), Å/fs
+    kinetic_energies: Optional[Any] = None  # (n_frames,), eV
+    potential_energies: Optional[Any] = None  # (n_frames,), eV
+    ensemble: str = "NVT"
+    timestep_fs: float = 1.0
+    source: str = "unknown"
+
+    @property
+    def n_frames(self) -> int:
+        """Number of trajectory frames."""
+        return len(self.energies) if self.energies is not None else 0
+
+    @property
+    def n_atoms(self) -> int:
+        """Number of atoms."""
+        return len(self.species)
+
+
 @runtime_checkable
 class DFTBackend(Protocol):
     """Protocol defining the interface every DFT backend must implement.

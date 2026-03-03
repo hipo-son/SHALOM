@@ -51,6 +51,7 @@ class CalculationType(str, Enum):
     BAND_STRUCTURE = "band_structure"
     DOS = "dos"
     ELASTIC = "elastic"
+    AIMD = "aimd"
 
 
 # ---------------------------------------------------------------------------

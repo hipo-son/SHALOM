@@ -85,6 +85,7 @@ phonon = [
 symmetry = [
     "spglib>=2.0",  # crystal symmetry analysis (space group, Wyckoff, etc.)
 ]
+lammps = []  # LAMMPS runs via subprocess (lmp/lmp_mpi on PATH), no Python binding needed
 all = [
     "shalom[pymatgen,mp,dev,docs,demo,plotting,mcp,analysis,phonon,symmetry,llm]"
 ]

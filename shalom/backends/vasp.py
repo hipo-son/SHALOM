@@ -16,7 +16,7 @@ from ase import Atoms
 from ase.io import write
 
 from shalom.backends._compression import postprocess_parse_result
-from shalom.backends.base import DFTResult, compute_forces_max
+from shalom.backends.base import DFTResult, MDTrajectoryData, compute_forces_max
 from shalom.backends.vasp_config import (
     VASPInputConfig,
     get_potcar_variant,
@@ -411,3 +411,159 @@ class VASPBackend:
             ionic_forces_max=ionic_forces_max if ionic_forces_max else None,
             raw=raw,
         )
+
+    # ------------------------------------------------------------------
+    # AIMD trajectory parsing
+    # ------------------------------------------------------------------
+
+    def parse_xdatcar(self, directory: str) -> MDTrajectoryData:
+        """Parse XDATCAR for AIMD trajectory (positions + cell).
+
+        Also reads OSZICAR for per-step temperature and energy.
+
+        Args:
+            directory: Calculation directory containing XDATCAR.
+
+        Returns:
+            MDTrajectoryData with positions, energies, temperatures.
+
+        Raises:
+            FileNotFoundError: If XDATCAR is missing.
+        """
+        import numpy as np
+
+        xdatcar_path = os.path.join(directory, "XDATCAR")
+        if not os.path.exists(xdatcar_path):
+            raise FileNotFoundError(f"XDATCAR not found in {directory}")
+
+        with open(xdatcar_path) as f:
+            lines = f.readlines()
+
+        # Parse header: system name, scale factor, lattice vectors, species, counts
+        scale = float(lines[1].strip())
+        cell = np.zeros((3, 3))
+        for i in range(3):
+            cell[i] = [float(x) for x in lines[2 + i].split()]
+        cell *= scale
+
+        species_line = lines[5].split()
+        counts_line = [int(x) for x in lines[6].split()]
+        n_atoms = sum(counts_line)
+        species = []
+        for sym, cnt in zip(species_line, counts_line):
+            species.extend([sym] * cnt)
+
+        # Parse frames: "Direct configuration=   N" header + n_atoms lines
+        all_positions = []
+        i = 7
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("Direct configuration") or line.startswith("Direct"):
+                i += 1
+                frac_coords = []
+                for _ in range(n_atoms):
+                    if i >= len(lines):
+                        break
+                    coords = [float(x) for x in lines[i].split()[:3]]
+                    frac_coords.append(coords)
+                    i += 1
+                # Convert fractional → Cartesian
+                frac_arr = np.array(frac_coords)
+                cart = frac_arr @ cell
+                all_positions.append(cart)
+            else:
+                i += 1
+
+        positions = np.array(all_positions)
+        n_frames = len(all_positions)
+
+        # Parse OSZICAR for per-step T and E
+        temperatures, energies = self._parse_oszicar_md(directory, n_frames)
+
+        # Compute times from INCAR POTIM (default 1.0 fs)
+        potim = self._read_potim(directory)
+        times = np.arange(n_frames) * potim
+
+        return MDTrajectoryData(
+            positions=positions,
+            energies=energies,
+            temperatures=temperatures,
+            times=times,
+            species=species,
+            cell_vectors=cell,
+            ensemble="NVT",
+            timestep_fs=potim,
+            source="vasp",
+        )
+
+    def _parse_oszicar_md(
+        self, directory: str, n_frames: int,
+    ) -> tuple:
+        """Extract per-ionic-step T and E from OSZICAR.
+
+        Returns:
+            (temperatures, energies) as numpy arrays.
+        """
+        import numpy as np
+
+        oszicar_path = os.path.join(directory, "OSZICAR")
+        temperatures = []
+        energies = []
+
+        if os.path.exists(oszicar_path):
+            with open(oszicar_path) as f:
+                for line in f:
+                    # Ionic step lines: "   1 T=  300.00 E= -1.234 ..."
+                    if "T=" in line and "E=" in line:
+                        try:
+                            parts = line.split()
+                            t_idx = parts.index("T=") + 1 if "T=" in parts else None
+                            e_idx = parts.index("E=") + 1 if "E=" in parts else None
+                            if t_idx is None or e_idx is None:
+                                # Try regex for flexible formatting
+                                t_match = re.search(r"T=\s*([\d.E+-]+)", line)
+                                e_match = re.search(r"E=\s*([\-\d.E+-]+)", line)
+                                if t_match and e_match:
+                                    temperatures.append(float(t_match.group(1)))
+                                    energies.append(float(e_match.group(1)))
+                            else:
+                                temperatures.append(float(parts[t_idx]))
+                                energies.append(float(parts[e_idx]))
+                        except (ValueError, IndexError):
+                            continue
+
+        if temperatures:
+            temperatures = np.array(temperatures[:n_frames])
+            energies = np.array(energies[:n_frames])
+        else:
+            temperatures = np.full(n_frames, 300.0)
+            energies = np.zeros(n_frames)
+
+        return temperatures, energies
+
+    def _read_potim(self, directory: str) -> float:
+        """Read POTIM from INCAR, default 1.0 fs."""
+        incar_path = os.path.join(directory, "INCAR")
+        if os.path.exists(incar_path):
+            with open(incar_path) as f:
+                for line in f:
+                    if "POTIM" in line and "=" in line:
+                        try:
+                            val = line.split("=")[1].split("!")[0].split("#")[0].strip()
+                            return float(val)
+                        except (ValueError, IndexError):
+                            pass
+        return 1.0
+
+    def parse_md_output(self, directory: str) -> DFTResult:
+        """Parse AIMD output: standard OUTCAR + XDATCAR trajectory.
+
+        Returns DFTResult with md_trajectory stored in ``raw["md_trajectory"]``.
+        """
+        result = self.parse_output(directory)
+        try:
+            traj = self.parse_xdatcar(directory)
+            result.raw["md_trajectory"] = traj
+        except FileNotFoundError:
+            logger.warning("XDATCAR not found; skipping trajectory extraction.")
+        return result

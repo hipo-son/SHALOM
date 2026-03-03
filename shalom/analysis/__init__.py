@@ -15,6 +15,7 @@ Available modules
 - **xrd**: X-ray diffraction patterns (pymatgen).
 - **symmetry**: Space group, Wyckoff positions, crystal system (spglib).
 - **magnetic**: Site magnetization and Lowdin charges (QE output parsing).
+- **md**: MD trajectory analysis — RDF, MSD, VACF, diffusion (numpy only).
 
 Usage::
 
@@ -28,10 +29,12 @@ Usage::
 from shalom.analysis._base import (
     ElasticResult,
     ElectronicResult,
+    MDResult,
     MagneticResult,
     PhononResult,
     SymmetryResult,
     XRDResult,
+    save_result_json,
 )
 from shalom.analysis.elastic import (
     analyze_elastic_tensor,
@@ -58,6 +61,14 @@ from shalom.analysis.phonon import (
 from shalom.analysis.symmetry import (
     analyze_symmetry,
     is_spglib_available,
+)
+from shalom.analysis.md import (
+    analyze_md_trajectory,
+    compute_msd,
+    compute_rdf,
+    compute_vacf,
+    compute_diffusion_coefficient,
+    detect_equilibration,
 )
 from shalom.analysis.xrd import (
     calculate_xrd,
@@ -88,6 +99,14 @@ __all__ = [
     "SymmetryResult",
     "analyze_symmetry",
     "is_spglib_available",
+    # MD
+    "MDResult",
+    "analyze_md_trajectory",
+    "compute_rdf",
+    "compute_msd",
+    "compute_vacf",
+    "compute_diffusion_coefficient",
+    "detect_equilibration",
     # Magnetic
     "MagneticResult",
     "analyze_magnetism",
@@ -95,4 +114,6 @@ __all__ = [
     "extract_total_magnetization",
     "extract_lowdin_charges",
     "is_magnetic_available",
+    # Serialization
+    "save_result_json",
 ]

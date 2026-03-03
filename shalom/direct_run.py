@@ -38,12 +38,14 @@ CALC_TYPE_ALIASES: Dict[str, str] = {
     "band_structure": "band_structure",
     "dos": "dos",
     "elastic": "elastic",
+    "aimd": "aimd",
     # QE / shorthand aliases → VASP canonical
     "scf": "static",
     "relax": "relaxation",
     "vc-relax": "relaxation",
     "bands": "band_structure",
     "nscf": "band_structure",
+    "md": "aimd",
 }
 
 
@@ -155,6 +157,8 @@ def _write_output_readme(
         "OUTCAR": "VASP output (energy, forces, stress, etc.)",
         "pw.in": "Quantum ESPRESSO input file (pw.x)",
         "pw.out": "Quantum ESPRESSO output (after calculation)",
+        "data.lammps": "LAMMPS data file (atom positions, masses, box)",
+        "in.lammps": "LAMMPS input script (pair_style, ensemble, run settings)",
         "atoms.txt": "ASE-format structure file (human-readable)",
     }
     if files_generated:
@@ -178,6 +182,16 @@ def _write_output_readme(
             f"   cd {output_dir}",
             "   mpirun -np 4 vasp_std > vasp.log 2>&1",
             "   ```",
+        ]
+    elif backend_name == "lammps":
+        lines += [
+            "1. Ensure potential files are in the calculation directory",
+            "2. Run LAMMPS:",
+            "   ```bash",
+            f"   cd {output_dir}",
+            "   lmp -in in.lammps > log.lammps 2>&1",
+            "   ```",
+            "   Or with MPI: `mpirun -np 4 lmp -in in.lammps`",
         ]
     else:
         lines += [
@@ -217,6 +231,36 @@ def _write_output_readme(
             fh.write("\n".join(lines))
     except OSError as exc:
         logger.warning("Could not write output README.md: %s", exc)
+
+
+def _write_run_info(
+    output_dir: str,
+    backend_name: str,
+    calc_type: str,
+    structure_info: Optional[Dict[str, Any]],
+    auto_detected: Optional[Dict[str, Any]],
+    files_generated: List[str],
+) -> None:
+    """Write machine-readable run_info.json into the output folder."""
+    import datetime
+    import json
+
+    info: Dict[str, Any] = {
+        "version": 1,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "backend": backend_name,
+        "calc_type": calc_type,
+        "structure_info": structure_info or {},
+        "auto_detected": auto_detected or {},
+        "files_generated": files_generated,
+    }
+
+    path = os.path.join(output_dir, "run_info.json")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(info, fh, indent=2, default=str)
+    except OSError as exc:
+        logger.warning("Could not write run_info.json: %s", exc)
 
 
 def _resolve_calc_type(calc_type: Optional[str], backend_name: str) -> str:
@@ -452,6 +496,28 @@ def direct_run(
                 "kpoints": dft_config.kpoints.grid,
             }.items() if v is not None
         }
+    elif config.backend_name == "lammps":
+        from shalom.backends.lammps_config import get_lammps_preset
+        lammps_settings = dict(config.user_settings or {})
+        ensemble = lammps_settings.pop("ensemble", "nvt")
+        dft_config = get_lammps_preset(
+            ensemble=ensemble, atoms=atoms, accuracy=config.accuracy,
+        )
+        # Apply user overrides
+        for key, value in lammps_settings.items():
+            if hasattr(dft_config, key):
+                setattr(dft_config, key, value)
+        # If user manually set pair_coeff, clear auto-detected potential_files
+        if "pair_coeff" in lammps_settings or "pair_style" in lammps_settings:
+            dft_config.potential_files = []
+        auto_detected = {
+            k: v for k, v in {
+                "pair_style": dft_config.pair_style,
+                "detected_ff": dft_config.detected_ff,
+                "timestep": dft_config.timestep,
+                "is_2d": dft_config.is_2d,
+            }.items() if v is not None
+        }
     else:
         dft_config = None
 
@@ -506,6 +572,19 @@ def direct_run(
         structure_info=structure_info,
         auto_detected=auto_detected,
         files_generated=[f for f in files_generated if f != "README.md"],
+    )
+
+    # 9. Write machine-readable run_info.json
+    _write_run_info(
+        output_dir=output_dir,
+        backend_name=config.backend_name,
+        calc_type=calc_type,
+        structure_info=structure_info,
+        auto_detected=auto_detected,
+        files_generated=[
+            f for f in files_generated
+            if f not in ("README.md", "run_info.json")
+        ],
     )
 
     return DirectRunResult(

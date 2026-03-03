@@ -31,9 +31,9 @@ Existing LLM-agent systems are either too general (lacking domain primitives for
 - **Hierarchical agent composition** — Nest agents in configurable layers (planning, execution, evaluation, auditing) that communicate via typed Pydantic schemas.
 - **Secure sandboxed execution** — Run LLM-generated Python/ASE code safely with whitelist-only builtins, import restrictions, timeouts, and audit logging.
 - **Pluggable LLM backends** — Swap between OpenAI, Anthropic, or local/self-hosted models (Ollama, vLLM, llama.cpp) via `base_url` parameter.
-- **Dual DFT backend support** — Quantum ESPRESSO (open-source, personal workstations) and VASP (licensed, HPC clusters) as first-class DFT solvers, with a unified abstraction layer. QE 7.1+ HUBBARD card syntax supported natively.
+- **Triple backend support** — Quantum ESPRESSO (open-source DFT), VASP (licensed DFT + AIMD), and LAMMPS (classical MD) as first-class solvers, with a unified abstraction layer. QE 7.1+ HUBBARD card syntax supported natively.
 - **HPC-native design** — First-class Slurm integration for submitting and monitoring jobs on supercomputers.
-- **MCP server for Claude Code** — 16 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
+- **MCP server for Claude Code** — 18 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
 - **Hands-on tutorials** — Jupyter notebooks for Si (convergence, bands, DOS, phonons, XRD) and Fe2O3 (spin-polarized, GGA+U, magnetic analysis) with real QE calculations.
 - **Deterministic reproducibility** — Seed-locked prompts and structured outputs ensure every run is traceable and repeatable.
 
@@ -63,14 +63,15 @@ To validate the framework, SHALOM ships with a complete **material discovery pip
 
 This pipeline is one instantiation of the SHALOM framework. The same core components — `LLMProvider`, `SafeExecutor`, Pydantic schemas, and the agent base classes — can be reused to build entirely different workflows (e.g., defect screening, catalyst optimization, phase-diagram exploration).
 
-### Supported DFT Backends
+### Supported Backends
 
-| Backend | License | Typical Environment | I/O Formats |
-|---------|---------|---------------------|-------------|
-| **Quantum ESPRESSO** | Open-source (GPL) | Personal workstations, small clusters | `pw.x` input / XML output |
-| **VASP** | Commercial license | HPC clusters with Slurm | POSCAR, INCAR, KPOINTS / OUTCAR |
+| Backend | Type | License | Typical Environment | I/O Formats |
+|---------|------|---------|---------------------|-------------|
+| **Quantum ESPRESSO** | DFT | Open-source (GPL) | Personal workstations, small clusters | `pw.x` input / XML output |
+| **VASP** | DFT / AIMD | Commercial license | HPC clusters with Slurm | POSCAR, INCAR, KPOINTS / OUTCAR, XDATCAR |
+| **LAMMPS** | Classical MD | Open-source (GPL) | Workstations, HPC | `data.lammps` + `in.lammps` / `log.lammps`, `dump.lammpstrj` |
 
-SHALOM abstracts DFT-specific details behind a unified interface so that agents operate on the same schema regardless of the solver. Individual researchers can prototype with Quantum ESPRESSO locally, then scale to VASP on institutional HPC resources without changing agent logic.
+SHALOM abstracts backend-specific details behind a unified interface so that agents operate on the same schema regardless of the solver. Individual researchers can prototype with Quantum ESPRESSO locally, scale to VASP on institutional HPC resources, or run classical MD with LAMMPS — without changing agent logic. Force field auto-detection selects the optimal potential (EAM, Tersoff, LJ) based on element composition.
 
 ## Getting Started
 
@@ -275,6 +276,16 @@ python -m shalom analyze electronic --calc-dir ./03_bands    # Band gap, effecti
 python -m shalom analyze magnetic --pw-out pw.out            # Site moments, Lowdin charges
 python -m shalom analyze elastic --file elastic_tensor.json  # Bulk/shear/Young's modulus
 python -m shalom analyze phonon --structure POSCAR --supercell 2x2x2 --force-constants fc.hdf5
+python -m shalom analyze md --calc-dir ./lammps_calc --backend lammps  # MD trajectory analysis
+
+# ── LAMMPS classical MD ─────────────────────────────────────────────────────
+python -m shalom run Fe --backend lammps                     # Auto-detect EAM
+python -m shalom run Si --backend lammps                     # Auto-detect Tersoff
+python -m shalom run Fe -b lammps --md-ensemble npt --temperature 500  # NPT at 500K
+
+# ── VASP AIMD ───────────────────────────────────────────────────────────────
+python -m shalom run Si --backend vasp --calc aimd           # Standard AIMD
+python -m shalom run Si -b vasp -c aimd --accuracy precise   # Precise (smaller timestep)
 
 # ── LLM-driven autonomous pipeline ──────────────────────────────────────────
 python -m shalom pipeline "Find a 2D HER catalyst"              # Full pipeline (OpenAI)
@@ -319,7 +330,7 @@ After setup, tell Claude Code things like:
 - "Si의 SCF 계산 입력 파일을 만들어줘"
 - "mp-1040425 밴드 구조 계산해줘"
 
-**16 MCP tools**: `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `run_pipeline`, `analyze_elastic`, `analyze_phonon_properties`, `analyze_electronic_structure`, `analyze_xrd_pattern`, `analyze_symmetry_properties`, `analyze_magnetic_properties`
+**18 MCP tools**: `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `run_pipeline`, `analyze_elastic`, `analyze_phonon_properties`, `analyze_electronic_structure`, `analyze_xrd_pattern`, `analyze_symmetry_properties`, `analyze_magnetic_properties`, `run_md`, `analyze_md_trajectory`
 
 The `run_pipeline` tool runs the full multi-agent LLM pipeline and supports `base_url` for local LLM servers as an alternative to external API keys.
 
@@ -331,6 +342,7 @@ Step-by-step Jupyter notebooks with real QE calculations — see [`tutorials/`](
 |----------|----------|-------------------|------|
 | `01_silicon_complete_study.ipynb` | Si | Convergence tests, bands, DOS, phonons, XRD | ~30 min |
 | `02_fe2o3_magnetic_oxide.ipynb` | Fe2O3 | Spin-polarized DFT, GGA+U (Hubbard), magnetic analysis | ~45-60 min |
+| `03_multiscale_md_pipeline.ipynb` | Fe/Si/Ar | LAMMPS MD, VASP AIMD, RDF, MSD, diffusion | ~5 min |
 
 Prerequisites: QE 7.1+, SSSP pseudopotentials, `pip install -e ".[all]"`. See [tutorials/README.md](tutorials/README.md) for details.
 
@@ -375,8 +387,8 @@ docker pull ghcr.io/hipo-son/shalom:latest
 
 | Phase | Target | Key Features | Status |
 |-------|--------|-------------|--------|
-| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server (16 tools), local LLM support, token-aware compression, band/DOS/XRD plotting, convergence tests, 5-step workflow, 6 post-DFT analysis modules, DFT tutorials, audit logging | Code complete (1536 tests, 13 skipped) |
-| **Phase 2** | Engine expansion | VASP-Slurm HPC, LAMMPS/AIMD integration, Dynamic Recipe Generator, 100+ self-correction benchmarks | Planned |
+| **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server, local LLM support, token-aware compression, band/DOS/XRD plotting, convergence tests, 5-step workflow, 6 post-DFT analysis modules, DFT tutorials, audit logging | Code complete |
+| **Phase 2** | Engine expansion | LAMMPS classical MD backend (auto force field detection), VASP AIMD, MD trajectory analysis (RDF, MSD, diffusion), MD plotting, MCP server (18 tools), VASP-Slurm HPC | In progress |
 | **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) | Planned |
 
 See the [Master Design Document](docs/master_design_document.md) for detailed milestones and publication strategy.

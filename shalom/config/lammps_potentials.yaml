@@ -1,0 +1,173 @@
+# LAMMPS force field metadata — per-element potential files, parameters, and defaults.
+#
+# Follows the SSSP pseudopotential metadata pattern:
+# all chemistry/physics data lives in YAML, Python code only routes.
+#
+# Adding a new force field:
+#   1. Add a new top-level key (e.g. "reaxff:")
+#   2. Define pair_style, supported_elements, potentials, timestep, thermostat
+#   3. Mirror in _defaults.py CONFIGS["lammps_potentials"]
+#   4. Tests auto-pick it via detect_force_field()
+
+eam_alloy:
+  description: "EAM/alloy — FCC/BCC metals (Mishin, Mendelev, etc.)"
+  pair_style: "eam/alloy"
+  priority: 90
+  units: metal
+  atom_style: atomic
+  supported_elements:
+    - Al
+    - Cu
+    - Ni
+    - Fe
+    - Co
+    - Cr
+    - Mn
+    - Ti
+    - Zr
+    - Nb
+    - Mo
+    - W
+    - Ag
+    - Au
+    - Pt
+    - Pd
+  timestep:
+    default: 1.0
+    light_elements: 0.5
+  thermostat:
+    nvt_damp: 100.0
+    npt_damp: 1000.0
+  potentials:
+    Al:
+      file: "Al_mishin.eam.alloy"
+      source: "Mishin et al. PRB 59, 3393 (1999)"
+    Cu:
+      file: "Cu_mishin.eam.alloy"
+      source: "Mishin et al. PRB 63, 224106 (2001)"
+    Ni:
+      file: "Ni_mishin.eam.alloy"
+      source: "Mishin et al. Acta Mater. 52, 1451 (2004)"
+    Fe:
+      file: "Fe_mendelev.eam.fs"
+      source: "Mendelev et al. Phil. Mag. 83, 3977 (2003)"
+    Co:
+      file: "Co_mishin.eam.alloy"
+      source: "Mishin et al."
+    Cr:
+      file: "Cr_eam.alloy"
+      source: "EAM potential"
+    Mn:
+      file: "Mn_eam.alloy"
+      source: "EAM potential"
+    Ti:
+      file: "Ti_eam.alloy"
+      source: "EAM potential"
+    Zr:
+      file: "Zr_eam.alloy"
+      source: "EAM potential"
+    Nb:
+      file: "Nb_eam.alloy"
+      source: "EAM potential"
+    Mo:
+      file: "Mo_eam.alloy"
+      source: "EAM potential"
+    W:
+      file: "W_eam.alloy"
+      source: "EAM potential"
+    Ag:
+      file: "Ag_eam.alloy"
+      source: "EAM potential"
+    Au:
+      file: "Au_eam.alloy"
+      source: "EAM potential"
+    Pt:
+      file: "Pt_eam.alloy"
+      source: "EAM potential"
+    Pd:
+      file: "Pd_eam.alloy"
+      source: "EAM potential"
+
+tersoff:
+  description: "Tersoff — covalent semiconductors (Si, C, Ge, BN)"
+  pair_style: "tersoff"
+  priority: 85
+  units: metal
+  atom_style: atomic
+  supported_elements:
+    - Si
+    - C
+    - Ge
+    - B
+    - N
+  timestep:
+    default: 0.5
+    light_elements: 0.25
+  thermostat:
+    nvt_damp: 50.0
+    npt_damp: 500.0
+  potentials:
+    Si:
+      file: "SiCGe.tersoff"
+      source: "Tersoff PRB 39, 5566 (1989)"
+      map: "Si"
+    C:
+      file: "SiCGe.tersoff"
+      source: "Tersoff PRB 39, 5566 (1989)"
+      map: "C"
+    Ge:
+      file: "SiCGe.tersoff"
+      source: "Tersoff PRB 39, 5566 (1989)"
+      map: "Ge"
+    B:
+      file: "BN.tersoff"
+      source: "Tersoff-type BN potential"
+      map: "B"
+    N:
+      file: "BN.tersoff"
+      source: "Tersoff-type BN potential"
+      map: "N"
+
+lj_cut:
+  description: "Lennard-Jones — noble gases, simple fluids"
+  pair_style: "lj/cut 10.0"
+  priority: 30
+  units: metal
+  atom_style: atomic
+  supported_elements:
+    - Ar
+    - Ne
+    - Kr
+    - Xe
+    - He
+  timestep:
+    default: 5.0
+    light_elements: 2.0
+  thermostat:
+    nvt_damp: 200.0
+    npt_damp: 2000.0
+  lj_params:
+    Ar:
+      sigma: 3.405
+      epsilon: 0.01039
+    Ne:
+      sigma: 2.780
+      epsilon: 0.00311
+    Kr:
+      sigma: 3.633
+      epsilon: 0.01400
+    Xe:
+      sigma: 3.949
+      epsilon: 0.01985
+    He:
+      sigma: 2.556
+      epsilon: 0.00087
+
+simulation_defaults:
+  boundary: "p p p"
+  thermo_interval: 100
+  dump_interval: 1000
+  velocity_seed: 12345
+  minimize_etol: 1.0e-8
+  minimize_ftol: 1.0e-10
+  minimize_maxiter: 10000

@@ -3,12 +3,59 @@
 Each analysis type (elastic, phonon, etc.) has its own result dataclass here.
 These are analogous to ``BandStructureData`` / ``DOSData`` in ``backends.base``
 but for derived physical properties rather than raw DFT outputs.
+
+All result dataclasses provide a ``to_dict()`` method that returns a
+JSON-serializable dictionary (numpy arrays converted to lists, ``raw``
+field excluded).  Use ``save_result_json()`` to persist results to disk.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+def _to_list(val: Any) -> Any:
+    """Convert numpy arrays to nested Python lists; pass through others."""
+    if val is None:
+        return None
+    if hasattr(val, "tolist"):
+        return val.tolist()
+    return val
+
+
+def save_result_json(
+    data: Dict[str, Any],
+    path: str,
+    *,
+    logger_ref: Optional[logging.Logger] = None,
+) -> Optional[str]:
+    """Save a dict as pretty-printed JSON (best-effort, never crashes).
+
+    Args:
+        data: JSON-serializable dict (e.g. from ``result.to_dict()``).
+        path: Destination file path.
+        logger_ref: Optional logger for info/warning messages.
+
+    Returns:
+        Absolute path on success, ``None`` on failure.
+    """
+    import os
+
+    _log = logger_ref or logger
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, default=str)
+        _log.info("Results saved: %s", path)
+        return os.path.abspath(path)
+    except OSError as exc:
+        _log.warning("Could not save results to %s: %s", path, exc)
+        return None
 
 
 @dataclass
@@ -44,6 +91,23 @@ class ElasticResult:
     compliance_tensor: Optional[Any] = None  # np.ndarray (6, 6), 1/GPa
     raw: Optional[Any] = None  # pymatgen ElasticTensor
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict (excludes ``raw``)."""
+        d: Dict[str, Any] = {
+            "elastic_tensor_GPa": _to_list(self.elastic_tensor),
+            "bulk_modulus_vrh_GPa": self.bulk_modulus_vrh,
+            "shear_modulus_vrh_GPa": self.shear_modulus_vrh,
+            "youngs_modulus_GPa": self.youngs_modulus,
+            "poisson_ratio": self.poisson_ratio,
+            "is_stable": self.is_stable,
+            "stability_violations": self.stability_violations,
+            "universal_anisotropy": self.universal_anisotropy,
+            "compliance_tensor_inv_GPa": _to_list(self.compliance_tensor),
+        }
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
 
 
 @dataclass
@@ -95,6 +159,32 @@ class PhononResult:
     raw: Optional[Any] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict (excludes ``raw`` and ``force_constants``)."""
+        d: Dict[str, Any] = {
+            "min_frequency_THz": self.min_frequency_THz,
+            "is_stable": self.is_stable,
+            "n_imaginary_modes": len(self.imaginary_modes),
+            "imaginary_modes": [
+                {"q_index": q, "branch": b, "frequency_THz": f}
+                for q, b, f in self.imaginary_modes
+            ],
+            "n_atoms": self.n_atoms,
+            "n_branches": self.n_branches,
+            "band_labels": {str(k): v for k, v in self.band_labels.items()},
+        }
+        # DOS summary (arrays can be large — include for completeness)
+        d["dos_frequencies_THz"] = _to_list(self.dos_frequencies)
+        d["dos_density_states_per_THz"] = _to_list(self.dos_density)
+        # Thermal properties
+        d["thermal_temperatures_K"] = _to_list(self.thermal_temperatures)
+        d["thermal_free_energy_kJ_per_mol"] = _to_list(self.thermal_free_energy)
+        d["thermal_entropy_J_per_K_per_mol"] = _to_list(self.thermal_entropy)
+        d["thermal_cv_J_per_K_per_mol"] = _to_list(self.thermal_cv)
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
+
 
 @dataclass
 class ElectronicResult:
@@ -130,6 +220,25 @@ class ElectronicResult:
     raw: Optional[Any] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict (excludes ``raw``)."""
+        d: Dict[str, Any] = {
+            "bandgap_eV": self.bandgap_eV,
+            "is_direct": self.is_direct,
+            "is_metal": self.is_metal,
+            "vbm_energy_eV": self.vbm_energy,
+            "cbm_energy_eV": self.cbm_energy,
+            "vbm_k_index": self.vbm_k_index,
+            "cbm_k_index": self.cbm_k_index,
+            "effective_mass_electron_me": self.effective_mass_electron,
+            "effective_mass_hole_me": self.effective_mass_hole,
+            "dos_at_fermi_states_per_eV": self.dos_at_fermi,
+            "n_occupied_bands": self.n_occupied_bands,
+        }
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
+
 
 @dataclass
 class XRDResult:
@@ -156,6 +265,21 @@ class XRDResult:
     n_peaks: int = 0
     raw: Optional[Any] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict (excludes ``raw``)."""
+        d: Dict[str, Any] = {
+            "wavelength": self.wavelength,
+            "wavelength_angstrom": self.wavelength_angstrom,
+            "n_peaks": self.n_peaks,
+            "two_theta_deg": _to_list(self.two_theta),
+            "intensities": _to_list(self.intensities),
+            "d_spacings_angstrom": _to_list(self.d_spacings),
+            "hkl_indices": [list(hkl) for hkl in self.hkl_indices],
+        }
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
 
 
 @dataclass
@@ -191,6 +315,24 @@ class SymmetryResult:
     raw: Optional[Any] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict (excludes ``raw``)."""
+        d: Dict[str, Any] = {
+            "space_group_number": self.space_group_number,
+            "space_group_symbol": self.space_group_symbol,
+            "point_group": self.point_group,
+            "crystal_system": self.crystal_system,
+            "lattice_type": self.lattice_type,
+            "hall_symbol": self.hall_symbol,
+            "wyckoff_letters": self.wyckoff_letters,
+            "equivalent_atoms": _to_list(self.equivalent_atoms),
+            "n_operations": self.n_operations,
+            "is_primitive": self.is_primitive,
+        }
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
+
 
 @dataclass
 class MagneticResult:
@@ -219,3 +361,97 @@ class MagneticResult:
     dominant_moment_element: Optional[str] = None
     raw: Optional[Any] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict (excludes ``raw``)."""
+        d: Dict[str, Any] = {
+            "total_magnetization_bohr_mag": self.total_magnetization,
+            "is_magnetic": self.is_magnetic,
+            "is_spin_polarized": self.is_spin_polarized,
+            "site_magnetizations_bohr_mag": _to_list(self.site_magnetizations),
+            "site_charges": _to_list(self.site_charges),
+            "lowdin_charges": self.lowdin_charges,
+            "magnetic_elements": self.magnetic_elements,
+            "dominant_moment_element": self.dominant_moment_element,
+        }
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
+
+
+@dataclass
+class MDResult:
+    """MD trajectory analysis results.
+
+    Contains thermodynamic averages, radial distribution function (RDF),
+    mean square displacement (MSD), velocity autocorrelation (VACF),
+    and diffusion coefficient computed from an MD trajectory.
+
+    Attributes:
+        rdf_r: Shape ``(n_bins,)`` radial distance grid in Angstrom.
+        rdf_g: Shape ``(n_bins,)`` pair correlation function g(r).
+        rdf_pairs: Atom pair label, e.g. ``"Fe-O"`` or ``"all"`` for total.
+        msd_t: Shape ``(n_points,)`` time axis in fs.
+        msd: Shape ``(n_points,)`` mean square displacement in Angstrom^2.
+        diffusion_coefficient: Diffusion coefficient in cm^2/s from MSD fit.
+        vacf_t: Shape ``(n_points,)`` time lag axis in fs.
+        vacf: Shape ``(n_points,)`` normalized velocity autocorrelation.
+        avg_temperature: Time-averaged temperature in K.
+        temperature_std: Standard deviation of temperature in K.
+        avg_pressure: Time-averaged pressure in kBar.
+        avg_energy: Time-averaged total energy in eV.
+        energy_drift_per_atom: Energy drift in eV/atom/ps (for NVE quality).
+        equilibration_step: Estimated frame index where equilibration ends.
+        is_equilibrated: True if the trajectory appears equilibrated.
+        metadata: Arbitrary key-value pairs for provenance tracking.
+    """
+
+    rdf_r: Optional[Any] = None
+    rdf_g: Optional[Any] = None
+    rdf_pairs: Optional[str] = None
+    msd_t: Optional[Any] = None
+    msd: Optional[Any] = None
+    diffusion_coefficient: Optional[float] = None
+    vacf_t: Optional[Any] = None
+    vacf: Optional[Any] = None
+    avg_temperature: Optional[float] = None
+    temperature_std: Optional[float] = None
+    avg_pressure: Optional[float] = None
+    avg_energy: Optional[float] = None
+    energy_drift_per_atom: Optional[float] = None
+    equilibration_step: Optional[int] = None
+    is_equilibrated: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable dict."""
+        d: Dict[str, Any] = {
+            "rdf": {
+                "r_angstrom": _to_list(self.rdf_r),
+                "g": _to_list(self.rdf_g),
+                "pairs": self.rdf_pairs,
+            },
+            "msd": {
+                "time_fs": _to_list(self.msd_t),
+                "displacement_angstrom2": _to_list(self.msd),
+            },
+            "vacf": {
+                "time_fs": _to_list(self.vacf_t),
+                "correlation": _to_list(self.vacf),
+            },
+            "diffusion_coefficient_cm2_per_s": self.diffusion_coefficient,
+            "thermodynamics": {
+                "avg_temperature_K": self.avg_temperature,
+                "temperature_std_K": self.temperature_std,
+                "avg_pressure_kBar": self.avg_pressure,
+                "avg_energy_eV": self.avg_energy,
+                "energy_drift_eV_per_atom_per_ps": self.energy_drift_per_atom,
+            },
+            "equilibration": {
+                "is_equilibrated": self.is_equilibrated,
+                "equilibration_step": self.equilibration_step,
+            },
+        }
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d

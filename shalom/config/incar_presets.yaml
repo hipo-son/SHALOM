@@ -139,3 +139,43 @@ elastic:precise:
   LREAL: false
   LORBIT: 11
   NELM: 200
+
+# ---------- AIMD (Ab Initio Molecular Dynamics) presets ----------
+
+aimd:standard:
+  IBRION: 0
+  ISYM: 0
+  NSW: 5000
+  POTIM: 1.0
+  SMASS: 0
+  TEBEG: 300
+  TEEND: 300
+  ISIF: 2
+  PREC: "Normal"
+  NELM: 100
+  EDIFF: 1.0e-5
+  LREAL: "Auto"
+  LWAVE: false
+  LCHARG: false
+  ALGO: "VeryFast"
+  ISMEAR: 0
+  SIGMA: 0.05
+
+aimd:precise:
+  IBRION: 0
+  ISYM: 0
+  NSW: 10000
+  POTIM: 0.5
+  SMASS: 0
+  TEBEG: 300
+  TEEND: 300
+  ISIF: 2
+  PREC: "Accurate"
+  NELM: 200
+  EDIFF: 1.0e-6
+  LREAL: "Auto"
+  LWAVE: false
+  LCHARG: false
+  ALGO: "VeryFast"
+  ISMEAR: 0
+  SIGMA: 0.05
