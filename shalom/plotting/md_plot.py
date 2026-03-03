@@ -23,19 +23,46 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 if TYPE_CHECKING:
     import matplotlib.figure
-    from shalom.analysis._base import MDResult
-    from shalom.backends.base import MDTrajectoryData
 
 
-class MDEnergyPlotter:
+# ---------------------------------------------------------------------------
+# Shared base class
+# ---------------------------------------------------------------------------
+
+class _MDPlotterBase:
+    """Shared base for MD analysis plotters."""
+
+    def __init__(self, data) -> None:
+        self.data = data
+
+    @staticmethod
+    def _new_figure(
+        figsize: Tuple[float, float] = (8.0, 5.0), dpi: int = 150,
+    ):
+        """Create a new figure and axes."""
+        import matplotlib.pyplot as plt
+        return plt.subplots(figsize=figsize, dpi=dpi)
+
+    @staticmethod
+    def _finalize(fig, ax, output_path: Optional[str] = None, dpi: int = 150):
+        """Apply common formatting, legend, and save."""
+        ax.legend(loc="best", frameon=False)
+        fig.tight_layout()
+        if output_path:
+            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        return fig
+
+
+# ---------------------------------------------------------------------------
+# Energy
+# ---------------------------------------------------------------------------
+
+class MDEnergyPlotter(_MDPlotterBase):
     """Plot energy vs time from an MD trajectory.
 
     Args:
         data: ``MDTrajectoryData`` with energies and times.
     """
-
-    def __init__(self, data: "MDTrajectoryData") -> None:
-        self.data = data
 
     def plot(
         self,
@@ -65,19 +92,16 @@ class MDEnergyPlotter:
         Returns:
             matplotlib Figure.
         """
-        import matplotlib.pyplot as plt
+        import numpy as np
 
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig, ax = self._new_figure(figsize, dpi)
 
         times = self.data.times
         if times is None:
-            import numpy as np
             times = np.arange(self.data.n_frames) * self.data.timestep_fs
 
-        # Total energy
         ax.plot(times, self.data.energies, color=color_total, lw=lw, label="Total")
 
-        # Components
         if show_components:
             if self.data.kinetic_energies is not None:
                 ax.plot(
@@ -93,23 +117,19 @@ class MDEnergyPlotter:
         ax.set_xlabel("Time (fs)")
         ax.set_ylabel("Energy (eV)")
         ax.set_title(title or "MD Energy")
-        ax.legend(loc="best", frameon=False)
-        fig.tight_layout()
-
-        if output_path:
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        return fig
+        return self._finalize(fig, ax, output_path, dpi)
 
 
-class MDTemperaturePlotter:
+# ---------------------------------------------------------------------------
+# Temperature
+# ---------------------------------------------------------------------------
+
+class MDTemperaturePlotter(_MDPlotterBase):
     """Plot temperature vs time with running average.
 
     Args:
         data: ``MDTrajectoryData`` with temperatures and times.
     """
-
-    def __init__(self, data: "MDTrajectoryData") -> None:
-        self.data = data
 
     def plot(
         self,
@@ -143,50 +163,42 @@ class MDTemperaturePlotter:
         Returns:
             matplotlib Figure.
         """
-        import matplotlib.pyplot as plt
         import numpy as np
 
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig, ax = self._new_figure(figsize, dpi)
 
         times = self.data.times
         if times is None:
             times = np.arange(self.data.n_frames) * self.data.timestep_fs
         temps = self.data.temperatures
 
-        # Raw temperature
         ax.plot(times, temps, color=color, lw=lw, alpha=alpha, label="T(t)")
 
-        # Running average
         if len(temps) >= running_avg_window:
             kernel = np.ones(running_avg_window) / running_avg_window
             avg = np.convolve(temps, kernel, mode="valid")
             t_avg = times[running_avg_window - 1:]
             ax.plot(t_avg, avg, color=color_avg, lw=lw * 2, label=f"Avg ({running_avg_window})")
 
-        # Target
         if target_temperature is not None:
             ax.axhline(target_temperature, color=color_target, ls="--", lw=1.0, label="Target")
 
         ax.set_xlabel("Time (fs)")
         ax.set_ylabel("Temperature (K)")
         ax.set_title(title or "MD Temperature")
-        ax.legend(loc="best", frameon=False)
-        fig.tight_layout()
-
-        if output_path:
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        return fig
+        return self._finalize(fig, ax, output_path, dpi)
 
 
-class MSDPlotter:
+# ---------------------------------------------------------------------------
+# MSD
+# ---------------------------------------------------------------------------
+
+class MSDPlotter(_MDPlotterBase):
     """Plot MSD vs time from MD analysis result.
 
     Args:
         data: ``MDResult`` with msd_t and msd arrays.
     """
-
-    def __init__(self, data: "MDResult") -> None:
-        self.data = data
 
     def plot(
         self,
@@ -214,10 +226,7 @@ class MSDPlotter:
         Returns:
             matplotlib Figure.
         """
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig, ax = self._new_figure(figsize, dpi)
 
         msd_t = self.data.msd_t
         msd = self.data.msd
@@ -229,31 +238,26 @@ class MSDPlotter:
 
         if show_fit and self.data.diffusion_coefficient is not None:
             D = self.data.diffusion_coefficient
-            # D in cm²/s → slope in Å²/fs = 6D * 10
-            slope = 6.0 * D * 10.0
+            slope = 6.0 * D * 10.0  # cm²/s → Å²/fs
             fit_line = slope * msd_t
             ax.plot(msd_t, fit_line, color=color_fit, ls="--", lw=1.0, label=f"D={D:.2e} cm²/s")
 
         ax.set_xlabel("Time (fs)")
         ax.set_ylabel(r"MSD ($\AA^2$)")
         ax.set_title(title or "Mean Square Displacement")
-        ax.legend(loc="best", frameon=False)
-        fig.tight_layout()
-
-        if output_path:
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        return fig
+        return self._finalize(fig, ax, output_path, dpi)
 
 
-class RDFPlotter:
+# ---------------------------------------------------------------------------
+# RDF
+# ---------------------------------------------------------------------------
+
+class RDFPlotter(_MDPlotterBase):
     """Plot radial distribution function g(r) from MD analysis result.
 
     Args:
         data: ``MDResult`` with rdf_r and rdf_g arrays.
     """
-
-    def __init__(self, data: "MDResult") -> None:
-        self.data = data
 
     def plot(
         self,
@@ -279,9 +283,7 @@ class RDFPlotter:
         Returns:
             matplotlib Figure.
         """
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig, ax = self._new_figure(figsize, dpi)
 
         r = self.data.rdf_r
         g = self.data.rdf_g
@@ -299,9 +301,4 @@ class RDFPlotter:
         ax.set_title(title or "Radial Distribution Function")
         ax.set_xlim(left=0)
         ax.set_ylim(bottom=0)
-        ax.legend(loc="best", frameon=False)
-        fig.tight_layout()
-
-        if output_path:
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        return fig
+        return self._finalize(fig, ax, output_path, dpi)

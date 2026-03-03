@@ -16,7 +16,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -37,7 +37,7 @@ def compute_rdf(
     n_bins: int = 200,
     pair: Optional[Tuple[str, str]] = None,
     start_frame: int = 0,
-) -> Tuple[Any, Any]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Compute the radial distribution function g(r).
 
     Uses minimum image convention for orthorhombic cells.
@@ -88,22 +88,28 @@ def compute_rdf(
     if n_a == 0 or n_b == 0:
         return r, np.zeros(n_bins)
 
+    idx_a_arr = np.array(idx_a)
+    idx_b_arr = np.array(idx_b)
+    same_species = pair is None or pair[0] == pair[1]
+
     for frame_idx in range(n_frames):
         pos = positions[frame_idx]
-        for i in idx_a:
-            for j in idx_b:
-                if i >= j and (pair is None or pair[0] == pair[1]):
-                    continue
-                delta = pos[j] - pos[i]
-                # Minimum image convention
-                delta -= np.round(delta / box) * box
-                dist = np.linalg.norm(delta)
-                if 0 < dist < r_max:
-                    bin_idx = int(dist / dr)
-                    if bin_idx < n_bins:
-                        hist[bin_idx] += 1
+        pos_a = pos[idx_a_arr]  # (n_a, 3)
+        pos_b = pos[idx_b_arr]  # (n_b, 3)
+        # Vectorized pairwise distances via broadcasting
+        delta = pos_b[np.newaxis, :, :] - pos_a[:, np.newaxis, :]  # (n_a, n_b, 3)
+        # Minimum image convention
+        delta -= np.round(delta / box) * box
+        dists = np.sqrt(np.sum(delta ** 2, axis=2))  # (n_a, n_b)
+        if same_species:
+            # Exclude self-pairs and double-counting (i >= j)
+            ii, jj = np.meshgrid(idx_a_arr, idx_b_arr, indexing="ij")
+            dists = np.where(ii < jj, dists, 0.0)
+        mask = (dists > 0) & (dists < r_max)
+        if np.any(mask):
+            hist += np.histogram(dists[mask], bins=n_bins, range=(0, r_max))[0]
 
-    # Normalize
+    # Normalize (vectorized)
     volume = np.prod(box)
     if pair is not None and pair[0] == pair[1]:
         n_pairs = n_a * (n_a - 1) / 2
@@ -113,14 +119,13 @@ def compute_rdf(
         n_pairs = n_atoms * (n_atoms - 1) / 2
 
     rho = n_atoms / volume if pair is None else n_b / volume
-    for k in range(n_bins):
-        shell_vol = 4.0 / 3.0 * np.pi * ((r[k] + dr / 2) ** 3 - (r[k] - dr / 2) ** 3)
-        if n_frames > 0 and n_pairs > 0 and shell_vol > 0:
-            if pair is not None and pair[0] != pair[1]:
-                hist[k] /= n_frames * n_a * rho * shell_vol
-            else:
-                hist[k] /= n_frames * n_pairs * (n_atoms / volume) * shell_vol
-                hist[k] *= n_atoms / 2
+    shell_vols = 4.0 / 3.0 * np.pi * ((r + dr / 2) ** 3 - (r - dr / 2) ** 3)
+    if n_frames > 0 and n_pairs > 0:
+        if pair is not None and pair[0] != pair[1]:
+            hist /= n_frames * n_a * rho * shell_vols
+        else:
+            hist /= n_frames * n_pairs * (n_atoms / volume) * shell_vols
+            hist *= n_atoms / 2
 
     return r, hist
 
@@ -134,7 +139,7 @@ def compute_msd(
     trajectory: MDTrajectoryData,
     start_frame: int = 0,
     species: Optional[str] = None,
-) -> Tuple[Any, Any]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Compute mean square displacement (MSD) vs time.
 
     Uses the Einstein relation: MSD(t) = <|r(t) - r(0)|²>.
@@ -183,7 +188,7 @@ def compute_vacf(
     trajectory: MDTrajectoryData,
     max_lag: int = 500,
     start_frame: int = 0,
-) -> Tuple[Any, Any]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Compute normalized velocity autocorrelation function.
 
     VACF(t) = <v(0)·v(t)> / <v(0)·v(0)>
@@ -232,8 +237,8 @@ def compute_vacf(
 
 
 def compute_diffusion_coefficient(
-    msd_t: Any,
-    msd: Any,
+    msd_t: np.ndarray,
+    msd: np.ndarray,
     fit_start_frac: float = 0.3,
     fit_end_frac: float = 0.9,
 ) -> float:
@@ -284,7 +289,7 @@ def compute_diffusion_coefficient(
 
 
 def detect_equilibration(
-    energies: Any,
+    energies: np.ndarray,
     window: int = 100,
 ) -> Tuple[int, bool]:
     """Estimate equilibration cutoff using block averaging.
@@ -362,6 +367,15 @@ def analyze_md_trajectory(
     Returns:
         MDResult with all computed properties.
     """
+    # Input validation
+    if trajectory.positions is None or trajectory.positions.size == 0:
+        logger.warning("Empty trajectory — returning default MDResult.")
+        return MDResult()
+    if np.any(np.isnan(trajectory.positions)):
+        logger.warning("NaN detected in trajectory positions.")
+    if np.any(np.isinf(trajectory.positions)):
+        logger.warning("Inf detected in trajectory positions.")
+
     # Equilibration detection
     eq_frame, is_eq = detect_equilibration(trajectory.energies)
 
@@ -385,9 +399,11 @@ def analyze_md_trajectory(
             trajectory, max_lag=max_vacf_lag, start_frame=eq_frame,
         )
 
-    # Thermodynamic averages (post-equilibration)
-    temps = trajectory.temperatures[eq_frame:] if trajectory.temperatures is not None else None
-    energies = trajectory.energies[eq_frame:] if trajectory.energies is not None else None
+    # Thermodynamic averages (post-equilibration) — slice once
+    eq_slice = slice(eq_frame, None)
+    temps = trajectory.temperatures[eq_slice] if trajectory.temperatures is not None else None
+    energies = trajectory.energies[eq_slice] if trajectory.energies is not None else None
+    times_eq = trajectory.times[eq_slice] if trajectory.times is not None else None
 
     avg_temp = float(np.mean(temps)) if temps is not None and len(temps) > 0 else None
     temp_std = float(np.std(temps)) if temps is not None and len(temps) > 0 else None
@@ -396,14 +412,13 @@ def analyze_md_trajectory(
     # Pressure average
     avg_pressure = None
     if trajectory.pressures is not None:
-        p = trajectory.pressures[eq_frame:]
+        p = trajectory.pressures[eq_slice]
         if len(p) > 0:
             avg_pressure = float(np.mean(p))
 
     # Energy drift per atom (NVE quality check)
     energy_drift = None
     if energies is not None and len(energies) > 2 and trajectory.n_atoms > 0:
-        times_eq = trajectory.times[eq_frame:] if trajectory.times is not None else None
         if times_eq is not None and len(times_eq) > 2:
             dt_ps = (times_eq[-1] - times_eq[0]) / 1000.0  # fs → ps
             if dt_ps > 0:

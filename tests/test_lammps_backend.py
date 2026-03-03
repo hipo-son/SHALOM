@@ -14,7 +14,6 @@ import textwrap
 import numpy as np
 import pytest
 from ase import Atoms
-from ase.build import bulk
 
 from shalom.backends import get_backend
 from shalom.backends.lammps import LAMMPSBackend
@@ -22,18 +21,12 @@ from shalom.backends.lammps_config import LAMMPSInputConfig
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures (fe_atoms / si_atoms reuse conftest.py shared fixtures)
 # ---------------------------------------------------------------------------
 
-
-@pytest.fixture
-def fe_atoms():
-    return bulk("Fe", "bcc", a=2.87)
-
-
-@pytest.fixture
-def si_atoms():
-    return bulk("Si", "diamond", a=5.43)
+# Aliases to conftest shared fixtures for backward-compatible test parameter names
+fe_atoms = pytest.fixture(name="fe_atoms")(lambda sample_bulk_fe: sample_bulk_fe)
+si_atoms = pytest.fixture(name="si_atoms")(lambda sample_si_diamond: sample_si_diamond)
 
 
 @pytest.fixture
@@ -111,25 +104,22 @@ class TestWriteInput:
             content = f.read()
         assert "pair_coeff" in content
 
-    def test_input_script_nvt_fix(self, lammps_backend, fe_atoms, calc_dir):
-        lammps_backend.write_input(fe_atoms, calc_dir, ensemble="nvt", temperature=500)
+    @pytest.mark.parametrize(
+        "ensemble,extra_kwargs,expected_strings",
+        [
+            ("nvt", {"temperature": 500}, ["nvt", "500.0"]),
+            ("npt", {}, ["npt", "iso"]),
+            ("nve", {}, ["fix             1 all nve"]),
+        ],
+    )
+    def test_input_script_ensemble_fix(
+        self, lammps_backend, fe_atoms, calc_dir, ensemble, extra_kwargs, expected_strings,
+    ):
+        lammps_backend.write_input(fe_atoms, calc_dir, ensemble=ensemble, **extra_kwargs)
         with open(os.path.join(calc_dir, "in.lammps")) as f:
             content = f.read()
-        assert "nvt" in content
-        assert "500.0" in content
-
-    def test_input_script_npt_fix(self, lammps_backend, fe_atoms, calc_dir):
-        lammps_backend.write_input(fe_atoms, calc_dir, ensemble="npt")
-        with open(os.path.join(calc_dir, "in.lammps")) as f:
-            content = f.read()
-        assert "npt" in content
-        assert "iso" in content
-
-    def test_input_script_nve_fix(self, lammps_backend, fe_atoms, calc_dir):
-        lammps_backend.write_input(fe_atoms, calc_dir, ensemble="nve")
-        with open(os.path.join(calc_dir, "in.lammps")) as f:
-            content = f.read()
-        assert "fix             1 all nve" in content
+        for s in expected_strings:
+            assert s in content
 
     def test_input_script_thermo(self, lammps_backend, fe_atoms, calc_dir):
         lammps_backend.write_input(fe_atoms, calc_dir)

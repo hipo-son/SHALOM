@@ -233,6 +233,19 @@ class TestClearCache:
                 f"Prompt '{name}' mismatch between loaded and default"
             )
 
+    def test_config_keys_match_defaults(self):
+        """YAML config top-level keys match _defaults.py for all configs."""
+        from shalom._defaults import CONFIGS
+
+        for name, default_data in CONFIGS.items():
+            clear_cache()
+            loaded = load_config(name)
+            if isinstance(loaded, dict) and isinstance(default_data, dict):
+                assert set(loaded.keys()) == set(default_data.keys()), (
+                    f"Config '{name}' key mismatch: "
+                    f"YAML={sorted(loaded.keys())}, defaults={sorted(default_data.keys())}"
+                )
+
 
 # ---------------------------------------------------------------------------
 # TestShalomConfigurationError

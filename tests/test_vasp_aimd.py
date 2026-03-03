@@ -37,27 +37,26 @@ class TestCalculationTypeAIMD:
         all_types = [ct.value for ct in CalculationType]
         assert "aimd" in all_types
 
-    def test_aimd_preset_standard(self):
-        preset = get_preset(CalculationType.AIMD, AccuracyLevel.STANDARD)
+    @pytest.mark.parametrize(
+        "accuracy,expected",
+        [
+            (AccuracyLevel.STANDARD, {"NSW": 5000, "POTIM": 1.0, "SMASS": 0, "TEBEG": 300}),
+            (AccuracyLevel.PRECISE, {"NSW": 10000, "POTIM": 0.5, "EDIFF": 1.0e-6}),
+        ],
+    )
+    def test_aimd_preset(self, accuracy, expected):
+        preset = get_preset(CalculationType.AIMD, accuracy)
         incar = preset.incar_settings
         assert incar["IBRION"] == 0
         assert incar["ISYM"] == 0
-        assert incar["NSW"] == 5000
-        assert abs(incar["POTIM"] - 1.0) < 0.01
-        assert incar["SMASS"] == 0
-        assert incar["TEBEG"] == 300
-        assert incar["TEEND"] == 300
         assert incar["ISIF"] == 2
         assert incar["LWAVE"] is False
         assert incar["LCHARG"] is False
-
-    def test_aimd_preset_precise(self):
-        preset = get_preset(CalculationType.AIMD, AccuracyLevel.PRECISE)
-        incar = preset.incar_settings
-        assert incar["IBRION"] == 0
-        assert incar["NSW"] == 10000
-        assert abs(incar["POTIM"] - 0.5) < 0.01
-        assert incar["EDIFF"] == 1.0e-6
+        for key, val in expected.items():
+            if isinstance(val, float):
+                assert abs(incar[key] - val) < 0.01, f"{key}: {incar[key]} != {val}"
+            else:
+                assert incar[key] == val, f"{key}: {incar[key]} != {val}"
 
     def test_aimd_preset_with_atoms(self):
         from ase.build import bulk

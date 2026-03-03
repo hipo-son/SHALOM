@@ -36,25 +36,23 @@ from shalom.backends.lammps_config import (
 class TestDetectForceField:
     """Test force field auto-detection from element composition."""
 
-    def test_fe_selects_eam(self):
-        atoms = bulk("Fe", "bcc", a=2.87)
-        assert detect_force_field(atoms) == "eam_alloy"
-
-    def test_si_selects_tersoff(self):
-        atoms = bulk("Si", "diamond", a=5.43)
-        assert detect_force_field(atoms) == "tersoff"
+    @pytest.mark.parametrize(
+        "element,structure,a,expected_ff",
+        [
+            ("Fe", "bcc", 2.87, "eam_alloy"),
+            ("Si", "diamond", 5.43, "tersoff"),
+            ("Cu", "fcc", 3.61, "eam_alloy"),
+            ("C", "diamond", 3.57, "tersoff"),
+            ("Al", "fcc", 4.05, "eam_alloy"),
+        ],
+    )
+    def test_element_selects_correct_ff(self, element, structure, a, expected_ff):
+        atoms = bulk(element, structure, a=a)
+        assert detect_force_field(atoms) == expected_ff
 
     def test_ar_selects_lj(self):
         atoms = Atoms("Ar", positions=[[0, 0, 0]], cell=[10, 10, 10], pbc=True)
         assert detect_force_field(atoms) == "lj_cut"
-
-    def test_cu_selects_eam(self):
-        atoms = bulk("Cu", "fcc", a=3.61)
-        assert detect_force_field(atoms) == "eam_alloy"
-
-    def test_c_selects_tersoff(self):
-        atoms = bulk("C", "diamond", a=3.57)
-        assert detect_force_field(atoms) == "tersoff"
 
     def test_unknown_element_returns_none(self):
         """Elements not in any supported_elements list → None."""
@@ -84,11 +82,6 @@ class TestDetectForceField:
             pbc=True,
         )
         assert detect_force_field(atoms) == "tersoff"
-
-    def test_priority_eam_over_others(self):
-        """EAM has higher priority (90) than others."""
-        atoms = bulk("Al", "fcc", a=4.05)
-        assert detect_force_field(atoms) == "eam_alloy"
 
     def test_he_selects_lj(self):
         atoms = Atoms("He", positions=[[0, 0, 0]], cell=[10, 10, 10], pbc=True)

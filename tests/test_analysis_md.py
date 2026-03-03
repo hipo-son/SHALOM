@@ -25,52 +25,8 @@ from shalom.analysis.md import (
 from shalom.backends.base import MDTrajectoryData
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_trajectory(
-    n_frames=10,
-    n_atoms=4,
-    box_size=10.0,
-    timestep=1.0,
-    with_velocities=False,
-    positions=None,
-    velocities=None,
-    energies=None,
-) -> MDTrajectoryData:
-    """Create a synthetic MDTrajectoryData for testing."""
-    if positions is None:
-        # Random positions in a box
-        rng = np.random.RandomState(42)
-        positions = rng.uniform(0, box_size, (n_frames, n_atoms, 3))
-    n_frames_actual = positions.shape[0]
-    n_atoms_actual = positions.shape[1]
-
-    if energies is None:
-        energies = np.linspace(-10.0, -9.5, n_frames_actual)
-
-    cell = np.diag([box_size, box_size, box_size])
-
-    vel = None
-    if with_velocities and velocities is None:
-        rng = np.random.RandomState(123)
-        vel = rng.normal(0, 0.01, (n_frames_actual, n_atoms_actual, 3))
-    elif velocities is not None:
-        vel = velocities
-
-    return MDTrajectoryData(
-        positions=positions,
-        energies=energies,
-        temperatures=np.full(n_frames_actual, 300.0),
-        times=np.arange(n_frames_actual) * timestep,
-        species=["Fe"] * n_atoms_actual,
-        cell_vectors=cell,
-        velocities=vel,
-        timestep_fs=timestep,
-        source="test",
-    )
+# Re-use shared trajectory factory from conftest.py
+from tests.conftest import make_trajectory as _make_trajectory
 
 
 # ---------------------------------------------------------------------------

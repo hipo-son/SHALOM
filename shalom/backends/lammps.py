@@ -21,9 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -39,6 +37,21 @@ from shalom.backends.lammps_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Module-level config cache (avoid repeated YAML loads)
+_LAMMPS_DB: Optional[dict] = None
+
+
+def _get_lammps_db() -> dict:
+    """Return cached lammps_potentials config (loaded once)."""
+    global _LAMMPS_DB
+    if _LAMMPS_DB is None:
+        try:
+            from shalom._config_loader import load_config
+            _LAMMPS_DB = load_config("lammps_potentials")
+        except Exception:
+            _LAMMPS_DB = {}
+    return _LAMMPS_DB
 
 
 class LAMMPSBackend:
@@ -212,13 +225,7 @@ class LAMMPSBackend:
             lines.append("")
 
         # Velocity initialization
-        db = {}
-        try:
-            from shalom._config_loader import load_config
-            db = load_config("lammps_potentials")
-        except Exception:
-            pass
-        seed = db.get("simulation_defaults", {}).get("velocity_seed", 12345)
+        seed = _get_lammps_db().get("simulation_defaults", {}).get("velocity_seed", 12345)
         lines.append(f"velocity        all create {t_start:.1f} {seed} dist gaussian")
         lines.append("")
 
@@ -530,25 +537,30 @@ class LAMMPSBackend:
                 id_idx = cols.index("id") if "id" in cols else 0
                 atom_data.sort(key=lambda x: int(x[id_idx]))
 
+                # Pre-compute column indices for direct access (avoid per-atom dict)
+                x_idx = cols.index("x") if "x" in cols else None
+                y_idx = cols.index("y") if "y" in cols else None
+                z_idx = cols.index("z") if "z" in cols else None
+                vx_idx = cols.index("vx") if has_v else None
+                vy_idx = cols.index("vy") if has_v else None
+                vz_idx = cols.index("vz") if has_v else None
+                fx_idx = cols.index("fx") if has_f else None
+                fy_idx = cols.index("fy") if has_f else None
+                fz_idx = cols.index("fz") if has_f else None
+
                 for j, parts in enumerate(atom_data):
-                    col_vals = {c: parts[k] for k, c in enumerate(cols)}
-                    positions[j] = [
-                        float(col_vals.get("x", 0)),
-                        float(col_vals.get("y", 0)),
-                        float(col_vals.get("z", 0)),
-                    ]
+                    if x_idx is not None:
+                        positions[j, 0] = float(parts[x_idx])
+                        positions[j, 1] = float(parts[y_idx])
+                        positions[j, 2] = float(parts[z_idx])
                     if has_v and velocities_frame is not None:
-                        velocities_frame[j] = [
-                            float(col_vals.get("vx", 0)),
-                            float(col_vals.get("vy", 0)),
-                            float(col_vals.get("vz", 0)),
-                        ]
+                        velocities_frame[j, 0] = float(parts[vx_idx])
+                        velocities_frame[j, 1] = float(parts[vy_idx])
+                        velocities_frame[j, 2] = float(parts[vz_idx])
                     if has_f and forces_frame is not None:
-                        forces_frame[j] = [
-                            float(col_vals.get("fx", 0)),
-                            float(col_vals.get("fy", 0)),
-                            float(col_vals.get("fz", 0)),
-                        ]
+                        forces_frame[j, 0] = float(parts[fx_idx])
+                        forces_frame[j, 1] = float(parts[fy_idx])
+                        forces_frame[j, 2] = float(parts[fz_idx])
 
                 frame: Dict[str, Any] = {
                     "timestep": timestep,

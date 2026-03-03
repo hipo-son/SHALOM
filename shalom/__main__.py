@@ -1747,6 +1747,29 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 1
 
 
+def _save_analysis_json(
+    result_dict: dict,
+    output_dir: Optional[str] = None,
+    save_json_path: Optional[str] = None,
+    auto_name: str = "results.json",
+) -> None:
+    """Unified JSON save logic for analyze subcommands.
+
+    Handles both auto-save to output dir and explicit --save-json path.
+    """
+    from shalom.analysis._base import save_result_json
+
+    if output_dir:
+        path = os.path.join(output_dir, auto_name)
+        saved = save_result_json(result_dict, path)
+        if saved:
+            print(f"  Saved: {saved}")
+    if save_json_path:
+        saved = save_result_json(result_dict, save_json_path)
+        if saved:
+            print(f"  Results saved: {saved}")
+
+
 def _cmd_analyze_elastic(args: argparse.Namespace) -> int:
     """Run elastic tensor analysis."""
     import json
@@ -1809,13 +1832,11 @@ def _cmd_analyze_elastic(args: argparse.Namespace) -> int:
     print()
     print("=" * 50)
 
-    # Save JSON if requested
-    save_path = getattr(args, "save_json", None)
-    if save_path:
-        from shalom.analysis._base import save_result_json
-        saved = save_result_json(result.to_dict(), save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+    _save_analysis_json(
+        result.to_dict(),
+        save_json_path=getattr(args, "save_json", None),
+        auto_name="elastic_results.json",
+    )
 
     return 0
 
@@ -1973,20 +1994,12 @@ def _cmd_analyze_phonon(args: argparse.Namespace) -> int:
         except ImportError:
             print("  Note: matplotlib not installed, skipping plots.")
 
-        # Auto-save JSON alongside plots
-        from shalom.analysis._base import save_result_json
-        json_path = os.path.join(args.output, "phonon_results.json")
-        saved = save_result_json(result.to_dict(), json_path)
-        if saved:
-            print(f"  Saved: {saved}")
-
-    # Save JSON to explicit path if requested
-    save_path = getattr(args, "save_json", None)
-    if save_path:
-        from shalom.analysis._base import save_result_json
-        saved = save_result_json(result.to_dict(), save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+    _save_analysis_json(
+        result.to_dict(),
+        output_dir=getattr(args, "output", None),
+        save_json_path=getattr(args, "save_json", None),
+        auto_name="phonon_results.json",
+    )
 
     return 0
 
@@ -2061,13 +2074,11 @@ def _cmd_analyze_electronic(args: argparse.Namespace) -> int:
     print()
     print("=" * 50)
 
-    # Save JSON if requested
-    save_path = getattr(args, "save_json", None)
-    if save_path:
-        from shalom.analysis._base import save_result_json
-        saved = save_result_json(result.to_dict(), save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+    _save_analysis_json(
+        result.to_dict(),
+        save_json_path=getattr(args, "save_json", None),
+        auto_name="electronic_results.json",
+    )
 
     return 0
 
@@ -2142,19 +2153,17 @@ def _cmd_analyze_xrd(args: argparse.Namespace) -> int:
             print("  Note: matplotlib not installed, skipping plot.")
 
         # Auto-save JSON alongside plot
-        from shalom.analysis._base import save_result_json
-        json_path = args.output.rsplit(".", 1)[0] + "_results.json"
-        saved = save_result_json(result.to_dict(), json_path)
-        if saved:
-            print(f"  Saved: {saved}")
+        xrd_json_dir = os.path.dirname(os.path.abspath(args.output))
+        _save_analysis_json(
+            result.to_dict(), output_dir=xrd_json_dir,
+            auto_name="xrd_results.json",
+        )
 
-    # Save JSON to explicit path if requested
-    save_path = getattr(args, "save_json", None)
-    if save_path:
-        from shalom.analysis._base import save_result_json
-        saved = save_result_json(result.to_dict(), save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+    _save_analysis_json(
+        result.to_dict(),
+        save_json_path=getattr(args, "save_json", None),
+        auto_name="xrd_results.json",
+    )
 
     return 0
 
@@ -2200,13 +2209,11 @@ def _cmd_analyze_symmetry(args: argparse.Namespace) -> int:
     print()
     print("=" * 50)
 
-    # Save JSON if requested
-    save_path = getattr(args, "save_json", None)
-    if save_path:
-        from shalom.analysis._base import save_result_json
-        saved = save_result_json(result.to_dict(), save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+    _save_analysis_json(
+        result.to_dict(),
+        save_json_path=getattr(args, "save_json", None),
+        auto_name="symmetry_results.json",
+    )
 
     return 0
 
@@ -2292,20 +2299,17 @@ def _cmd_analyze_magnetic(args: argparse.Namespace) -> int:
     # Save JSON if requested (build a simple dict for the raw parsing case)
     save_path = getattr(args, "save_json", None)
     if save_path:
-        from shalom.analysis._base import save_result_json
         mag_dict: Dict[str, Any] = {
             "site_magnetizations_bohr_mag": site_mags,
             "lowdin_charges": lowdin,
         }
-        # Include full analysis result if it was computed
         if mag_result is not None:
             try:
                 mag_dict.update(mag_result.to_dict())
             except Exception:
                 pass
-        saved = save_result_json(mag_dict, save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+        _save_analysis_json(mag_dict, save_json_path=save_path,
+                            auto_name="magnetic_results.json")
 
     return 0
 
@@ -2399,20 +2403,12 @@ def _cmd_analyze_md(args: argparse.Namespace) -> int:
         except ImportError:
             print("  Note: matplotlib not installed, skipping plots.")
 
-        # Auto-save JSON alongside plots
-        from shalom.analysis._base import save_result_json
-        json_path = os.path.join(args.output, "md_analysis_results.json")
-        saved = save_result_json(result.to_dict(), json_path)
-        if saved:
-            print(f"  Saved: {saved}")
-
-    # Save JSON to explicit path if requested
-    save_path = getattr(args, "save_json", None)
-    if save_path:
-        from shalom.analysis._base import save_result_json
-        saved = save_result_json(result.to_dict(), save_path)
-        if saved:
-            print(f"  Results saved: {saved}")
+    _save_analysis_json(
+        result.to_dict(),
+        output_dir=getattr(args, "output", None),
+        save_json_path=getattr(args, "save_json", None),
+        auto_name="md_analysis_results.json",
+    )
 
     return 0
 
