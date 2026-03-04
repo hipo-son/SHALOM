@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "timestamp": "2026-03-03T20:34:46.155383",
+  "material_formula": "Si2",
+  "fermi_energy_eV": 6.4291,
+  "bands_png": "C:\\Users\\Sejong\\Desktop\\si_full_study\\qe_workflow\\bands.png",
+  "dos_png": "C:\\Users\\Sejong\\Desktop\\si_full_study\\qe_workflow\\dos.png",
+  "calc_dirs": {
+    "vc_relax": "C:\\Users\\Sejong\\Desktop\\si_full_study\\qe_workflow\\01_vc_relax",
+    "scf": "C:\\Users\\Sejong\\Desktop\\si_full_study\\qe_workflow\\02_scf",
+    "bands": "C:\\Users\\Sejong\\Desktop\\si_full_study\\qe_workflow\\03_bands",
+    "nscf": "C:\\Users\\Sejong\\Desktop\\si_full_study\\qe_workflow\\04_nscf"
+  },
+  "completed_steps": [
+    "vc_relax",
+    "scf",
+    "bands",
+    "nscf",
+    "dos"
+  ],
+  "failed_step": null,
+  "steps": [
+    {
+      "name": "vc_relax",
+      "step_number": 1,
+      "success": true,
+      "elapsed_seconds": 6.98,
+      "summary": "E=-310.7558 eV, Ef=6.4187 eV, converged",
+      "error_message": ""
+    },
+    {
+      "name": "scf",
+      "step_number": 2,
+      "success": true,
+      "elapsed_seconds": 2.08,
+      "summary": "E=-310.7558 eV, Ef=6.4185 eV, converged",
+      "error_message": ""
+    },
+    {
+      "name": "bands",
+      "step_number": 3,
+      "success": true,
+      "elapsed_seconds": 16.59,
+      "summary": "",
+      "error_message": ""
+    },
+    {
+      "name": "nscf",
+      "step_number": 4,
+      "success": true,
+      "elapsed_seconds": 5.5,
+      "summary": "",
+      "error_message": ""
+    },
+    {
+      "name": "dos",
+      "step_number": 5,
+      "success": true,
+      "elapsed_seconds": 1.73,
+      "summary": "",
+      "error_message": ""
+    }
+  ]
+}

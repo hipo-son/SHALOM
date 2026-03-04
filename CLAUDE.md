@@ -65,10 +65,16 @@ shalom/
 └── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
 
 tutorials/
-├── 01_silicon_complete_study.ipynb   # Si: convergence, bands, DOS, phonons, XRD (~30 min)
-├── 02_fe2o3_magnetic_oxide.ipynb     # Fe2O3: spin-polarized, GGA+U, magnetic analysis (~45 min)
-├── 03_multiscale_md_pipeline.ipynb  # Fe/Si/Ar: LAMMPS MD, VASP AIMD, RDF, MSD, diffusion (~5 min)
-└── README.md                         # Prerequisites, configuration, output directory structure
+├── 01_silicon/
+│   ├── notebook.ipynb                # Si: convergence, bands, DOS, phonons, XRD (~30 min)
+│   └── expected_output/              # Reference bands.png, dos.png, xrd.png, JSON results
+├── 02_fe2o3/
+│   ├── notebook.ipynb                # Fe2O3: spin-polarized, GGA+U, magnetic analysis (~45 min)
+│   └── expected_output/              # Reference dos.png, dos_spin.png, xrd.png
+├── 03_multiscale_md/
+│   ├── notebook.ipynb                # Fe/Si/Ar: LAMMPS MD, VASP AIMD, RDF, MSD, diffusion (~5 min)
+│   └── expected_output/              # Reference md_*.png, md_analysis_results.json
+└── README.md                         # Prerequisites, configuration, expected output
 ```
 
 ## Key Conventions

@@ -1,0 +1,18 @@
+{
+  "bandgap_eV": 0.6122068962168772,
+  "is_direct": false,
+  "is_metal": false,
+  "vbm_energy_eV": 5.982516652647429,
+  "cbm_energy_eV": 6.594723548864306,
+  "vbm_k_index": 0,
+  "cbm_k_index": 34,
+  "effective_mass_electron_me": 0.5405299017644674,
+  "effective_mass_hole_me": 0.19414525870447968,
+  "dos_at_fermi_states_per_eV": null,
+  "n_occupied_bands": 4,
+  "metadata": {
+    "fermi_energy": 6.4291,
+    "source": "qe",
+    "n_edge_points": 5
+  }
+}

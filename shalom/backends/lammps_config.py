@@ -67,7 +67,7 @@ class LAMMPSInputConfig:
         temperature_damp: Thermostat damping parameter in fs.
         pressure_damp: Barostat damping parameter in fs.
         is_2d: True if the structure is 2D (z-direction non-periodic).
-        minimize_first: Run energy minimization before MD.
+        minimize_first: Run energy minimization before MD (default: True).
         accuracy: Accuracy level (``"standard"`` / ``"precise"``).
         extra_commands: Additional LAMMPS commands appended to input script.
     """
@@ -98,7 +98,7 @@ class LAMMPSInputConfig:
     is_2d: bool = False
 
     # Advanced
-    minimize_first: bool = False
+    minimize_first: bool = True
     accuracy: str = "standard"
     extra_commands: List[str] = field(default_factory=list)
 
@@ -137,7 +137,9 @@ def resolve_potential_dir(potential_dir: Optional[str] = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def detect_force_field(atoms: Atoms) -> Optional[str]:
+def detect_force_field(
+    atoms: Atoms, _db: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Auto-detect the best force field for the given structure.
 
     Searches ``lammps_potentials.yaml`` for force fields whose
@@ -146,6 +148,7 @@ def detect_force_field(atoms: Atoms) -> Optional[str]:
 
     Args:
         atoms: ASE Atoms object.
+        _db: Pre-loaded config dict (internal use to avoid redundant loads).
 
     Returns:
         Force field key (e.g. ``"eam_alloy"``, ``"tersoff"``, ``"lj_cut"``)
@@ -155,11 +158,11 @@ def detect_force_field(atoms: Atoms) -> Optional[str]:
         return None
 
     elements = set(atoms.get_chemical_symbols())
-    db = load_config("lammps_potentials")
+    db = _db if _db is not None else load_config("lammps_potentials")
 
     candidates: List[tuple] = []
     for ff_name, ff_data in db.items():
-        if ff_name == "simulation_defaults" or not isinstance(ff_data, dict):
+        if not isinstance(ff_data, dict) or "pair_style" not in ff_data:
             continue
         supported = set(ff_data.get("supported_elements", []))
         if elements.issubset(supported):
@@ -211,7 +214,11 @@ def _generate_pair_coeff(
 
         for el in species_order:
             el_data = potentials.get(el, {})
-            pot_file = el_data.get("file", "")
+            # Use single_file for pure single-element systems
+            if len(species_order) == 1 and "single_file" in el_data:
+                pot_file = el_data["single_file"]
+            else:
+                pot_file = el_data.get("file", "")
             map_name = el_data.get("map", el)
             element_map.append(map_name)
             if pot_file and pot_file not in pot_files_seen:
@@ -267,8 +274,9 @@ def detect_and_apply_lammps_hints(
             config.boundary = "p p f"
         return config
 
-    # 2. Auto-detect force field
-    ff_name = detect_force_field(atoms)
+    # 2. Auto-detect force field (load config once, reuse for FF lookup)
+    db = load_config("lammps_potentials")
+    ff_name = detect_force_field(atoms, _db=db)
     if ff_name is None:
         elements = set(atoms.get_chemical_symbols())
         logger.warning(
@@ -278,7 +286,6 @@ def detect_and_apply_lammps_hints(
         )
         return config
 
-    db = load_config("lammps_potentials")
     ff_data = db[ff_name]
     config.detected_ff = ff_name
 
@@ -354,5 +361,17 @@ def get_lammps_preset(
 
     if atoms is not None:
         detect_and_apply_lammps_hints(atoms, config)
+
+    # Apply accuracy presets from YAML
+    db = load_config("lammps_potentials")
+    presets = db.get("accuracy_presets", {})
+    preset = presets.get(accuracy, {})
+    if preset:
+        ts_mult = preset.get("timestep_multiplier", 1.0)
+        config.timestep *= ts_mult
+        ns_mult = preset.get("nsteps_multiplier", 1.0)
+        config.nsteps = int(config.nsteps * ns_mult)
+        config.dump_interval = preset.get("dump_interval", config.dump_interval)
+        config.thermo_interval = preset.get("thermo_interval", config.thermo_interval)
 
     return config

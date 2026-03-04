@@ -124,7 +124,8 @@ class TestDetectAndApplyLammpsHints:
         config = LAMMPSInputConfig()
         detect_and_apply_lammps_hints(atoms, config)
         assert config.pair_style == "tersoff"
-        assert "SiCGe.tersoff" in config.pair_coeff[0]
+        # Pure Si uses single_file (Si.tersoff)
+        assert "Si.tersoff" in config.pair_coeff[0]
         assert config.timestep == 0.5
 
     def test_ar_lj_auto_config(self):
@@ -218,14 +219,34 @@ class TestGeneratePairCoeff:
         assert "Fe" in pair_coeff[0]
         assert len(pot_files) >= 1
 
-    def test_tersoff_si(self):
+    def test_tersoff_si_single_element(self):
+        """Pure Si uses single_file (Si.tersoff)."""
         from shalom._config_loader import load_config
 
         db = load_config("lammps_potentials")
         ff_data = db["tersoff"]
         pair_coeff, pot_files = _generate_pair_coeff("tersoff", ff_data, ["Si"])
-        assert "SiCGe.tersoff" in pair_coeff[0]
+        assert "Si.tersoff" in pair_coeff[0]
+        assert "SiCGe.tersoff" not in pair_coeff[0]
         assert "Si" in pair_coeff[0]
+
+    def test_tersoff_sic_compound_uses_multi_file(self):
+        """SiC compound uses SiCGe.tersoff (not single_file)."""
+        from shalom._config_loader import load_config
+
+        db = load_config("lammps_potentials")
+        ff_data = db["tersoff"]
+        pair_coeff, pot_files = _generate_pair_coeff("tersoff", ff_data, ["Si", "C"])
+        assert "SiCGe.tersoff" in pair_coeff[0]
+
+    def test_eam_no_single_file_unchanged(self):
+        """EAM has no single_file — uses standard file field."""
+        from shalom._config_loader import load_config
+
+        db = load_config("lammps_potentials")
+        ff_data = db["eam_alloy"]
+        pair_coeff, pot_files = _generate_pair_coeff("eam_alloy", ff_data, ["Fe"])
+        assert "Fe_mendelev.eam.fs" in pair_coeff[0]
 
     def test_lj_single_element(self):
         from shalom._config_loader import load_config
@@ -307,6 +328,34 @@ class TestGetLammpsPreset:
         config = get_lammps_preset(ensemble="nve")
         assert config.ensemble == "nve"
 
+    def test_preset_standard_defaults(self):
+        """Standard accuracy uses default multipliers (1.0x)."""
+        atoms = bulk("Fe", "bcc", a=2.87)
+        config = get_lammps_preset(ensemble="nvt", atoms=atoms, accuracy="standard")
+        assert config.timestep == 1.0  # EAM default, multiplied by 1.0
+        assert config.nsteps == 100000
+        assert config.dump_interval == 100
+        assert config.thermo_interval == 100
+
+    def test_preset_precise_halves_timestep(self):
+        """Precise accuracy halves the timestep."""
+        atoms = bulk("Fe", "bcc", a=2.87)
+        config = get_lammps_preset(ensemble="nvt", atoms=atoms, accuracy="precise")
+        assert config.timestep == 0.5  # EAM 1.0 * 0.5
+
+    def test_preset_precise_doubles_nsteps(self):
+        """Precise accuracy doubles the number of steps."""
+        atoms = bulk("Fe", "bcc", a=2.87)
+        config = get_lammps_preset(ensemble="nvt", atoms=atoms, accuracy="precise")
+        assert config.nsteps == 200000  # 100000 * 2.0
+
+    def test_preset_precise_dump_interval(self):
+        """Precise accuracy uses finer dump interval."""
+        atoms = bulk("Fe", "bcc", a=2.87)
+        config = get_lammps_preset(ensemble="nvt", atoms=atoms, accuracy="precise")
+        assert config.dump_interval == 50
+        assert config.thermo_interval == 50
+
 
 # ---------------------------------------------------------------------------
 # LAMMPSInputConfig
@@ -327,7 +376,7 @@ class TestLAMMPSInputConfig:
         assert config.units == "metal"
         assert config.atom_style == "atomic"
         assert config.boundary == "p p p"
-        assert config.minimize_first is False
+        assert config.minimize_first is True
 
     def test_custom_values(self):
         config = LAMMPSInputConfig(

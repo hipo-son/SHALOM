@@ -1,0 +1,18 @@
+{
+  "space_group_number": 227,
+  "space_group_symbol": "Fd-3m",
+  "point_group": "m-3m",
+  "crystal_system": "cubic",
+  "lattice_type": "F",
+  "hall_symbol": "F 4d 2 3 -1d",
+  "wyckoff_letters": [
+    "b",
+    "b"
+  ],
+  "equivalent_atoms": [
+    0,
+    0
+  ],
+  "n_operations": 48,
+  "is_primitive": true
+}

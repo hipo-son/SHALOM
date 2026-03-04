@@ -74,7 +74,8 @@ class TestWriteInput:
         lammps_backend.write_input(fe_atoms, calc_dir)
         with open(os.path.join(calc_dir, "data.lammps")) as f:
             content = f.read()
-        assert f"{len(fe_atoms)} atoms" in content
+        # BCC primitive (1-atom) is auto-converted to conventional (2-atom)
+        assert "2 atoms" in content
 
     def test_data_file_masses(self, lammps_backend, fe_atoms, calc_dir):
         lammps_backend.write_input(fe_atoms, calc_dir)
@@ -163,7 +164,8 @@ class TestWriteInput:
         lammps_backend.write_input(si_atoms, calc_dir)
         with open(os.path.join(calc_dir, "data.lammps")) as f:
             content = f.read()
-        assert f"{len(si_atoms)} atoms" in content
+        # FCC primitive (2-atom) is auto-converted to conventional (8-atom)
+        assert "8 atoms" in content
         assert "1 atom types" in content  # Si is only type
 
     def test_multi_element_type_count(self, lammps_backend, calc_dir):
@@ -181,6 +183,106 @@ class TestWriteInput:
     def test_returns_directory(self, lammps_backend, fe_atoms, calc_dir):
         result = lammps_backend.write_input(fe_atoms, calc_dir)
         assert result == calc_dir
+
+    def test_fcc_primitive_supercell_tilt_compatible(self, lammps_backend, si_atoms, calc_dir):
+        """FCC primitive supercell (cos_gamma=0.5) should be auto-converted."""
+        from ase.build import bulk
+
+        sc = bulk("Si", "diamond", a=5.43) * (3, 3, 3)  # 54-atom FCC supercell
+        lammps_backend.write_input(sc, calc_dir)
+        with open(os.path.join(calc_dir, "data.lammps")) as f:
+            content = f.read()
+        # Conventional supercell should have >= 54 atoms
+        lines = content.split("\n")
+        atom_count_line = [l for l in lines if "atoms" in l and "atom types" not in l][0]
+        n_atoms = int(atom_count_line.strip().split()[0])
+        assert n_atoms >= 54
+        # If triclinic, tilts must be within LAMMPS bounds
+        tilt_lines = [l for l in lines if "xy xz yz" in l]
+        if tilt_lines:
+            parts = tilt_lines[0].strip().split()
+            xy, xz, yz = float(parts[0]), float(parts[1]), float(parts[2])
+            xhi_line = [l for l in lines if "xlo xhi" in l][0]
+            lx = float(xhi_line.strip().split()[1])
+            yhi_line = [l for l in lines if "ylo yhi" in l][0]
+            ly = float(yhi_line.strip().split()[1])
+            assert abs(xy) <= 0.5 * lx + 1e-6, f"|xy|={abs(xy)} > lx/2={0.5*lx}"
+            assert abs(xz) <= 0.5 * lx + 1e-6, f"|xz|={abs(xz)} > lx/2={0.5*lx}"
+            assert abs(yz) <= 0.5 * ly + 1e-6, f"|yz|={abs(yz)} > ly/2={0.5*ly}"
+
+    def test_cubic_cell_no_conversion(self, lammps_backend, calc_dir):
+        """Cubic cell should pass through without conversion."""
+        from ase.build import bulk
+
+        atoms = bulk("Si", "diamond", a=5.43, cubic=True)  # 8 atoms, cubic
+        lammps_backend.write_input(atoms, calc_dir)
+        with open(os.path.join(calc_dir, "data.lammps")) as f:
+            content = f.read()
+        assert "8 atoms" in content  # No conversion — stays 8 atoms
+        assert "xy xz yz" not in content  # Cubic = orthogonal, no tilts
+
+    def test_fcc_primitive_unit_cell_converted(self, lammps_backend, calc_dir):
+        """Single FCC primitive cell (2-atom Si) should convert to conventional."""
+        from ase.build import bulk
+
+        atoms = bulk("Si", "diamond", a=5.43)  # 2-atom primitive
+        lammps_backend.write_input(atoms, calc_dir)
+        with open(os.path.join(calc_dir, "data.lammps")) as f:
+            content = f.read()
+        # Should be converted to 8-atom conventional cell
+        assert "8 atoms" in content
+
+    def test_bcc_primitive_converted(self, lammps_backend, fe_atoms, calc_dir):
+        """BCC primitive cell (|yz| = ly/2) should be auto-converted."""
+        lammps_backend.write_input(fe_atoms, calc_dir)
+        with open(os.path.join(calc_dir, "data.lammps")) as f:
+            content = f.read()
+        # BCC primitive (1-atom) → conventional (2-atom)
+        assert "2 atoms" in content
+        # Conventional BCC is cubic, no tilts
+        assert "xy xz yz" not in content
+
+    def test_minimize_default_in_script(self, lammps_backend, fe_atoms, calc_dir):
+        """Default minimize_first=True should include minimize block."""
+        lammps_backend.write_input(fe_atoms, calc_dir)
+        with open(os.path.join(calc_dir, "in.lammps")) as f:
+            content = f.read()
+        assert "minimize" in content
+        assert "reset_timestep" in content
+
+    def test_minimize_false_no_block(self, lammps_backend, fe_atoms, calc_dir):
+        """Explicit minimize_first=False should omit minimize block."""
+        lammps_backend.write_input(fe_atoms, calc_dir, minimize_first=False)
+        with open(os.path.join(calc_dir, "in.lammps")) as f:
+            content = f.read()
+        assert "minimize" not in content
+
+    def test_dump_interval_adaptive_guard(self, lammps_backend, fe_atoms, calc_dir):
+        """Short run with large dump_interval → auto-adjusted for min frames."""
+        lammps_backend.write_input(
+            fe_atoms, calc_dir, nsteps=1000, dump_interval=1000,
+        )
+        with open(os.path.join(calc_dir, "in.lammps")) as f:
+            content = f.read()
+        # dump_interval should be adjusted down (1000 // 50 = 20)
+        assert "dump            1 all custom 20" in content
+
+    def test_dump_interval_no_adjust_sufficient(self, lammps_backend, fe_atoms, calc_dir):
+        """Sufficient frames → dump_interval unchanged."""
+        lammps_backend.write_input(
+            fe_atoms, calc_dir, nsteps=10000, dump_interval=100,
+        )
+        with open(os.path.join(calc_dir, "in.lammps")) as f:
+            content = f.read()
+        assert "dump            1 all custom 100" in content
+
+    def test_si_uses_single_tersoff_file(self, lammps_backend, si_atoms, calc_dir):
+        """Pure Si should use Si.tersoff, not SiCGe.tersoff."""
+        lammps_backend.write_input(si_atoms, calc_dir)
+        with open(os.path.join(calc_dir, "in.lammps")) as f:
+            content = f.read()
+        assert "Si.tersoff" in content
+        assert "SiCGe.tersoff" not in content
 
 
 # ---------------------------------------------------------------------------

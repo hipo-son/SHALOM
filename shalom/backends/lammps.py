@@ -28,6 +28,7 @@ import numpy as np
 from ase import Atoms
 from ase.data import atomic_masses, atomic_numbers
 
+from shalom._config_loader import load_config
 from shalom.backends.base import DFTResult, MDTrajectoryData
 from shalom.backends.lammps_config import (
     LAMMPSInputConfig,
@@ -38,20 +39,8 @@ from shalom.backends.lammps_config import (
 
 logger = logging.getLogger(__name__)
 
-# Module-level config cache (avoid repeated YAML loads)
-_LAMMPS_DB: Optional[dict] = None
-
-
-def _get_lammps_db() -> dict:
-    """Return cached lammps_potentials config (loaded once)."""
-    global _LAMMPS_DB
-    if _LAMMPS_DB is None:
-        try:
-            from shalom._config_loader import load_config
-            _LAMMPS_DB = load_config("lammps_potentials")
-        except Exception:
-            _LAMMPS_DB = {}
-    return _LAMMPS_DB
+# Minimum number of trajectory frames for meaningful MD analysis
+_MIN_TRAJECTORY_FRAMES = 50
 
 
 class LAMMPSBackend:
@@ -96,6 +85,9 @@ class LAMMPSBackend:
             # Still apply hints if pair_style not set
             detect_and_apply_lammps_hints(atoms, config)
 
+        # Ensure cell is LAMMPS-compatible (FCC/HCP boundary tilt fix)
+        atoms = self._ensure_lammps_compatible_cell(atoms)
+
         # Write files
         self._write_data_file(atoms, directory, config)
         self._write_input_script(atoms, directory, config)
@@ -103,19 +95,116 @@ class LAMMPSBackend:
 
         return directory
 
+    # Tolerance for boundary tilt detection
+    _TILT_BOUNDARY_TOL = 1e-4
+
+    def _ensure_lammps_compatible_cell(self, atoms: Atoms) -> Atoms:
+        """Convert cell to LAMMPS-compatible form if tilts are at boundary.
+
+        FCC/HCP primitive cells have tilt factors exactly at the LAMMPS
+        limit (e.g. ``|xy| == lx/2`` for FCC with cos(gamma) = 0.5).
+        Tilt flipping cannot fix this since the tilt is already at the
+        boundary, not beyond it.
+
+        This method detects such boundary cases and uses spglib to convert
+        to the conventional unit cell, then builds a supercell of similar
+        size to the original.
+
+        Args:
+            atoms: Input ASE Atoms object.
+
+        Returns:
+            The original atoms (if compatible) or a new conventional
+            supercell Atoms object.
+        """
+        cell = np.array(atoms.get_cell())
+        lx, ly, _lz, xy, xz, yz, _, _ = self._cell_to_lammps(cell)
+
+        tol = self._TILT_BOUNDARY_TOL
+        at_boundary = (
+            abs(abs(xy) - 0.5 * lx) < tol
+            or abs(abs(xz) - 0.5 * lx) < tol
+            or abs(abs(yz) - 0.5 * ly) < tol
+        )
+
+        if not at_boundary:
+            return atoms
+
+        try:
+            import spglib
+        except ImportError:
+            logger.warning(
+                "Cell tilt at LAMMPS boundary but spglib not available. "
+                "Install spglib to enable automatic cell conversion: "
+                "pip install shalom[symmetry]"
+            )
+            return atoms
+
+        spg_cell = (
+            atoms.cell.array,
+            atoms.get_scaled_positions(),
+            atoms.get_atomic_numbers(),
+        )
+        conv = spglib.standardize_cell(spg_cell, to_primitive=False, symprec=1e-3)
+
+        if conv is None:
+            logger.warning(
+                "spglib standardize_cell failed; proceeding with original cell"
+            )
+            return atoms
+
+        conv_lattice, conv_positions, conv_numbers = conv
+        conv_atoms = Atoms(
+            numbers=conv_numbers,
+            scaled_positions=conv_positions,
+            cell=conv_lattice,
+            pbc=atoms.pbc,
+        )
+
+        # Determine supercell dimensions to approximately match original atom count
+        n_orig = len(atoms)
+        n_conv = len(conv_atoms)
+
+        if n_conv >= n_orig:
+            # Conventional cell already has enough atoms
+            sc_atoms = conv_atoms
+            dims = (1, 1, 1)
+        else:
+            ratio = n_orig / n_conv
+            n_per_dim = max(1, round(ratio ** (1.0 / 3.0)))
+            dims = [n_per_dim, n_per_dim, n_per_dim]
+            # Increase smallest dimension until atom count >= original
+            while dims[0] * dims[1] * dims[2] * n_conv < n_orig:
+                dims[dims.index(min(dims))] += 1
+            dims = tuple(dims)
+            sc_atoms = conv_atoms * dims
+
+        logger.info(
+            "Converted %d-atom cell to %d-atom conventional supercell "
+            "(%dx%dx%d) to satisfy LAMMPS tilt constraints",
+            n_orig, len(sc_atoms), *dims,
+        )
+
+        return sc_atoms
+
     @staticmethod
     def _cell_to_lammps(cell: np.ndarray):
-        """Convert ASE cell to LAMMPS box parameters and rotation matrix.
+        """Convert ASE cell to LAMMPS box parameters with tilt flipping.
 
         Follows the LAMMPS triclinic convention:
           a_lammps = [lx, 0, 0]
           b_lammps = [xy, ly, 0]
           c_lammps = [xz, yz, lz]
 
+        LAMMPS requires ``|xy| <= lx/2``, ``|xz| <= lx/2``, ``|yz| <= ly/2``.
+        If tilts exceed these limits (e.g. FCC/HCP primitive cells), lattice
+        vector flipping is applied to bring them within bounds.
+
         Ref: https://docs.lammps.org/Howto_triclinic.html
 
         Returns:
-            (lx, ly, lz, xy, xz, yz, rotation_matrix)
+            (lx, ly, lz, xy, xz, yz, lammps_cell, original_lammps_cell)
+            ``lammps_cell`` has flipped tilts; ``original_lammps_cell`` does not.
         """
         a_len = np.linalg.norm(cell[0])
         b_len = np.linalg.norm(cell[1])
@@ -129,21 +218,48 @@ class LAMMPSBackend:
         # LAMMPS box dimensions
         lx = a_len
         xy = b_len * cos_gamma
-        ly = np.sqrt(b_len**2 - xy**2)
+        ly = np.sqrt(max(b_len**2 - xy**2, 0.0))
         xz = c_len * cos_beta
-        yz = (b_len * c_len * cos_alpha - xy * xz) / ly
+        yz = (b_len * c_len * cos_alpha - xy * xz) / ly if ly > 1e-15 else 0.0
         lz = np.sqrt(max(c_len**2 - xz**2 - yz**2, 0.0))
 
-        # Build LAMMPS cell matrix (rows = vectors) for coordinate transform
+        # Original LAMMPS cell (before flipping)
+        original_cell = np.array([
+            [lx, 0.0, 0.0],
+            [xy, ly, 0.0],
+            [xz, yz, lz],
+        ])
+
+        # Flip tilts to satisfy LAMMPS constraints.
+        # Order matters: yz first (c' = c - n*b changes xz), then xz, then xy.
+        # Ref: LAMMPS source domain.cpp lamda2x / x2lamda
+        _EPS = 1e-6
+        # Step 1: reduce yz via c' = c - n*b
+        while yz > 0.5 * ly + _EPS:
+            yz -= ly
+            xz -= xy
+        while yz < -0.5 * ly - _EPS:
+            yz += ly
+            xz += xy
+        # Step 2: reduce xz via c' = c - n*a
+        while xz > 0.5 * lx + _EPS:
+            xz -= lx
+        while xz < -0.5 * lx - _EPS:
+            xz += lx
+        # Step 3: reduce xy via b' = b - n*a
+        while xy > 0.5 * lx + _EPS:
+            xy -= lx
+        while xy < -0.5 * lx - _EPS:
+            xy += lx
+
+        # Flipped LAMMPS cell
         lammps_cell = np.array([
             [lx, 0.0, 0.0],
             [xy, ly, 0.0],
             [xz, yz, lz],
         ])
 
-        # Rotation: frac coords are cell-invariant, so convert via fractional
-        # pos_lammps = frac @ lammps_cell
-        return lx, ly, lz, xy, xz, yz, lammps_cell
+        return lx, ly, lz, xy, xz, yz, lammps_cell, original_cell
 
     def _write_data_file(
         self, atoms: Atoms, directory: str, config: LAMMPSInputConfig,
@@ -155,12 +271,18 @@ class LAMMPSBackend:
 
         cell = np.array(atoms.get_cell())
 
-        # Convert to LAMMPS convention (positive box, correct orientation)
-        lx, ly, lz, xy, xz, yz, lammps_cell = self._cell_to_lammps(cell)
+        # Convert to LAMMPS convention with tilt flipping
+        lx, ly, lz, xy, xz, yz, lammps_cell, original_cell = self._cell_to_lammps(cell)
 
-        # Convert positions via fractional coordinates (cell-invariant)
+        # Convert positions: ASE frac → original LAMMPS Cartesian → flipped cell
         frac = atoms.get_scaled_positions(wrap=True)
-        positions = frac @ lammps_cell
+        cart = frac @ original_cell  # Cartesian in original LAMMPS frame
+
+        # Re-express in flipped cell and wrap into [0, 1)
+        inv_cell = np.linalg.inv(lammps_cell)
+        frac_new = cart @ inv_cell
+        frac_new -= np.floor(frac_new)
+        positions = frac_new @ lammps_cell
 
         is_triclinic = abs(xy) > 1e-10 or abs(xz) > 1e-10 or abs(yz) > 1e-10
 
@@ -225,7 +347,8 @@ class LAMMPSBackend:
             lines.append("")
 
         # Velocity initialization
-        seed = _get_lammps_db().get("simulation_defaults", {}).get("velocity_seed", 12345)
+        db = load_config("lammps_potentials")
+        seed = db.get("simulation_defaults", {}).get("velocity_seed", 12345)
         lines.append(f"velocity        all create {t_start:.1f} {seed} dist gaussian")
         lines.append("")
 
@@ -259,9 +382,16 @@ class LAMMPSBackend:
         lines.append("thermo_style    custom step temp pe ke etotal press vol")
         lines.append("")
 
-        # Dump
+        # Dump — adaptive interval to ensure enough frames for analysis
+        dump_interval = config.dump_interval
+        if config.nsteps > 0 and config.nsteps // dump_interval < _MIN_TRAJECTORY_FRAMES:
+            dump_interval = max(1, config.nsteps // _MIN_TRAJECTORY_FRAMES)
+            logger.info(
+                "Adjusted dump_interval from %d to %d to ensure >= %d trajectory frames",
+                config.dump_interval, dump_interval, _MIN_TRAJECTORY_FRAMES,
+            )
         lines.append(
-            f"dump            1 all custom {config.dump_interval} dump.lammpstrj "
+            f"dump            1 all custom {dump_interval} dump.lammpstrj "
             f"id type x y z vx vy vz fx fy fz"
         )
         lines.append("")

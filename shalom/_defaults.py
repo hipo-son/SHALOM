@@ -663,9 +663,9 @@ CONFIGS: dict = {
             "timestep": {"default": 0.5, "light_elements": 0.25},
             "thermostat": {"nvt_damp": 50.0, "npt_damp": 500.0},
             "potentials": {
-                "Si": {"file": "SiCGe.tersoff", "source": "Tersoff (1989)", "map": "Si"},
-                "C": {"file": "SiCGe.tersoff", "source": "Tersoff (1989)", "map": "C"},
-                "Ge": {"file": "SiCGe.tersoff", "source": "Tersoff (1989)", "map": "Ge"},
+                "Si": {"file": "SiCGe.tersoff", "single_file": "Si.tersoff", "source": "Tersoff (1989)", "map": "Si"},
+                "C": {"file": "SiCGe.tersoff", "single_file": "C.tersoff", "source": "Tersoff (1989)", "map": "C"},
+                "Ge": {"file": "SiCGe.tersoff", "single_file": "Ge.tersoff", "source": "Tersoff (1989)", "map": "Ge"},
                 "B": {"file": "BN.tersoff", "source": "Tersoff BN", "map": "B"},
                 "N": {"file": "BN.tersoff", "source": "Tersoff BN", "map": "N"},
             },
@@ -690,11 +690,25 @@ CONFIGS: dict = {
         "simulation_defaults": {
             "boundary": "p p p",
             "thermo_interval": 100,
-            "dump_interval": 1000,
+            "dump_interval": 100,
             "velocity_seed": 12345,
             "minimize_etol": 1.0e-8,
             "minimize_ftol": 1.0e-10,
             "minimize_maxiter": 10000,
+        },
+        "accuracy_presets": {
+            "standard": {
+                "nsteps_multiplier": 1.0,
+                "timestep_multiplier": 1.0,
+                "dump_interval": 100,
+                "thermo_interval": 100,
+            },
+            "precise": {
+                "nsteps_multiplier": 2.0,
+                "timestep_multiplier": 0.5,
+                "dump_interval": 50,
+                "thermo_interval": 50,
+            },
         },
     },
 }
