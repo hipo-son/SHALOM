@@ -156,6 +156,7 @@ class QEInputConfig:
     pseudo_map: Dict[str, str] = field(default_factory=dict)
     functional: str = "PBE"
     is_2d: bool = False
+    _detection_log: List[str] = field(default_factory=list)
 
     def get_merged_namelists(self) -> Dict[str, Dict[str, Any]]:
         """Return namelists with user_settings overrides applied.
@@ -183,6 +184,25 @@ class QEInputConfig:
             else:
                 result.setdefault("SYSTEM", {})[key] = val
         return result
+
+    def to_summary_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable summary of all calculation parameters."""
+        merged = self.get_merged_namelists()
+        d: Dict[str, Any] = {
+            "calc_type": self.calc_type.value,
+            "accuracy": self.accuracy.value,
+            "functional": self.functional,
+            "pseudo_dir": self.pseudo_dir,
+        }
+        for ns in ("CONTROL", "SYSTEM", "ELECTRONS", "IONS", "CELL"):
+            if merged.get(ns):
+                d[ns.lower()] = merged[ns]
+        if self.kpoints.grid:
+            d["kpoints_grid"] = self.kpoints.grid
+        if self.pseudo_map:
+            d["pseudo_map"] = self.pseudo_map
+        d["is_2d"] = self.is_2d
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +316,7 @@ def detect_and_apply_qe_hints(
     # 1. Magnetic element detection
     has_magnetic = any(el in MAGNETIC_ELEMENTS for el in unique_elements)
     if has_magnetic:
+        mag_els = sorted(el for el in unique_elements if el in MAGNETIC_ELEMENTS)
         config.system["nspin"] = 2
         # starting_magnetization(i) = MAGMOM / z_valence
         # Uses z_valence from SSSP metadata, NOT /10.
@@ -304,6 +325,9 @@ def detect_and_apply_qe_hints(
                 z_val = get_z_valence(el)
                 start_mag = min(DEFAULT_MAGMOM[el] / z_val, 1.0)
                 config.system[f"starting_magnetization({i})"] = round(start_mag, 4)
+        config._detection_log.append(
+            f"Magnetic elements {mag_els} → nspin=2, starting_magnetization set"
+        )
 
     # 2. GGA+U auto-detection (PRECISE only, same policy as VASP)
     has_anion = any(el in ANION_ELEMENTS for el in unique_elements)
@@ -316,6 +340,10 @@ def detect_and_apply_qe_hints(
                 if el in HUBBARD_U_VALUES:
                     _, u_val, _ = HUBBARD_U_VALUES[el]
                     config.system[f"Hubbard_U({i})"] = u_val
+            config._detection_log.append(
+                f"TMO: {u_elements} with anions → Hubbard U: "
+                f"{{{', '.join(f'{el}: {HUBBARD_U_VALUES[el][1]}' for el in u_elements)}}}"
+            )
             if config.functional != "PBE":
                 logger.warning(
                     "GGA+U enabled with functional='%s', but Hubbard U "
@@ -324,6 +352,10 @@ def detect_and_apply_qe_hints(
                     config.functional,
                 )
         elif u_elements and config.accuracy != AccuracyLevel.PRECISE:
+            config._detection_log.append(
+                f"TMO: {u_elements} with anions → GGA+U disabled "
+                f"(STANDARD accuracy; set accuracy='precise' to enable)"
+            )
             logger.warning(
                 "GGA+U disabled at STANDARD accuracy for elements %s. "
                 "For transition metal oxides/chalcogenides, use accuracy='precise'.",
@@ -340,6 +372,13 @@ def detect_and_apply_qe_hints(
         config.system["dftd3_version"] = 4  # BJ damping
         if config.calc_type == QECalculationType.VC_RELAX:
             config.cell["cell_dofree"] = "2Dxy"
+            config._detection_log.append(
+                "2D structure → assume_isolated=2D, DFT-D3(BJ), cell_dofree=2Dxy"
+            )
+        else:
+            config._detection_log.append(
+                "2D structure → assume_isolated=2D, DFT-D3(BJ)"
+            )
 
     # 4. Occupation / smearing based on material class
     if _is_pure_metal(unique_elements):
@@ -348,20 +387,30 @@ def detect_and_apply_qe_hints(
         config.system["smearing"] = "methfessel-paxton"
         config.system["degauss"] = DEGAUSS_METAL_RY
         config.electrons["mixing_beta"] = METAL_MIXING_BETA
+        config._detection_log.append(
+            f"Pure metal → methfessel-paxton, degauss={DEGAUSS_METAL_RY} Ry"
+        )
     elif not has_magnetic:
         # Non-magnetic non-metal (semiconductor/insulator): reduce broadening
         # 0.02 eV / 13.6057 = 0.00147 Ry — negligible for wide-gap materials
         config.system["degauss"] = DEGAUSS_INSULATOR_RY
+        config._detection_log.append(
+            f"Semiconductor/insulator → degauss={DEGAUSS_INSULATOR_RY} Ry"
+        )
 
     # 5. ecutwfc / ecutrho from SSSP metadata
     ecutwfc = compute_ecutwfc(unique_elements, config.accuracy)
     ecutrho = compute_ecutrho(unique_elements, config.accuracy)
     config.system["ecutwfc"] = ecutwfc
     config.system["ecutrho"] = ecutrho
+    config._detection_log.append(f"ecutwfc={ecutwfc} Ry, ecutrho={ecutrho} Ry (SSSP)")
 
     # 6. K-points grid (reuses shared function)
     config.kpoints.grid = compute_kpoints_grid(
         atoms, kpr=DEFAULT_KPR, is_2d=config.is_2d,
+    )
+    config._detection_log.append(
+        f"K-grid {config.kpoints.grid} from kpr={DEFAULT_KPR}"
     )
 
     # 7. Pseudo mapping

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import numpy as np
 from ase import Atoms

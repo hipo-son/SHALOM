@@ -33,7 +33,7 @@ Existing LLM-agent systems are either too general (lacking domain primitives for
 - **Pluggable LLM backends** — Swap between OpenAI, Anthropic, or local/self-hosted models (Ollama, vLLM, llama.cpp) via `base_url` parameter.
 - **Triple backend support** — Quantum ESPRESSO (open-source DFT), VASP (licensed DFT + AIMD), and LAMMPS (classical MD) as first-class solvers, with a unified abstraction layer. QE 7.1+ HUBBARD card syntax supported natively.
 - **HPC-native design** — First-class Slurm integration for submitting and monitoring jobs on supercomputers.
-- **MCP server for Claude Code** — 18 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
+- **MCP server for Claude Code** — 19 tools accessible via natural language through Claude Code (no API key needed for deterministic tools).
 - **Hands-on tutorials** — Jupyter notebooks for Si (convergence, bands, DOS, phonons, XRD) and Fe2O3 (spin-polarized, GGA+U, magnetic analysis) with real QE calculations.
 - **Deterministic reproducibility** — Seed-locked prompts and structured outputs ensure every run is traceable and repeatable.
 
@@ -330,7 +330,7 @@ After setup, tell Claude Code things like:
 - "Si의 SCF 계산 입력 파일을 만들어줘"
 - "mp-1040425 밴드 구조 계산해줘"
 
-**18 MCP tools**: `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `run_pipeline`, `analyze_elastic`, `analyze_phonon_properties`, `analyze_electronic_structure`, `analyze_xrd_pattern`, `analyze_symmetry_properties`, `analyze_magnetic_properties`, `run_md`, `analyze_md_trajectory`
+**19 MCP tools**: `search_material`, `generate_dft_input`, `run_workflow`, `execute_dft`, `parse_dft_output`, `plot_bands`, `plot_dos`, `run_convergence`, `check_qe_setup`, `run_pipeline`, `analyze_elastic`, `analyze_phonon_properties`, `analyze_electronic_structure`, `analyze_xrd_pattern`, `analyze_symmetry_properties`, `analyze_magnetic_properties`, `run_md`, `analyze_md_trajectory`, `load_calc_context`
 
 The `run_pipeline` tool runs the full multi-agent LLM pipeline and supports `base_url` for local LLM servers as an alternative to external API keys.
 
@@ -388,7 +388,7 @@ docker pull ghcr.io/hipo-son/shalom:latest
 | Phase | Target | Key Features | Status |
 |-------|--------|-------------|--------|
 | **Phase 1** | arXiv preprint + PyPI | VASP + QE dual backend, 3-layer agent pipeline, error recovery, local QE execution, CLI, MCP server, local LLM support, token-aware compression, band/DOS/XRD plotting, convergence tests, 5-step workflow, 6 post-DFT analysis modules, DFT tutorials, audit logging | Code complete |
-| **Phase 2** | Engine expansion | LAMMPS classical MD backend (auto force field detection), VASP AIMD, MD trajectory analysis (RDF, MSD, diffusion), MD plotting, MCP server (18 tools), VASP-Slurm HPC | In progress |
+| **Phase 2** | Engine expansion | LAMMPS classical MD backend (auto force field detection), VASP AIMD, MD trajectory analysis (RDF, MSD, diffusion), MD plotting, MCP server (19 tools), structured calculation reports, calculation context loading | Code complete |
 | **Phase 3** | Journal submission | Main paper with benchmark data, advanced use cases (2D, defects, catalysts) | Planned |
 
 See the [Master Design Document](docs/master_design_document.md) for detailed milestones and publication strategy.

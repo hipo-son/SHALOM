@@ -84,6 +84,28 @@ class TestDOSPlotter:
         # Twin axis should give us 2 axes on the figure
         assert len(fig.axes) >= 2
 
+    def test_energy_window_clipped_to_data_range(self):
+        """If data range is narrower than window, x-axis clips to data."""
+        from shalom.backends.base import DOSData
+
+        # Data only covers -5 to 3.5 eV (narrower than default -6 to 6)
+        energies = np.linspace(-5.0, 3.5, 200)
+        dos = np.abs(np.sin(energies)) + 0.1
+        data = DOSData(
+            energies=energies,
+            dos=dos,
+            integrated_dos=np.cumsum(dos) * (energies[1] - energies[0]),
+            fermi_energy=0.0,
+            is_spin_polarized=False,
+        )
+        plotter = DOSPlotter(data)
+        fig = plotter.plot(energy_window=(-6.0, 6.0))
+        ax = fig.axes[0]
+        xlim = ax.get_xlim()
+        # x-axis should be clipped to data range, not extend to +6
+        assert xlim[0] >= -5.1
+        assert xlim[1] <= 3.6
+
 
 class TestRequireMatplotlib:
     def test_importerror_raised_when_missing(self):

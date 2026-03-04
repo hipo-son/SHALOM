@@ -101,6 +101,39 @@ class LAMMPSInputConfig:
     minimize_first: bool = True
     accuracy: str = "standard"
     extra_commands: List[str] = field(default_factory=list)
+    _detection_log: List[str] = field(default_factory=list)
+
+    def to_summary_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable summary of all simulation parameters."""
+        d: Dict[str, Any] = {
+            "ensemble": self.ensemble,
+            "temperature_K": self.temperature,
+            "timestep_fs": self.timestep,
+            "nsteps": self.nsteps,
+            "units": self.units,
+            "atom_style": self.atom_style,
+            "boundary": self.boundary,
+            "accuracy": self.accuracy,
+            "is_2d": self.is_2d,
+            "minimize_first": self.minimize_first,
+        }
+        if self.temperature_end is not None:
+            d["temperature_end_K"] = self.temperature_end
+        if self.ensemble == "npt":
+            d["pressure_bar"] = self.pressure
+            d["pressure_damp_fs"] = self.pressure_damp
+        if self.pair_style:
+            d["pair_style"] = self.pair_style
+        if self.pair_coeff:
+            d["pair_coeff"] = self.pair_coeff
+        if self.detected_ff:
+            d["detected_ff"] = self.detected_ff
+        if self.potential_files:
+            d["potential_files"] = self.potential_files
+        d["temperature_damp_fs"] = self.temperature_damp
+        d["thermo_interval"] = self.thermo_interval
+        d["dump_interval"] = self.dump_interval
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +301,14 @@ def detect_and_apply_lammps_hints(
 
     # 1. User specified pair_style → skip auto-detection entirely
     if config.pair_style:
+        config._detection_log.append(
+            f"User override: pair_style={config.pair_style} (auto-detect skipped)"
+        )
         # Still apply 2D detection
         if detect_2d(atoms):
             config.is_2d = True
             config.boundary = "p p f"
+            config._detection_log.append("2D structure → boundary 'p p f'")
         return config
 
     # 2. Auto-detect force field (load config once, reuse for FF lookup)
@@ -298,6 +335,9 @@ def detect_and_apply_lammps_hints(
     pair_coeff, potential_files = _generate_pair_coeff(ff_name, ff_data, species_order)
     config.pair_coeff = pair_coeff
     config.potential_files = potential_files
+    config._detection_log.append(
+        f"Force field: {ff_name} (pair_style={ff_data['pair_style']})"
+    )
 
     # 4. Timestep (light elements → shorter)
     elements = set(atoms.get_chemical_symbols())
@@ -305,10 +345,19 @@ def detect_and_apply_lammps_hints(
     if isinstance(ts_data, dict):
         if any(el in _LIGHT_ELEMENTS for el in elements):
             config.timestep = ts_data.get("light_elements", ts_data.get("default", 1.0))
+            config._detection_log.append(
+                f"Light elements detected → timestep={config.timestep} fs"
+            )
         else:
             config.timestep = ts_data.get("default", 1.0)
+            config._detection_log.append(
+                f"Timestep={config.timestep} fs (default for {ff_name})"
+            )
     else:
         config.timestep = float(ts_data)
+        config._detection_log.append(
+            f"Timestep={config.timestep} fs (default for {ff_name})"
+        )
 
     # 5. Thermostat damping
     thermo = ff_data.get("thermostat", {})
@@ -320,6 +369,7 @@ def detect_and_apply_lammps_hints(
     if detect_2d(atoms):
         config.is_2d = True
         config.boundary = "p p f"
+        config._detection_log.append("2D structure → boundary 'p p f'")
 
     # 7. Apply simulation defaults
     sim_defaults = db.get("simulation_defaults", {})

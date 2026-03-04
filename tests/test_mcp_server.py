@@ -266,6 +266,43 @@ class TestRunWorkflow:
         assert "warning" in result
         assert "ASE bulk" in result["warning"]
 
+    def test_run_workflow_returns_detection_log(self):
+        """run_workflow should include detection_log in response."""
+        mod = _import_mcp_server()
+
+        mock_wf_result = {
+            "fermi_energy": 5.0,
+            "bands_png": None,
+            "dos_png": None,
+            "calc_dirs": {},
+            "detection_log": ["ecutwfc=30.0 Ry", "K-grid [6, 6, 6]"],
+            "completed_steps": ["vc_relax", "scf"],
+            "failed_step": None,
+        }
+
+        with patch.object(mod, "_load_atoms", return_value=(bulk("Si"), "materials_project")), \
+             patch("shalom.workflows.standard.StandardWorkflow") as MockWF:
+            MockWF.return_value.run.return_value = mock_wf_result
+            result = mod.run_workflow(material="Si", output_dir="/tmp/wf")
+
+        assert result["success"] is True
+        assert result["detection_log"] == ["ecutwfc=30.0 Ry", "K-grid [6, 6, 6]"]
+        assert result["completed_steps"] == ["vc_relax", "scf"]
+        assert result["failed_step"] is None
+
+    def test_run_workflow_error_includes_detection_log(self):
+        """Error responses include detection_log and completed_steps keys."""
+        mod = _import_mcp_server()
+
+        with patch.object(mod, "_load_atoms", side_effect=ValueError("bad material")):
+            result = mod.run_workflow(material="???", output_dir="/tmp/wf")
+
+        assert result["success"] is False
+        assert "detection_log" in result
+        assert result["detection_log"] == []
+        assert result["completed_steps"] == []
+        assert result["failed_step"] is None
+
 
 # ===========================================================================
 # Test: execute_dft

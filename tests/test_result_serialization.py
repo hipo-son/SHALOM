@@ -400,13 +400,18 @@ class TestWorkflowResultsSummary:
             "failed_step": "dos",
         }
 
+        wf.accuracy = "standard"
+        wf.pseudo_dir = "/pseudo"
+        wf.is_2d = False
+        wf._first_detection_log = ["ecutwfc=30.0 Ry"]
+        wf._structure_analysis = {"formula": "Si2", "natoms": 2}
         wf._save_results_summary(result, step_results)
 
         path = tmp_path / "results_summary.json"
         assert path.exists()
 
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["version"] == 1
+        assert data["version"] == 3
         assert data["material_formula"] == "Si2"
         assert data["fermi_energy_eV"] == 5.23
         assert data["failed_step"] == "dos"
@@ -415,6 +420,57 @@ class TestWorkflowResultsSummary:
         assert data["steps"][0]["success"] is True
         assert data["steps"][0]["elapsed_seconds"] == 10.5
         assert data["steps"][2]["error_message"] == "timeout"
+
+    def test_detection_log_in_summary(self, tmp_path):
+        """results_summary.json contains detection_log and structure_analysis."""
+        from unittest.mock import MagicMock
+        from shalom.workflows.standard import StandardWorkflow, StepStatus
+
+        wf = StandardWorkflow.__new__(StandardWorkflow)
+        wf.output_dir = str(tmp_path)
+        wf.accuracy = "standard"
+        wf.pseudo_dir = "/pseudo"
+        wf.is_2d = False
+        wf._first_detection_log = [
+            "Magnetic elements ['Fe'] → nspin=2",
+            "ecutwfc=64.0 Ry",
+        ]
+        wf._structure_analysis = {
+            "formula": "Fe2O3",
+            "natoms": 10,
+            "is_magnetic": True,
+            "magnetic_elements": ["Fe"],
+        }
+
+        step_results = [
+            StepStatus("scf", 1, True, elapsed_seconds=5.0,
+                       detection_log=["ecutwfc=64.0 Ry"]),
+        ]
+        atoms_mock = MagicMock()
+        atoms_mock.get_chemical_formula.return_value = "Fe2O3"
+
+        result = {
+            "atoms": atoms_mock,
+            "fermi_energy": 3.1,
+            "bands_png": None,
+            "dos_png": None,
+            "calc_dirs": {},
+            "completed_steps": ["scf"],
+            "failed_step": None,
+        }
+        wf._save_results_summary(result, step_results)
+
+        data = json.loads(
+            (tmp_path / "results_summary.json").read_text(encoding="utf-8")
+        )
+        assert data["detection_log"] == [
+            "Magnetic elements ['Fe'] → nspin=2",
+            "ecutwfc=64.0 Ry",
+        ]
+        assert data["structure_analysis"]["formula"] == "Fe2O3"
+        assert data["structure_analysis"]["is_magnetic"] is True
+        # Per-step detection_log in steps array
+        assert data["steps"][0]["detection_log"] == ["ecutwfc=64.0 Ry"]
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +496,7 @@ class TestDirectRunInfo:
         assert path.exists()
 
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["version"] == 1
+        assert data["version"] == 2
         assert data["backend"] == "qe"
         assert data["calc_type"] == "scf"
         assert data["structure_info"]["formula"] == "Si"

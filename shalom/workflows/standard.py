@@ -72,6 +72,7 @@ class StepStatus:
     error_message: Optional[str] = None
     elapsed_seconds: float = 0.0
     summary: str = ""
+    detection_log: Optional[List[str]] = None
 
 
 class StandardWorkflow:
@@ -127,7 +128,7 @@ class StandardWorkflow:
         npoints_kpath: int = DEFAULT_BAND_NPOINTS,
         is_2d: bool = False,
         dos_emin: float = -20.0,
-        dos_emax: float = 10.0,
+        dos_emax: float = 20.0,
         dos_deltaE: float = 0.01,
         nscf_kmesh: Optional[list] = None,
         resume: bool = False,
@@ -214,6 +215,7 @@ class StandardWorkflow:
         scf_ok = False
         bands_ok = False
         nscf_ok = False
+        self._first_detection_log: List[str] = []
 
         # Resume support: load checkpoint and determine which steps to skip.
         done: set = set()
@@ -228,7 +230,8 @@ class StandardWorkflow:
         # ------------------------------------------------------------------
         current_atoms = self.atoms
         if "vc_relax" in done:
-            step_results.append(StepStatus("vc_relax", 1, True, summary="resumed"))
+            step_results.append(StepStatus("vc_relax", 1, True, summary="resumed",
+                                           detection_log=[]))
             logger.info("[1/5] vc-relax — already complete (resumed)")
             # Recover relaxed structure from pw.out if available
             pw_out = os.path.join(relax_dir, "pw.out")
@@ -240,20 +243,24 @@ class StandardWorkflow:
         elif not self.skip_relax:
             t0 = self._log_step_start(1, 5, "vc-relax")
             try:
-                current_atoms = self._run_vc_relax(relax_dir, current_atoms)
+                current_atoms, vc_det_log = self._run_vc_relax(relax_dir, current_atoms)
+                self._first_detection_log = vc_det_log
                 summary = self._extract_pw_summary(os.path.join(relax_dir, "pw.out"))
                 elapsed = time.monotonic() - t0
                 step_results.append(StepStatus("vc_relax", 1, True,
-                                               elapsed_seconds=elapsed, summary=summary))
+                                               elapsed_seconds=elapsed, summary=summary,
+                                               detection_log=vc_det_log))
                 self._log_step_end(1, 5, "vc-relax", t0, summary)
                 self._save_checkpoint(["vc_relax"])
             except RuntimeError as exc:
                 elapsed = time.monotonic() - t0
-                step_results.append(StepStatus("vc_relax", 1, False, str(exc), elapsed))
+                step_results.append(StepStatus("vc_relax", 1, False, str(exc), elapsed,
+                                               detection_log=[]))
                 logger.error("[1/5] vc-relax FAILED (%s) — using input geometry", exc)
                 # vc-relax failure is non-fatal: continue with input atoms
         else:
-            step_results.append(StepStatus("vc_relax", 1, True, summary="skipped"))
+            step_results.append(StepStatus("vc_relax", 1, True, summary="skipped",
+                                           detection_log=[]))
             logger.info("[1/5] vc-relax SKIPPED")
 
         # Convert to seekpath standardized primitive cell so that the k-path
@@ -266,13 +273,18 @@ class StandardWorkflow:
             calc_atoms, npoints=self.npoints_kpath, is_2d=self.is_2d
         )
 
+        # Build structure analysis for results_summary.json
+        from shalom.direct_run import _build_structure_analysis
+        self._structure_analysis = _build_structure_analysis(calc_atoms)
+
         # ------------------------------------------------------------------
         # Step 2: scf (fatal — prerequisite for everything)
         # ------------------------------------------------------------------
         if "scf" in done:
             scf_pw_out = os.path.join(scf_dir, "pw.out")
             if os.path.isfile(scf_pw_out):
-                step_results.append(StepStatus("scf", 2, True, summary="resumed"))
+                step_results.append(StepStatus("scf", 2, True, summary="resumed",
+                                               detection_log=[]))
                 logger.info("[2/5] scf — already complete (resumed)")
                 scf_ok = True
             else:
@@ -283,37 +295,43 @@ class StandardWorkflow:
         if "scf" not in done:
             t0 = self._log_step_start(2, 5, "scf")
             try:
-                self._run_scf(scf_dir, calc_atoms)
+                scf_det_log = self._run_scf(scf_dir, calc_atoms)
+                if not self._first_detection_log:
+                    self._first_detection_log = scf_det_log
                 summary = self._extract_pw_summary(os.path.join(scf_dir, "pw.out"))
                 elapsed = time.monotonic() - t0
                 step_results.append(StepStatus("scf", 2, True,
-                                               elapsed_seconds=elapsed, summary=summary))
+                                               elapsed_seconds=elapsed, summary=summary,
+                                               detection_log=scf_det_log))
                 self._log_step_end(2, 5, "scf", t0, summary)
                 scf_ok = True
                 self._save_checkpoint(
                     [s.name for s in step_results if s.success])
             except RuntimeError as exc:
                 elapsed = time.monotonic() - t0
-                step_results.append(StepStatus("scf", 2, False, str(exc), elapsed))
+                step_results.append(StepStatus("scf", 2, False, str(exc), elapsed,
+                                               detection_log=[]))
                 logger.error("[2/5] scf FAILED — %s", exc)
                 failed_step = "scf"
                 return self._build_result(
                     calc_atoms, None, None, None,
                     relax_dir, scf_dir, bands_dir, nscf_dir,
                     step_results, failed_step,
+                    detection_log=self._first_detection_log,
                 )
 
         # ------------------------------------------------------------------
         # Step 3: bands (depends on SCF)
         # ------------------------------------------------------------------
         if "bands" in done:
-            step_results.append(StepStatus("bands", 3, True, summary="resumed"))
+            step_results.append(StepStatus("bands", 3, True, summary="resumed",
+                                           detection_log=[]))
             logger.info("[3/5] bands — already complete (resumed)")
             bands_ok = True
         else:
             t0 = self._log_step_start(3, 5, "bands")
             try:
-                self._run_bands(bands_dir, calc_atoms, scf_tmp_dir)
+                bands_det_log = self._run_bands(bands_dir, calc_atoms, scf_tmp_dir)
 
                 # Preserve bands XML before NSCF overwrites it in scf_tmp_dir.
                 bands_xml_src = find_xml_path(scf_tmp_dir)
@@ -331,14 +349,16 @@ class StandardWorkflow:
 
                 elapsed = time.monotonic() - t0
                 step_results.append(StepStatus("bands", 3, True,
-                                               elapsed_seconds=elapsed))
+                                               elapsed_seconds=elapsed,
+                                               detection_log=bands_det_log))
                 self._log_step_end(3, 5, "bands", t0)
                 bands_ok = True
                 self._save_checkpoint(
                     [s.name for s in step_results if s.success])
             except RuntimeError as exc:
                 elapsed = time.monotonic() - t0
-                step_results.append(StepStatus("bands", 3, False, str(exc), elapsed))
+                step_results.append(StepStatus("bands", 3, False, str(exc), elapsed,
+                                               detection_log=[]))
                 logger.error("[3/5] bands FAILED — %s", exc)
                 if not failed_step:
                     failed_step = "bands"
@@ -347,23 +367,26 @@ class StandardWorkflow:
         # Step 4: nscf (depends on SCF, independent of bands)
         # ------------------------------------------------------------------
         if "nscf" in done:
-            step_results.append(StepStatus("nscf", 4, True, summary="resumed"))
+            step_results.append(StepStatus("nscf", 4, True, summary="resumed",
+                                           detection_log=[]))
             logger.info("[4/5] nscf — already complete (resumed)")
             nscf_ok = True
         else:
             t0 = self._log_step_start(4, 5, "nscf")
             try:
-                self._run_nscf(nscf_dir, calc_atoms, scf_tmp_dir)
+                nscf_det_log = self._run_nscf(nscf_dir, calc_atoms, scf_tmp_dir)
                 elapsed = time.monotonic() - t0
                 step_results.append(StepStatus("nscf", 4, True,
-                                               elapsed_seconds=elapsed))
+                                               elapsed_seconds=elapsed,
+                                               detection_log=nscf_det_log))
                 self._log_step_end(4, 5, "nscf", t0)
                 nscf_ok = True
                 self._save_checkpoint(
                     [s.name for s in step_results if s.success])
             except RuntimeError as exc:
                 elapsed = time.monotonic() - t0
-                step_results.append(StepStatus("nscf", 4, False, str(exc), elapsed))
+                step_results.append(StepStatus("nscf", 4, False, str(exc), elapsed,
+                                               detection_log=[]))
                 logger.error("[4/5] nscf FAILED — %s", exc)
                 if not failed_step:
                     failed_step = "nscf"
@@ -372,7 +395,8 @@ class StandardWorkflow:
         # Step 5: dos.x (depends on NSCF)
         # ------------------------------------------------------------------
         if "dos" in done:
-            step_results.append(StepStatus("dos", 5, True, summary="resumed"))
+            step_results.append(StepStatus("dos", 5, True, summary="resumed",
+                                           detection_log=[]))
             logger.info("[5/5] dos.x — already complete (resumed)")
         elif nscf_ok:
             t0 = self._log_step_start(5, 5, "dos.x")
@@ -380,17 +404,20 @@ class StandardWorkflow:
                 self._run_dos(nscf_dir, scf_tmp_dir)
                 elapsed = time.monotonic() - t0
                 step_results.append(StepStatus("dos", 5, True,
-                                               elapsed_seconds=elapsed))
+                                               elapsed_seconds=elapsed,
+                                               detection_log=[]))
                 self._log_step_end(5, 5, "dos.x", t0)
                 self._save_checkpoint(
                     [s.name for s in step_results if s.success])
             except Exception as exc:
                 elapsed = time.monotonic() - t0
-                step_results.append(StepStatus("dos", 5, False, str(exc), elapsed))
+                step_results.append(StepStatus("dos", 5, False, str(exc), elapsed,
+                                               detection_log=[]))
                 logger.error("[5/5] dos.x FAILED — %s", exc)
         else:
             step_results.append(StepStatus("dos", 5, False,
-                                           "skipped: NSCF failed"))
+                                           "skipped: NSCF failed",
+                                           detection_log=[]))
             logger.info("[5/5] dos.x SKIPPED (NSCF failed)")
 
         # ------------------------------------------------------------------
@@ -413,6 +440,7 @@ class StandardWorkflow:
             calc_atoms, fermi, bands_png, dos_png,
             relax_dir, scf_dir, bands_dir, nscf_dir,
             step_results, failed_step,
+            detection_log=self._first_detection_log,
         )
 
         self._save_results_summary(result, step_results)
@@ -434,6 +462,7 @@ class StandardWorkflow:
         nscf_dir: str,
         step_results: List["StepStatus"],
         failed_step: Optional[str],
+        detection_log: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Build the result dict (backward-compatible + new keys)."""
         completed = [s.name for s in step_results if s.success]
@@ -453,6 +482,7 @@ class StandardWorkflow:
             "step_results": step_results,
             "completed_steps": completed,
             "failed_step": failed_step,
+            "detection_log": detection_log or [],
         }
 
     # ------------------------------------------------------------------
@@ -511,9 +541,14 @@ class StandardWorkflow:
                 pass
 
         summary: Dict[str, Any] = {
-            "version": 1,
+            "version": 3,
             "timestamp": datetime.now().isoformat(),
             "material_formula": formula,
+            "accuracy": self.accuracy,
+            "pseudo_dir": self.pseudo_dir,
+            "is_2d": self.is_2d,
+            "structure_analysis": getattr(self, "_structure_analysis", {}),
+            "detection_log": getattr(self, "_first_detection_log", []),
             "fermi_energy_eV": result.get("fermi_energy"),
             "bands_png": result.get("bands_png"),
             "dos_png": result.get("dos_png"),
@@ -529,6 +564,7 @@ class StandardWorkflow:
                     if sr.elapsed_seconds else 0,
                     "summary": sr.summary or "",
                     "error_message": sr.error_message or "",
+                    "detection_log": sr.detection_log or [],
                 }
                 for sr in step_results
             ],
@@ -633,11 +669,14 @@ class StandardWorkflow:
     # Step implementations
     # ------------------------------------------------------------------
 
-    def _run_vc_relax(self, calc_dir: str, atoms: "Atoms") -> "Atoms":
-        """Run vc-relax and return the relaxed structure."""
+    def _run_vc_relax(
+        self, calc_dir: str, atoms: "Atoms",
+    ) -> tuple:
+        """Run vc-relax and return (relaxed_atoms, detection_log)."""
         os.makedirs(calc_dir, exist_ok=True)
         acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.VC_RELAX, accuracy=acc, atoms=atoms)
+        detection_log = list(config._detection_log)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
 
@@ -650,31 +689,34 @@ class StandardWorkflow:
         try:
             relaxed = ase_read(pw_out, format="espresso-out", index=-1)
             logger.info("vc-relax: read relaxed structure (%d atoms)", len(relaxed))
-            return relaxed
+            return relaxed, detection_log
         except Exception as exc:
             logger.warning(
                 "vc-relax: could not parse relaxed structure (%s); "
                 "using UNRELAXED input. Check %s for details.", exc, pw_out
             )
-            return atoms
+            return atoms, detection_log
 
-    def _run_scf(self, calc_dir: str, atoms: "Atoms") -> None:
-        """Run scf calculation."""
+    def _run_scf(self, calc_dir: str, atoms: "Atoms") -> List[str]:
+        """Run scf calculation. Returns detection_log."""
         os.makedirs(calc_dir, exist_ok=True)
         acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.SCF, accuracy=acc, atoms=atoms)
+        detection_log = list(config._detection_log)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
 
         backend = QEBackend()
         backend.write_input(atoms, calc_dir, config=config)
         self._pw_run(calc_dir)
+        return detection_log
 
-    def _run_bands(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> None:
-        """Run bands calculation using the scf charge density."""
+    def _run_bands(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> List[str]:
+        """Run bands calculation using the scf charge density. Returns detection_log."""
         os.makedirs(calc_dir, exist_ok=True)
         acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.BANDS, accuracy=acc, atoms=atoms)
+        detection_log = list(config._detection_log)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
 
@@ -693,12 +735,14 @@ class StandardWorkflow:
         backend = QEBackend()
         backend.write_input(atoms, calc_dir, config=config)
         self._pw_run(calc_dir)
+        return detection_log
 
-    def _run_nscf(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> None:
-        """Run nscf calculation using the scf charge density."""
+    def _run_nscf(self, calc_dir: str, atoms: "Atoms", scf_tmp_dir: str) -> List[str]:
+        """Run nscf calculation using the scf charge density. Returns detection_log."""
         os.makedirs(calc_dir, exist_ok=True)
         acc = self._accuracy_level
         config = get_qe_preset(QECalculationType.NSCF, accuracy=acc, atoms=atoms)
+        detection_log = list(config._detection_log)
         if self.pseudo_dir:
             config.pseudo_dir = self.pseudo_dir
 
@@ -714,9 +758,14 @@ class StandardWorkflow:
                 atoms, kpr=DEFAULT_NSCF_KPR, is_2d=config.is_2d,
             )
 
+        # Auto-set nbnd — same as bands step, ensures DOS covers conduction bands
+        nbnd = compute_nbnd(atoms, multiplier=1.3)
+        config.system["nbnd"] = max(nbnd, config.system.get("nbnd", 20))
+
         backend = QEBackend()
         backend.write_input(atoms, calc_dir, config=config)
         self._pw_run(calc_dir)
+        return detection_log
 
     def _run_dos(self, calc_dir: str, scf_tmp_dir: str) -> None:
         """Write dos.in and run dos.x (all energies in eV)."""

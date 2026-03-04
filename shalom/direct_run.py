@@ -87,6 +87,29 @@ class DirectRunResult:
     files_generated: List[str] = field(default_factory=list)
     error: Optional[str] = None
     auto_detected: Optional[Dict[str, Any]] = None
+    structure_analysis: Optional[Dict[str, Any]] = None
+    calculation_parameters: Optional[Dict[str, Any]] = None
+    detection_log: Optional[List[str]] = None
+
+
+def _build_structure_analysis(atoms: Atoms) -> Dict[str, Any]:
+    """Build structure analysis dict from atoms object."""
+    from shalom.backends._physics import (
+        MAGNETIC_ELEMENTS, detect_2d, _is_pure_metal,
+    )
+    elements = sorted(set(atoms.get_chemical_symbols()))
+    mag_elements = [e for e in elements if e in MAGNETIC_ELEMENTS]
+    d: Dict[str, Any] = {
+        "formula": atoms.get_chemical_formula(mode="reduce"),
+        "natoms": len(atoms),
+        "elements": elements,
+        "is_magnetic": len(mag_elements) > 0,
+        "is_2d": detect_2d(atoms),
+        "is_metal": _is_pure_metal(elements),
+    }
+    if mag_elements:
+        d["magnetic_elements"] = mag_elements
+    return d
 
 
 def _write_output_readme(
@@ -96,6 +119,8 @@ def _write_output_readme(
     structure_info: Optional[Dict[str, Any]],
     auto_detected: Optional[Dict[str, Any]],
     files_generated: List[str],
+    structure_analysis: Optional[Dict[str, Any]] = None,
+    detection_log: Optional[List[str]] = None,
 ) -> None:
     """Write a README.md into the DFT output folder explaining the generated files."""
     import datetime
@@ -140,7 +165,28 @@ def _write_output_readme(
         lines.append(f"- **Source**: {source}")
     lines.append("")
 
-    # Auto-detected parameters
+    # Structure analysis
+    sa = structure_analysis or {}
+    if sa:
+        lines += ["## Structure Analysis", ""]
+        lines.append(f"- **Atoms**: {sa.get('natoms', '?')} ({', '.join(sa.get('elements', []))})")
+        if sa.get("is_magnetic"):
+            lines.append(f"- **Magnetic**: Yes ({', '.join(sa.get('magnetic_elements', []))})")
+        else:
+            lines.append("- **Magnetic**: No")
+        lines.append(f"- **Metal**: {'Yes' if sa.get('is_metal') else 'No'}")
+        lines.append(f"- **2D**: {'Yes' if sa.get('is_2d') else 'No'}")
+        lines.append("")
+
+    # Detection reasoning
+    det = detection_log or []
+    if det:
+        lines += ["## Why These Settings", ""]
+        for entry in det:
+            lines.append(f"- {entry}")
+        lines.append("")
+
+    # Auto-detected parameters (legacy, kept for backward compat)
     if auto_detected:
         lines += ["## Auto-Detected Parameters", ""]
         for key, val in auto_detected.items():
@@ -240,18 +286,24 @@ def _write_run_info(
     structure_info: Optional[Dict[str, Any]],
     auto_detected: Optional[Dict[str, Any]],
     files_generated: List[str],
+    structure_analysis: Optional[Dict[str, Any]] = None,
+    calculation_parameters: Optional[Dict[str, Any]] = None,
+    detection_log: Optional[List[str]] = None,
 ) -> None:
     """Write machine-readable run_info.json into the output folder."""
     import datetime
     import json
 
     info: Dict[str, Any] = {
-        "version": 1,
+        "version": 2,
         "timestamp": datetime.datetime.now().isoformat(),
         "backend": backend_name,
         "calc_type": calc_type,
         "structure_info": structure_info or {},
+        "structure_analysis": structure_analysis or {},
         "auto_detected": auto_detected or {},
+        "calculation_parameters": calculation_parameters or {},
+        "detection_log": detection_log or [],
         "files_generated": files_generated,
     }
 
@@ -470,6 +522,10 @@ def direct_run(
 
     # 3. Create backend-specific DFT config
     auto_detected: Dict[str, Any] = {}
+    struct_analysis = _build_structure_analysis(atoms)
+    calc_params: Dict[str, Any] = {}
+    det_log: List[str] = []
+
     if config.backend_name == "vasp":
         dft_config = _create_vasp_config(
             atoms, calc_type, config.accuracy,
@@ -483,6 +539,8 @@ def direct_run(
                 "kpoints": dft_config.kpoints.grid,
             }.items() if v is not None
         }
+        calc_params = dft_config.to_summary_dict()
+        det_log = list(dft_config._detection_log)
     elif config.backend_name == "qe":
         dft_config = _create_qe_config(
             atoms, calc_type, config.accuracy,
@@ -496,6 +554,8 @@ def direct_run(
                 "kpoints": dft_config.kpoints.grid,
             }.items() if v is not None
         }
+        calc_params = dft_config.to_summary_dict()
+        det_log = list(dft_config._detection_log)
     elif config.backend_name == "lammps":
         from shalom.backends.lammps_config import get_lammps_preset
         lammps_settings = dict(config.user_settings or {})
@@ -518,6 +578,8 @@ def direct_run(
                 "is_2d": dft_config.is_2d,
             }.items() if v is not None
         }
+        calc_params = dft_config.to_summary_dict()
+        det_log = list(dft_config._detection_log)
     else:
         dft_config = None
 
@@ -572,6 +634,8 @@ def direct_run(
         structure_info=structure_info,
         auto_detected=auto_detected,
         files_generated=[f for f in files_generated if f != "README.md"],
+        structure_analysis=struct_analysis,
+        detection_log=det_log,
     )
 
     # 9. Write machine-readable run_info.json
@@ -585,6 +649,9 @@ def direct_run(
             f for f in files_generated
             if f not in ("README.md", "run_info.json")
         ],
+        structure_analysis=struct_analysis,
+        calculation_parameters=calc_params,
+        detection_log=det_log,
     )
 
     return DirectRunResult(
@@ -594,4 +661,7 @@ def direct_run(
         backend_name=config.backend_name,
         files_generated=files_generated,
         auto_detected=auto_detected,
+        structure_analysis=struct_analysis,
+        calculation_parameters=calc_params,
+        detection_log=det_log,
     )

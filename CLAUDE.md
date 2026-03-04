@@ -60,7 +60,7 @@ shalom/
 ├── _defaults.py      # Hardcoded fallback values
 ├── mp_client.py      # Materials Project API client (optional: pip install mp-api)
 ├── direct_run.py     # Direct material run (structure -> DFT input files)
-├── mcp_server.py     # MCP server for Claude Code integration (18 tools)
+├── mcp_server.py     # MCP server for Claude Code integration (19 tools)
 ├── __main__.py       # CLI: python -m shalom run/plot/workflow/converge/analyze/pipeline
 └── pipeline.py       # End-to-end LLM pipeline orchestrator (supports base_url for local LLMs)
 
@@ -310,7 +310,7 @@ After setup, tell Claude Code things like:
 - "mp-1040425 그래핀 밴드 구조 계산해줘"
 - "QE 환경이 설정되어 있는지 확인해줘"
 
-**18 MCP tools** (17 deterministic + 1 LLM-driven):
+**19 MCP tools** (18 deterministic + 1 LLM-driven):
 
 | Tool | Description | Requires API Key? |
 |------|-------------|:-----------------:|
@@ -331,6 +331,7 @@ After setup, tell Claude Code things like:
 | `analyze_magnetic_properties` | Site magnetization and Löwdin charges from QE pw.out | No |
 | `run_md` | Run LAMMPS/VASP AIMD molecular dynamics | No |
 | `analyze_md_trajectory` | MD trajectory analysis (RDF, MSD, diffusion) | No |
+| `load_calc_context` | Load calculation context from a run directory | No |
 | `run_pipeline` | Full multi-agent LLM pipeline | Yes (or `base_url`) |
 
 The `run_pipeline` tool supports `base_url` for local LLM servers (Ollama, vLLM, etc.)

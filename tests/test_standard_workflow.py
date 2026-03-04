@@ -145,7 +145,7 @@ def test_standard_workflow_defaults():
     assert not wf.skip_relax
     assert not wf.is_2d
     assert wf.dos_emin == pytest.approx(-20.0)
-    assert wf.dos_emax == pytest.approx(10.0)
+    assert wf.dos_emax == pytest.approx(20.0)
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +238,10 @@ class TestRunVcRelax:
         with patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"), \
              patch("shalom.workflows.standard.ase_read", return_value=relaxed):
-            result = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), wf.atoms)
+            result_atoms, det_log = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), wf.atoms)
 
-        assert result is relaxed
+        assert result_atoms is relaxed
+        assert isinstance(det_log, list)
 
     def test_falls_back_to_input_on_read_failure(self, tmp_path, make_workflow):
         """When ase_read fails, returns the original atoms."""
@@ -251,9 +252,10 @@ class TestRunVcRelax:
         with patch("shalom.backends.qe.QEBackend.write_input"), \
              patch.object(wf, "_pw_run"), \
              patch("shalom.workflows.standard.ase_read", side_effect=Exception("parse error")):
-            result = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), wf.atoms)
+            result_atoms, det_log = wf._run_vc_relax(str(tmp_path / "01_vc_relax"), wf.atoms)
 
-        assert result is wf.atoms
+        assert result_atoms is wf.atoms
+        assert isinstance(det_log, list)
 
     def test_precise_accuracy_applied(self, tmp_path, make_workflow):
         """Precise accuracy flag is forwarded to get_qe_preset."""
@@ -270,6 +272,7 @@ class TestRunVcRelax:
             cfg.control = {}
             cfg.system = {}
             cfg.kpoints = None
+            cfg._detection_log = []
             return cfg
 
         with patch("shalom.workflows.standard.get_qe_preset", side_effect=fake_preset), \
@@ -291,6 +294,7 @@ class TestRunVcRelax:
         config_obj.control = {}
         config_obj.system = {}
         config_obj.kpoints = None
+        config_obj._detection_log = []
 
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
@@ -321,11 +325,12 @@ class TestRunScf:
 
         with patch("shalom.backends.qe.QEBackend.write_input", side_effect=fake_write), \
              patch.object(wf, "_pw_run") as mock_pw:
-            wf._run_scf(scf_dir, wf.atoms)
+            det_log = wf._run_scf(scf_dir, wf.atoms)
 
         assert len(write_calls) == 1
         assert write_calls[0] == scf_dir
         mock_pw.assert_called_once_with(scf_dir)
+        assert isinstance(det_log, list)
 
     def test_pseudo_dir_override(self, tmp_path, make_workflow):
         """pseudo_dir is forwarded to config."""
@@ -337,6 +342,7 @@ class TestRunScf:
         config_obj.control = {}
         config_obj.system = {}
         config_obj.kpoints = None
+        config_obj._detection_log = []
 
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
@@ -366,6 +372,7 @@ class TestRunBandsExtended:
         config_obj.control = {}
         config_obj.system = {"nbnd": 20}
         config_obj.kpoints = None
+        config_obj._detection_log = []
 
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input"), \
@@ -388,6 +395,7 @@ class TestRunBandsExtended:
         config_obj.control = {}
         config_obj.system = {"nbnd": 20}
         config_obj.kpoints = None
+        config_obj._detection_log = []
 
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.workflows.standard.generate_band_kpath", return_value=generated_kpath), \
@@ -408,6 +416,7 @@ class TestRunBandsExtended:
         config_obj.control = {}
         config_obj.system = {}  # no nbnd set
         config_obj.kpoints = None
+        config_obj._detection_log = []
 
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.workflows.standard.generate_band_kpath",
@@ -436,6 +445,7 @@ class TestRunNscfExtended:
         config_obj = MagicMock()
         config_obj.control = {}
         config_obj.system = {}
+        config_obj._detection_log = []
 
         with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
              patch("shalom.backends.qe.QEBackend.write_input") as mock_write, \
@@ -445,6 +455,26 @@ class TestRunNscfExtended:
         mock_write.assert_called_once()
         mock_pw.assert_called_once_with(nscf_dir)
         assert config_obj.control["outdir"] == "/abs/scf/tmp"
+
+    def test_nscf_sets_nbnd(self, tmp_path, make_workflow):
+        """_run_nscf must set nbnd to cover conduction bands for DOS."""
+        wf = make_workflow()
+        nscf_dir = str(tmp_path / "04_nscf")
+        from unittest.mock import patch, MagicMock
+
+        config_obj = MagicMock()
+        config_obj.control = {}
+        config_obj.system = {}
+        config_obj._detection_log = []
+
+        with patch("shalom.workflows.standard.get_qe_preset", return_value=config_obj), \
+             patch("shalom.backends.qe.QEBackend.write_input"), \
+             patch.object(wf, "_pw_run"):
+            wf._run_nscf(nscf_dir, wf.atoms, "/abs/scf/tmp")
+
+        # Si: 2 atoms * 4 z_valence = 8 electrons → 4 occupied → nbnd >= 6
+        assert "nbnd" in config_obj.system
+        assert config_obj.system["nbnd"] >= 6
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +753,7 @@ class TestRunFull:
 
         def fake_vc_relax(calc_dir, atoms):
             vc_relax_called.append(True)
-            return atoms
+            return atoms, ["fake detection log"]
 
         mock_band_plotter = MagicMock()
         mock_dos_plotter = MagicMock()
@@ -1346,6 +1376,7 @@ class TestNscfKmeshOverride:
         config_obj = MagicMock()
         config_obj.control = {}
         config_obj.system = {}
+        config_obj._detection_log = []
         kpts_obj = MagicMock()
         kpts_obj.grid = [4, 4, 4]  # default
         config_obj.kpoints = kpts_obj
@@ -1366,6 +1397,7 @@ class TestNscfKmeshOverride:
         config_obj = MagicMock()
         config_obj.control = {}
         config_obj.system = {}
+        config_obj._detection_log = []
         kpts_obj = MagicMock()
         kpts_obj.grid = [4, 4, 4]
         config_obj.kpoints = kpts_obj
@@ -1416,6 +1448,7 @@ class TestNscfKmeshOverride:
         config_obj = MagicMock()
         config_obj.control = {}
         config_obj.system = {}
+        config_obj._detection_log = []
         kpts_obj = MagicMock()
         kpts_obj.grid = [4, 4, 4]
         config_obj.kpoints = kpts_obj

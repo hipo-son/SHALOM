@@ -399,8 +399,8 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_parser.add_argument(
         "--dos-emax",
         type=float,
-        default=10.0,
-        help="DOS energy window max in eV (default: 10).",
+        default=20.0,
+        help="DOS energy window max in eV (default: 20).",
     )
     workflow_parser.add_argument(
         "--nscf-kgrid",

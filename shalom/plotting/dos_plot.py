@@ -141,7 +141,13 @@ class DOSPlotter:
         # Axis limits / labels
         # ------------------------------------------------------------------
         if energy_window is not None:
-            ax.set_xlim(energy_window)
+            # Clip window to actual data range to avoid abrupt cutoff cliffs
+            e_lo = max(energy_window[0], float(energies.min()))
+            e_hi = min(energy_window[1], float(energies.max()))
+            if e_lo < e_hi:
+                ax.set_xlim(e_lo, e_hi)
+            else:
+                ax.set_xlim(energy_window)
             # Auto-scale DOS axis to the visible window
             mask = (energies >= energy_window[0]) & (energies <= energy_window[1])
             if mask.any():

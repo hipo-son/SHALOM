@@ -221,6 +221,9 @@ def generate_dft_input(
             "backend": result.backend_name,
             "structure_info": result.structure_info,
             "auto_detected": result.auto_detected,
+            "structure_analysis": result.structure_analysis or {},
+            "calculation_parameters": result.calculation_parameters or {},
+            "detection_log": result.detection_log or [],
             "error": result.error,
         }
     except FileNotFoundError as exc:
@@ -261,7 +264,7 @@ def run_workflow(
     npoints_kpath: int = 40,
     structure_file: Optional[str] = None,
     dos_emin: float = -20.0,
-    dos_emax: float = 10.0,
+    dos_emax: float = 20.0,
     dos_deltaE: float = 0.01,
 ) -> dict:
     """Run the full 5-step QE workflow: vc-relax → scf → bands → nscf → dos.
@@ -319,6 +322,9 @@ def run_workflow(
             "bands_png": result.get("bands_png"),
             "dos_png": result.get("dos_png"),
             "calc_dirs": result.get("calc_dirs", {}),
+            "detection_log": result.get("detection_log", []),
+            "completed_steps": result.get("completed_steps", []),
+            "failed_step": result.get("failed_step"),
         }
         if source == "ase_bulk_fallback":
             response["warning"] = (
@@ -334,9 +340,18 @@ def run_workflow(
                 "Check that pw.x/dos.x are installed and pseudo_dir is set. "
                 "Run check_qe_setup to diagnose."
             ),
+            "detection_log": [],
+            "completed_steps": [],
+            "failed_step": None,
         }
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        return {
+            "success": False,
+            "error": str(exc),
+            "detection_log": [],
+            "completed_steps": [],
+            "failed_step": None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -1528,6 +1543,9 @@ def run_md(
             "output_dir": result.output_dir,
             "files_generated": result.files_generated,
             "auto_detected": result.auto_detected,
+            "structure_analysis": result.structure_analysis or {},
+            "calculation_parameters": result.calculation_parameters or {},
+            "detection_log": result.detection_log or [],
             "error": result.error,
         }
     except Exception as exc:
@@ -1586,6 +1604,101 @@ def analyze_md_trajectory(
         return response
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool 19: load_calc_context
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def load_calc_context(calc_dir: str) -> Dict[str, Any]:
+    """Load calculation context from a previous run directory.
+
+    Reads run_info.json and results_summary.json to reconstruct
+    what was calculated, with what parameters, and why those
+    settings were chosen.
+
+    Use this BEFORE running follow-up analyses, comparing results,
+    or planning new calculations on the same material.
+
+    Args:
+        calc_dir: Path to the calculation directory.
+    """
+    import glob
+    import json
+
+    d = os.path.abspath(os.path.expanduser(calc_dir))
+    if not os.path.isdir(d):
+        return {"success": False, "error": f"Directory not found: {calc_dir}"}
+
+    response: Dict[str, Any] = {"success": True, "calc_dir": d}
+
+    # 1. run_info.json (written by direct_run)
+    run_info_path = os.path.join(d, "run_info.json")
+    if os.path.isfile(run_info_path):
+        try:
+            with open(run_info_path, encoding="utf-8") as f:
+                response["run_info"] = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Could not read run_info.json: %s", exc)
+
+    # 2. results_summary.json (written by StandardWorkflow)
+    summary_path = os.path.join(d, "results_summary.json")
+    if os.path.isfile(summary_path):
+        try:
+            with open(summary_path, encoding="utf-8") as f:
+                response["results_summary"] = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Could not read results_summary.json: %s", exc)
+
+    # 3. Analysis result JSON files (*_results.json)
+    analysis_files: List[str] = []
+    for p in glob.glob(os.path.join(d, "*_results.json")):
+        analysis_files.append(os.path.basename(p))
+    # Also check workflow sub-step directories
+    _STEP_DIRS = ("01_vc_relax", "02_scf", "03_bands", "04_nscf")
+    for sub in _STEP_DIRS:
+        sub_path = os.path.join(d, sub)
+        if os.path.isdir(sub_path):
+            for p in glob.glob(os.path.join(sub_path, "*_results.json")):
+                analysis_files.append(f"{sub}/{os.path.basename(p)}")
+    if analysis_files:
+        response["analysis_results"] = sorted(analysis_files)
+
+    # 4. List important files (helps agent decide next action)
+    _IMPORTANT_PATTERNS = (
+        "*.in", "*.out", "*.xml", "*.png",
+        "POSCAR", "CONTCAR", "OUTCAR", "INCAR", "KPOINTS",
+        "*.dump", "*.log", "*.lammps",
+    )
+    available: set = set()
+    for pat in _IMPORTANT_PATTERNS:
+        for fp in glob.glob(os.path.join(d, pat)):
+            available.add(os.path.basename(fp))
+    # Sub-directories
+    try:
+        for sub in os.listdir(d):
+            sub_path = os.path.join(d, sub)
+            if os.path.isdir(sub_path):
+                for pat in _IMPORTANT_PATTERNS:
+                    for fp in glob.glob(os.path.join(sub_path, pat)):
+                        available.add(f"{sub}/{os.path.basename(fp)}")
+    except OSError:
+        pass
+    if available:
+        response["available_files"] = sorted(available)
+
+    # No context files at all
+    if "run_info" not in response and "results_summary" not in response:
+        return {
+            "success": False,
+            "calc_dir": d,
+            "error": "No context files (run_info.json or results_summary.json) found.",
+            "available_files": response.get("available_files", []),
+        }
+
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Structured Calculation Reports** (`run_info.json` v2, `results_summary.json` v3)
+  - `run_info.json` v2: `structure_info` (source, formula, mp_id), `structure_analysis` (natoms, elements, is_magnetic, is_2d, is_metal), `calculation_parameters`, `detection_log` (human-readable auto-detection trace)
+  - `results_summary.json` v3: `structure_analysis`, workflow-level `detection_log`, per-step `detection_log` in steps array
+  - `_build_structure_analysis(atoms)` utility in `direct_run.py`
+  - `to_summary_dict()` method on `VASPInputConfig`, `QEInputConfig`, `LAMMPSInputConfig`
+  - `_detection_log` field on all 3 config dataclasses — records auto-detected parameters with human-readable messages
+  - Detection log messages: ecutwfc/ecutrho (SSSP), k-grid (KPR), magnetic/2D/Hubbard hints, LAMMPS force field selection
+- **`load_calc_context` MCP tool** (`shalom/mcp_server.py`)
+  - Loads `run_info.json`, `results_summary.json`, and `*_results.json` from a calculation directory
+  - Lists important files (`.in`, `.out`, `.xml`, `.png`, VASP files) in root and workflow sub-step dirs
+  - Graceful handling: malformed JSON skipped, missing files tolerated, non-existent directory reported
+  - 13 tests in `test_mcp_load_context.py`
+  - Total MCP tools: 18 → 19
+- **Workflow detection_log propagation** (`shalom/workflows/standard.py`)
+  - `StepStatus` dataclass extended with `detection_log: Optional[List[str]]` field
+  - `_run_vc_relax()` returns `(Atoms, List[str])` tuple; `_run_scf/bands/nscf()` return `List[str]`
+  - All StepStatus creation sites (success/resume/failure/skip) explicitly set `detection_log=[]`
+  - `_build_result()` extended with `detection_log` parameter
+  - `run_workflow` MCP error responses include `detection_log`, `completed_steps`, `failed_step` keys
 - **LAMMPS Classical MD Backend** (`shalom/backends/lammps.py`, `lammps_config.py`)
   - `LAMMPSBackend`: `write_input()` (data.lammps + in.lammps script), `parse_output()` (log.lammps), `parse_trajectory()` (dump.lammpstrj → MDTrajectoryData)
   - `LAMMPSInputConfig` dataclass: ensemble, pair_style, pair_coeff, timestep, temperature, boundary, thermo/dump intervals
@@ -58,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP MD Tools** (`shalom/mcp_server.py`)
   - `run_md()`: run LAMMPS or VASP AIMD molecular dynamics
   - `analyze_md_trajectory()`: parse trajectory and run full analysis (RDF, MSD, diffusion)
-  - Total MCP tools: 16 → 18
+  - MCP tools: 16 → 18
 - **DFT Tutorial Notebooks** (`tutorials/`)
   - `01_silicon_complete_study.ipynb`: Si convergence tests (ecutwfc + kpoints), 5-step workflow (vc-relax→scf→bands→nscf→dos), phonon analysis (bands, DOS, thermal properties), XRD pattern, combined band+DOS figure
   - `02_fe2o3_magnetic_oxide.ipynb`: Fe2O3 spin-polarized DFT with GGA+U (Hubbard), magnetic analysis (site moments, Löwdin charges), DOS gap estimation, XRD pattern

@@ -117,12 +117,37 @@ class VASPInputConfig:
     initial_magmom: Optional[Dict[str, float]] = None
     is_2d: bool = False
     enmax_values: Optional[Dict[str, float]] = None
+    _detection_log: List[str] = field(default_factory=list)
 
     def get_merged_incar(self) -> Dict[str, Any]:
         """Return INCAR settings with user overrides applied on top of presets."""
         merged = dict(self.incar_settings)
         merged.update(self.user_incar_settings)
         return merged
+
+    def to_summary_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable summary of all calculation parameters."""
+        merged = self.get_merged_incar()
+        d: Dict[str, Any] = {
+            "calc_type": self.calc_type.value,
+            "accuracy": self.accuracy.value,
+            "functional": self.functional,
+            "potcar_preset": self.potcar_preset,
+        }
+        if merged:
+            d["incar"] = merged
+        if self.kpoints.grid:
+            d["kpoints_grid"] = self.kpoints.grid
+        if self.vdw_correction is not None:
+            d["vdw_correction_IVDW"] = self.vdw_correction
+        if self.ldau_settings:
+            d["ldau_settings"] = self.ldau_settings
+        if self.initial_magmom:
+            d["initial_magmom"] = self.initial_magmom
+        d["is_2d"] = self.is_2d
+        if self.enmax_values:
+            d["enmax_values_eV"] = self.enmax_values
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -239,12 +264,16 @@ def detect_and_apply_structure_hints(
     # 1. Magnetic element detection
     has_magnetic = any(el in MAGNETIC_ELEMENTS for el in unique_elements)
     if has_magnetic:
+        mag_els = sorted(el for el in unique_elements if el in MAGNETIC_ELEMENTS)
         config.incar_settings["ISPIN"] = 2
         magmom_list = [DEFAULT_MAGMOM.get(s, 0.6) for s in symbols]
         config.incar_settings["MAGMOM"] = magmom_list
         config.initial_magmom = {
             el: DEFAULT_MAGMOM[el] for el in unique_elements if el in DEFAULT_MAGMOM
         }
+        config._detection_log.append(
+            f"Magnetic elements {mag_els} → ISPIN=2, MAGMOM set"
+        )
 
     # 2. GGA+U auto-detection (TMO / chalcogenides)
     has_anion = any(el in ANION_ELEMENTS for el in unique_elements)
@@ -252,6 +281,11 @@ def detect_and_apply_structure_hints(
     if has_magnetic and has_anion and magnetic_tm:
         u_elements = [el for el in magnetic_tm if HUBBARD_U_VALUES[el][1] > 0.0]
         if u_elements:
+            if config.accuracy != AccuracyLevel.PRECISE:
+                config._detection_log.append(
+                    f"TMO: {u_elements} with anions → GGA+U disabled "
+                    f"(STANDARD accuracy; set accuracy='precise' to enable)"
+                )
             if config.accuracy == AccuracyLevel.PRECISE:
                 # Auto-enable GGA+U
                 all_elements_ordered = list(dict.fromkeys(symbols))
@@ -277,6 +311,10 @@ def detect_and_apply_structure_hints(
                     "LDAUPRINT": 1,
                     "elements_order": all_elements_ordered,
                 }
+                config._detection_log.append(
+                    f"TMO: {u_elements} with anions → GGA+U enabled: "
+                    f"{{{', '.join(f'{el}: {HUBBARD_U_VALUES[el][1]}' for el in u_elements)}}}"
+                )
                 if config.functional != "PBE":
                     logger.warning(
                         "GGA+U enabled with functional='%s', but Hubbard U "
@@ -292,6 +330,14 @@ def detect_and_apply_structure_hints(
             config.incar_settings["ISIF"] = 4  # Prevent vacuum collapse
         config.vdw_correction = 12  # D3(BJ) preferred over D3
         config.incar_settings["IVDW"] = 12
+        if config.calc_type == CalculationType.RELAXATION:
+            config._detection_log.append(
+                "2D structure → ISIF=4, IVDW=12 (D3-BJ)"
+            )
+        else:
+            config._detection_log.append(
+                "2D structure → IVDW=12 (D3-BJ)"
+            )
 
     # 3b. Slab detection (vacuum > 5A but not 2D monolayer)
     if not config.is_2d:
@@ -305,21 +351,31 @@ def detect_and_apply_structure_hints(
                     config.incar_settings["ISIF"] = 2
                 config.incar_settings["IDIPOL"] = 3
                 config.incar_settings["LDIPOL"] = True
+                config._detection_log.append(
+                    f"Slab detected (vacuum={_vacuum:.1f} Å) → ISIF=2, dipole correction"
+                )
 
     # 4. Pure metal detection
     if _is_pure_metal(unique_elements):
         config.incar_settings["ISMEAR"] = 1
         config.incar_settings["SIGMA"] = METAL_SIGMA
         config.incar_settings["ALGO"] = "Fast"
+        config._detection_log.append(
+            f"Pure metal {sorted(unique_elements)} → ISMEAR=1, SIGMA={METAL_SIGMA}"
+        )
 
     # 5. LMAXMIX
     lmaxmix = _get_lmaxmix(atomic_numbers)
     if lmaxmix is not None:
         config.incar_settings["LMAXMIX"] = lmaxmix
+        config._detection_log.append(f"d/f electrons → LMAXMIX={lmaxmix}")
 
     # 6. KPOINTS grid with 2D handling
     config.kpoints.grid = compute_kpoints_grid(
         atoms, kpr=config.kpoints.kpoints_resolution, is_2d=config.is_2d,
+    )
+    config._detection_log.append(
+        f"K-grid {config.kpoints.grid} from kpr={config.kpoints.kpoints_resolution}"
     )
 
     # 7. Dynamic ENCUT
@@ -327,6 +383,11 @@ def detect_and_apply_structure_hints(
     config.enmax_values = element_enmax
     encut = compute_encut(unique_elements, config.accuracy, element_enmax)
     config.incar_settings["ENCUT"] = encut
+    multiplier = (ENCUT_MULTIPLIER_STANDARD if config.accuracy == AccuracyLevel.STANDARD
+                  else ENCUT_MULTIPLIER_PRECISE)
+    config._detection_log.append(
+        f"ENCUT={encut} eV (max ENMAX × {multiplier})"
+    )
 
     return config
 
