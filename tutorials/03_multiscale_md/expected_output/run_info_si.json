@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "timestamp": "2026-03-04T18:35:14.402407",
+  "backend": "lammps",
+  "calc_type": "relaxation",
+  "structure_info": {
+    "source": "ase_bulk",
+    "formula": "Si2",
+    "note": "Built from ASE bulk (idealized structure). For accurate results, use an MP ID or structure file."
+  },
+  "structure_analysis": {
+    "formula": "Si2",
+    "natoms": 2,
+    "elements": [
+      "Si"
+    ],
+    "is_magnetic": false,
+    "is_2d": false,
+    "is_metal": false
+  },
+  "auto_detected": {
+    "pair_style": "tersoff",
+    "detected_ff": "tersoff",
+    "timestep": 0.5,
+    "is_2d": false
+  },
+  "calculation_parameters": {
+    "ensemble": "nvt",
+    "temperature_K": 300.0,
+    "timestep_fs": 0.5,
+    "nsteps": 100000,
+    "units": "metal",
+    "atom_style": "atomic",
+    "boundary": "p p p",
+    "accuracy": "standard",
+    "is_2d": false,
+    "minimize_first": true,
+    "pair_style": "tersoff",
+    "pair_coeff": [
+      "* * Si.tersoff Si"
+    ],
+    "detected_ff": "tersoff",
+    "potential_files": [
+      "Si.tersoff"
+    ],
+    "temperature_damp_fs": 50.0,
+    "thermo_interval": 100,
+    "dump_interval": 100
+  },
+  "detection_log": [
+    "Force field: tersoff (pair_style=tersoff)",
+    "Timestep=0.5 fs (default for tersoff)"
+  ],
+  "files_generated": [
+    "data.lammps",
+    "in.lammps"
+  ]
+}

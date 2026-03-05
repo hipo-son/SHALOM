@@ -10,27 +10,36 @@ tutorials/
 ├── 01_silicon/                    # Si: convergence, bands, DOS, phonons, XRD
 │   ├── notebook.ipynb
 │   └── expected_output/           # Reference results for validation
-│       ├── bands.png
-│       ├── dos.png
-│       ├── xrd.png
-│       ├── results_summary.json
+│       ├── si_combined_band_dos.png
+│       ├── si_xrd.png
+│       ├── si_phonon_bands.png
+│       ├── si_phonon_dos.png
+│       ├── si_thermal_properties.png
+│       ├── results_summary.json     # v3 workflow report
 │       ├── electronic_results.json
 │       ├── symmetry_results.json
 │       └── xrd_results.json
 ├── 02_fe2o3/                      # Fe2O3: spin-polarized, GGA+U, magnetic
 │   ├── notebook.ipynb
 │   └── expected_output/
-│       ├── dos.png
-│       ├── dos_spin.png
-│       └── xrd.png
+│       ├── fe2o3_dos_spin.png
+│       ├── fe2o3_xrd.png
+│       ├── results_summary.json     # v3 workflow report
+│       ├── symmetry_results.json
+│       ├── xrd_results.json
+│       └── magnetic_results.json
 ├── 03_multiscale_md/              # Fe/Si/Ar: LAMMPS MD, VASP AIMD, analysis
 │   ├── notebook.ipynb
 │   └── expected_output/
-│       ├── md_energy.png
-│       ├── md_temperature.png
-│       ├── md_rdf.png
-│       ├── md_msd.png
-│       └── md_analysis_results.json
+│       ├── fe_md_energy.png
+│       ├── fe_md_temperature.png
+│       ├── fe_md_rdf.png
+│       ├── fe_md_msd.png
+│       ├── fe_md_vacf.png
+│       ├── md_analysis_results.json
+│       ├── run_info_fe.json         # v2 structured run info
+│       ├── run_info_si.json
+│       └── run_info_ar.json
 └── README.md
 ```
 
@@ -86,6 +95,18 @@ correctness.
 
 > **Note**: Tutorial 03 does not require external software (QE, VASP, LAMMPS).
 > It generates input files and uses synthetic trajectories for analysis/plotting.
+
+### Structured Report Files
+
+Each tutorial demonstrates SHALOM's structured calculation reporting:
+
+- **`results_summary.json`** (v3) — Written by `StandardWorkflow.run()`. Contains
+  structure analysis, per-step timing, detection log (auto-detected parameters),
+  Fermi energy, and plot paths.
+- **`run_info.json`** (v2) — Written by `direct_run()`. Contains structure analysis,
+  auto-detected settings, detection log, and backend/calc_type metadata.
+- **`*_results.json`** — Analysis results from `save_result_json()` (symmetry,
+  electronic, XRD, magnetic, MD).
 
 ## Configuration
 

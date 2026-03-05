@@ -1,0 +1,10 @@
+{
+  "total_magnetization_bohr_mag": 20.0,
+  "is_magnetic": true,
+  "is_spin_polarized": true,
+  "site_magnetizations_bohr_mag": null,
+  "site_charges": null,
+  "lowdin_charges": null,
+  "magnetic_elements": [],
+  "dominant_moment_element": null
+}

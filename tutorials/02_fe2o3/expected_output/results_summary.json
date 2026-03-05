@@ -1,0 +1,101 @@
+{
+  "version": 3,
+  "timestamp": "2026-03-05T03:53:14.509423",
+  "material_formula": "Fe4O6",
+  "accuracy": "precise",
+  "pseudo_dir": "C:\\Users\\Sejong\\pseudopotentials",
+  "is_2d": false,
+  "structure_analysis": {
+    "formula": "Fe4O6",
+    "natoms": 10,
+    "elements": [
+      "Fe",
+      "O"
+    ],
+    "is_magnetic": true,
+    "is_2d": false,
+    "is_metal": false,
+    "magnetic_elements": [
+      "Fe"
+    ]
+  },
+  "detection_log": [
+    "Magnetic elements ['Fe'] \u2192 nspin=2, starting_magnetization set",
+    "TMO: ['Fe'] with anions \u2192 Hubbard U: {Fe: 5.3}",
+    "ecutwfc=108 Ry, ecutrho=1296 Ry (SSSP)",
+    "K-grid [7, 7, 7] from kpr=30.0"
+  ],
+  "fermi_energy_eV": 12.2317,
+  "bands_png": null,
+  "dos_png": "C:\\Users\\Sejong\\Desktop\\shalom-tutorials\\fe2o3_study\\workflow\\dos.png",
+  "calc_dirs": {
+    "vc_relax": "C:\\Users\\Sejong\\Desktop\\shalom-tutorials\\fe2o3_study\\workflow\\01_vc_relax",
+    "scf": "C:\\Users\\Sejong\\Desktop\\shalom-tutorials\\fe2o3_study\\workflow\\02_scf",
+    "bands": "C:\\Users\\Sejong\\Desktop\\shalom-tutorials\\fe2o3_study\\workflow\\03_bands",
+    "nscf": "C:\\Users\\Sejong\\Desktop\\shalom-tutorials\\fe2o3_study\\workflow\\04_nscf"
+  },
+  "completed_steps": [
+    "vc_relax",
+    "scf",
+    "nscf",
+    "dos"
+  ],
+  "failed_step": "bands",
+  "steps": [
+    {
+      "name": "vc_relax",
+      "step_number": 1,
+      "success": true,
+      "elapsed_seconds": 0,
+      "summary": "skipped",
+      "error_message": "",
+      "detection_log": []
+    },
+    {
+      "name": "scf",
+      "step_number": 2,
+      "success": true,
+      "elapsed_seconds": 3031.16,
+      "summary": "E=-21312.2681 eV, Ef=11.9509 eV, converged",
+      "error_message": "",
+      "detection_log": [
+        "Magnetic elements ['Fe'] \u2192 nspin=2, starting_magnetization set",
+        "TMO: ['Fe'] with anions \u2192 Hubbard U: {Fe: 5.3}",
+        "ecutwfc=108 Ry, ecutrho=1296 Ry (SSSP)",
+        "K-grid [7, 7, 7] from kpr=30.0"
+      ]
+    },
+    {
+      "name": "bands",
+      "step_number": 3,
+      "success": false,
+      "elapsed_seconds": 5400.02,
+      "summary": "",
+      "error_message": "pw.x failed in C:\\Users\\Sejong\\Desktop\\shalom-tutorials\\fe2o3_study\\workflow\\03_bands: Process exited with code 1",
+      "detection_log": []
+    },
+    {
+      "name": "nscf",
+      "step_number": 4,
+      "success": true,
+      "elapsed_seconds": 5250.62,
+      "summary": "",
+      "error_message": "",
+      "detection_log": [
+        "Magnetic elements ['Fe'] \u2192 nspin=2, starting_magnetization set",
+        "TMO: ['Fe'] with anions \u2192 Hubbard U: {Fe: 5.3}",
+        "ecutwfc=108 Ry, ecutrho=1296 Ry (SSSP)",
+        "K-grid [7, 7, 7] from kpr=30.0"
+      ]
+    },
+    {
+      "name": "dos",
+      "step_number": 5,
+      "success": true,
+      "elapsed_seconds": 13.64,
+      "summary": "",
+      "error_message": "",
+      "detection_log": []
+    }
+  ]
+}
