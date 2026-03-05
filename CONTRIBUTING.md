@@ -27,7 +27,7 @@ Thank you for your interest in contributing to SHALOM! We welcome contributions 
 - **Code Style**: We strictly enforce `black` for formatting and `ruff` for linting.
 - **Type Hinting**: All code must include Python type hints, checked using `mypy`.
 - **Docstrings**: We use the *Google Style* for docstrings (in English) across all classes and methods.
-- **Tests**: All new features and bug fixes must include tests. High test coverage (>85%) is expected. We use `pytest`. Current baseline: ~1724 tests.
+- **Tests**: All new features and bug fixes must include tests. High test coverage (>95%) is expected. We use `pytest`. Current baseline: ~1780 tests.
 
 ## Adding New Components
 

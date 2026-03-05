@@ -79,9 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `analyze_md_trajectory()`: parse trajectory and run full analysis (RDF, MSD, diffusion)
   - MCP tools: 16 → 18
 - **DFT Tutorial Notebooks** (`tutorials/`)
-  - `01_silicon_complete_study.ipynb`: Si convergence tests (ecutwfc + kpoints), 5-step workflow (vc-relax→scf→bands→nscf→dos), phonon analysis (bands, DOS, thermal properties), XRD pattern, combined band+DOS figure
-  - `02_fe2o3_magnetic_oxide.ipynb`: Fe2O3 spin-polarized DFT with GGA+U (Hubbard), magnetic analysis (site moments, Löwdin charges), DOS gap estimation, XRD pattern
-  - `03_multiscale_md_pipeline.ipynb`: Fe/Si/Ar LAMMPS MD + VASP AIMD input generation, synthetic trajectory analysis (RDF, MSD, VACF, diffusion), MD plotting — no external software required (~5 min)
+  - `01_silicon/notebook.ipynb`: Si convergence tests (ecutwfc + kpoints), 5-step workflow (vc-relax→scf→bands→nscf→dos), phonon analysis (bands, DOS, thermal properties), XRD pattern, combined band+DOS figure
+  - `02_fe2o3/notebook.ipynb`: Fe2O3 spin-polarized DFT with GGA+U (Hubbard), magnetic analysis (site moments, Löwdin charges), DOS gap estimation, XRD pattern
+  - `03_multiscale_md/notebook.ipynb`: Fe/Si/Ar LAMMPS MD + VASP AIMD input generation, synthetic trajectory analysis (RDF, MSD, VACF, diffusion), MD plotting — no external software required (~5 min)
   - `tutorials/README.md`: prerequisites, configuration, output directory structure
 - **QE 7.1+ HUBBARD card syntax** (`shalom/backends/qe.py`)
   - Automatic migration from old `lda_plus_u` / `Hubbard_U(i)` namelist entries to `HUBBARD (ortho-atomic)` card
@@ -295,7 +295,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All Pydantic `Field` descriptions translated to English
 - `ruff` and `mypy` target versions aligned to `py39` (minimum supported)
 - `anthropic` minimum version raised to `>=0.25.0`
-- Coverage threshold unified to 85% across CI, `pyproject.toml`, and `CONTRIBUTING.md`
+- Coverage threshold unified to 95% across CI, `pyproject.toml`, and `CONTRIBUTING.md`
 
 ## [0.1.0] - 2026-02-22
 

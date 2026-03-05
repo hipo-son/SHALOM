@@ -67,13 +67,13 @@ shalom/
 tutorials/
 ├── 01_silicon/
 │   ├── notebook.ipynb                # Si: convergence, bands, DOS, phonons, XRD (~30 min)
-│   └── expected_output/              # Reference bands.png, dos.png, xrd.png, JSON results
+│   └── expected_output/              # si_*.png, results_summary/electronic/symmetry/xrd JSONs
 ├── 02_fe2o3/
 │   ├── notebook.ipynb                # Fe2O3: spin-polarized, GGA+U, magnetic analysis (~45 min)
-│   └── expected_output/              # Reference dos.png, dos_spin.png, xrd.png
+│   └── expected_output/              # fe2o3_*.png, results_summary/magnetic/symmetry/xrd JSONs
 ├── 03_multiscale_md/
 │   ├── notebook.ipynb                # Fe/Si/Ar: LAMMPS MD, VASP AIMD, RDF, MSD, diffusion (~5 min)
-│   └── expected_output/              # Reference md_*.png, md_analysis_results.json
+│   └── expected_output/              # fe_md_*.png, run_info_*.json, md_analysis_results.json
 └── README.md                         # Prerequisites, configuration, expected output
 ```
 
@@ -101,7 +101,7 @@ tutorials/
 
 **Quick tests** (mock-based, ~20s, no external deps):
 ```bash
-pytest tests/                          # default: ~1724 tests, coverage ≥85%
+pytest tests/                          # default: ~1780 tests, coverage ≥95%
 pytest tests/ -x --no-cov             # fast, stop on first failure
 conda run -n shalom-env python -m pytest tests/   # Windows/bash
 ```

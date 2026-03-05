@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/hipo-son/SHALOM/actions"><img src="https://github.com/hipo-son/SHALOM/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
-  <a href="https://codecov.io/gh/hipo-son/SHALOM"><img src="https://codecov.io/gh/hipo-son/SHALOM/branch/main/graph/badge.svg" alt="Coverage (>85%)"></a>
+  <a href="https://codecov.io/gh/hipo-son/SHALOM"><img src="https://codecov.io/gh/hipo-son/SHALOM/branch/main/graph/badge.svg" alt="Coverage (>95%)"></a>
   <!-- PyPI badge — uncomment after publishing to PyPI: -->
   <!-- <a href="https://pypi.org/project/shalom/"><img src="https://img.shields.io/pypi/v/shalom.svg" alt="PyPI version"></a> -->
   <!-- ReadTheDocs badge — uncomment after RTD project setup: -->
@@ -340,9 +340,9 @@ Step-by-step Jupyter notebooks with real QE calculations — see [`tutorials/`](
 
 | Notebook | Material | What You'll Learn | Time |
 |----------|----------|-------------------|------|
-| `01_silicon_complete_study.ipynb` | Si | Convergence tests, bands, DOS, phonons, XRD | ~30 min |
-| `02_fe2o3_magnetic_oxide.ipynb` | Fe2O3 | Spin-polarized DFT, GGA+U (Hubbard), magnetic analysis | ~45-60 min |
-| `03_multiscale_md_pipeline.ipynb` | Fe/Si/Ar | LAMMPS MD, VASP AIMD, RDF, MSD, diffusion | ~5 min |
+| [`01_silicon/notebook.ipynb`](tutorials/01_silicon/notebook.ipynb) | Si | Convergence tests, bands, DOS, phonons, XRD | ~30 min |
+| [`02_fe2o3/notebook.ipynb`](tutorials/02_fe2o3/notebook.ipynb) | Fe2O3 | Spin-polarized DFT, GGA+U (Hubbard), magnetic analysis | ~45-60 min |
+| [`03_multiscale_md/notebook.ipynb`](tutorials/03_multiscale_md/notebook.ipynb) | Fe/Si/Ar | LAMMPS MD, VASP AIMD, RDF, MSD, diffusion | ~5 min |
 
 Prerequisites: QE 7.1+, SSSP pseudopotentials, `pip install -e ".[all]"`. See [tutorials/README.md](tutorials/README.md) for details.
 
