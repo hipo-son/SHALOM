@@ -1743,3 +1743,215 @@ class TestAccuracyLevelCached:
         si = bulk("Si", "diamond", a=5.43)
         wf = StandardWorkflow(atoms=si, output_dir="/tmp/test", accuracy="precise")
         assert wf._accuracy_level == AccuracyLevel.PRECISE
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Resume/checkpoint paths, error handlers, plot failures
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowResume:
+    """Test resumed step paths (lines 232-242, 326-330, 369-373, 397-400)."""
+
+    def _make_checkpoint(self, output_dir, completed_steps):
+        """Create a workflow_state.json checkpoint file."""
+        import json
+        ckpt = {"version": 1, "completed_steps": completed_steps}
+        ckpt_path = os.path.join(output_dir, "workflow_state.json")
+        with open(ckpt_path, "w") as f:
+            json.dump(ckpt, f)
+
+    def test_resume_vc_relax(self, tmp_path):
+        """vc-relax already in checkpoint → step skipped with 'resumed'."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), nprocs=1, resume=True,
+        )
+
+        (tmp_path / "01_vc_relax").mkdir()
+        self._make_checkpoint(str(tmp_path), ["vc_relax"])
+
+        with patch.object(wf, "_validate_environment"), \
+             patch.object(wf, "_run_scf", side_effect=RuntimeError("SCF crash")):
+            result = wf.run()
+
+        assert any(s.name == "vc_relax" and s.summary == "resumed"
+                    for s in result["step_results"])
+
+    def test_resume_vc_relax_recovers_atoms_from_pw_out(self, tmp_path):
+        """Resumed vc-relax reads atoms from pw.out if available."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), nprocs=1, resume=True,
+        )
+
+        relax_dir = tmp_path / "01_vc_relax"
+        relax_dir.mkdir()
+        pw_out = relax_dir / "pw.out"
+        pw_out.write_text("fake output")
+        self._make_checkpoint(str(tmp_path), ["vc_relax"])
+
+        with patch.object(wf, "_validate_environment"), \
+             patch("shalom.workflows.standard.ase_read") as mock_read, \
+             patch.object(wf, "_run_scf", side_effect=RuntimeError("stop")):
+            mock_read.return_value = si
+            result = wf.run()
+
+        mock_read.assert_called_once()
+
+    def test_resume_bands(self, tmp_path):
+        """bands already in checkpoint → step skipped."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), nprocs=1, resume=True,
+        )
+
+        for d in ["01_vc_relax", "02_scf", "03_bands", "04_nscf"]:
+            (tmp_path / d).mkdir()
+        # SCF needs pw.out to be recognized as done
+        (tmp_path / "02_scf" / "pw.out").write_text("dummy scf output\n")
+        self._make_checkpoint(str(tmp_path), ["vc_relax", "scf", "bands"])
+
+        with patch.object(wf, "_validate_environment"), \
+             patch.object(wf, "_run_nscf", side_effect=RuntimeError("stop")):
+            result = wf.run()
+
+        assert any(s.name == "bands" and s.summary == "resumed"
+                    for s in result["step_results"])
+
+    def test_resume_nscf(self, tmp_path):
+        """nscf already in checkpoint → step skipped."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), nprocs=1, resume=True,
+        )
+
+        for d in ["01_vc_relax", "02_scf", "03_bands", "04_nscf"]:
+            (tmp_path / d).mkdir()
+        (tmp_path / "02_scf" / "pw.out").write_text("dummy scf output\n")
+        self._make_checkpoint(str(tmp_path), ["vc_relax", "scf", "bands", "nscf"])
+
+        with patch.object(wf, "_validate_environment"), \
+             patch.object(wf, "_run_dos", side_effect=RuntimeError("no dos.x")):
+            result = wf.run()
+
+        assert any(s.name == "nscf" and s.summary == "resumed"
+                    for s in result["step_results"])
+
+    def test_resume_dos(self, tmp_path):
+        """dos already in checkpoint → step skipped."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(
+            atoms=si, output_dir=str(tmp_path), nprocs=1, resume=True,
+        )
+
+        for d in ["01_vc_relax", "02_scf", "03_bands", "04_nscf"]:
+            (tmp_path / d).mkdir()
+        (tmp_path / "02_scf" / "pw.out").write_text("dummy scf output\n")
+        self._make_checkpoint(str(tmp_path),
+                              ["vc_relax", "scf", "bands", "nscf", "dos"])
+
+        with patch.object(wf, "_validate_environment"), \
+             patch.object(wf, "_plot_bands", return_value=None), \
+             patch.object(wf, "_plot_dos", return_value=None):
+            result = wf.run()
+
+        assert any(s.name == "dos" and s.summary == "resumed"
+                    for s in result["step_results"])
+
+
+class TestWorkflowErrorHandlers:
+    """Test error/exception handler paths."""
+
+    def test_results_summary_oserror(self, tmp_path):
+        """OSError writing results_summary.json → warning, no crash."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        result = {"atoms": si, "fermi_energy": 5.0}
+
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            # Should not raise
+            wf._save_results_summary(result, [])
+
+    def test_scf_summary_parse_exception(self, tmp_path):
+        """_extract_pw_summary handles exceptions gracefully."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+
+        # Non-existent file
+        result = wf._extract_pw_summary("/nonexistent/pw.out")
+        assert result == ""
+
+    def test_formula_extraction_exception(self, tmp_path):
+        """Formula extraction failure in _save_results_summary → None formula."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+        mock_atoms = MagicMock()
+        mock_atoms.get_chemical_formula.side_effect = Exception("broken")
+
+        result = {"atoms": mock_atoms, "fermi_energy": 5.0}
+        # Should not raise
+        wf._save_results_summary(result, [])
+
+
+class TestWorkflowPlotFailures:
+    """Test plot error paths (lines 868-870, 878-880, 895-897)."""
+
+    def test_band_plot_exception(self, tmp_path):
+        """BandStructurePlotter.plot() raises → returns None."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+
+        # Create a fake XML file so find_xml_path + parse_xml_bands succeed
+        mock_bs = MagicMock()
+        mock_bs.kpath_labels = {}
+        mock_bs.kpath_distances = MagicMock()
+        mock_bs.kpath_distances.__len__ = lambda self: 0
+
+        with patch("shalom.workflows.standard.find_xml_path", return_value="/fake.xml"), \
+             patch("shalom.workflows.standard.parse_xml_bands", return_value=mock_bs), \
+             patch(
+                "shalom.plotting.band_plot.BandStructurePlotter",
+                side_effect=RuntimeError("plot crash"),
+             ):
+            result = wf._plot_bands(str(tmp_path), 5.0)
+
+        assert result is None
+
+    def test_dos_matplotlib_missing(self, tmp_path):
+        """matplotlib not installed → returns None."""
+        import sys
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+
+        # Remove the module from cache so the local import fails
+        saved = sys.modules.pop("shalom.plotting.dos_plot", None)
+        try:
+            with patch.dict("sys.modules", {"shalom.plotting.dos_plot": None}):
+                result = wf._plot_dos(str(tmp_path), None)
+        finally:
+            if saved is not None:
+                sys.modules["shalom.plotting.dos_plot"] = saved
+
+        assert result is None
+
+    def test_dos_plot_exception(self, tmp_path):
+        """DOSPlotter.plot() raises → returns None."""
+        si = bulk("Si", "diamond", a=5.43)
+        wf = StandardWorkflow(atoms=si, output_dir=str(tmp_path))
+
+        # Create a fake dos file
+        dos_file = tmp_path / "pwscf.dos"
+        dos_file.write_text("# E DOS IDOS\n0.0 1.0 0.0\n")
+
+        with patch("shalom.backends.qe_parser.parse_dos_file") as mock_parse, \
+             patch(
+                "shalom.plotting.dos_plot.DOSPlotter",
+             ) as mock_cls:
+            mock_parse.return_value = MagicMock()
+            mock_plotter = MagicMock()
+            mock_plotter.plot.side_effect = RuntimeError("plot crash")
+            mock_cls.return_value = mock_plotter
+            result = wf._plot_dos(str(tmp_path), 5.0)
+
+        assert result is None

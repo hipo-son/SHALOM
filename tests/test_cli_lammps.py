@@ -186,3 +186,151 @@ class TestMCPTools:
         mcp = pytest.importorskip("mcp", reason="mcp package not installed")
         from shalom.mcp_server import analyze_md_trajectory
         assert callable(analyze_md_trajectory)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: direct_run LAMMPS paths, _resolve_calc_type, _write_run_info
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch
+
+
+class TestResolveCalcType:
+    """Test _resolve_calc_type (direct_run.py lines 318-326)."""
+
+    def test_none_defaults_to_relaxation(self):
+        from shalom.direct_run import _resolve_calc_type
+        assert _resolve_calc_type(None, "vasp") == "relaxation"
+
+    def test_known_alias(self):
+        from shalom.direct_run import _resolve_calc_type
+        assert _resolve_calc_type("scf", "qe") == "static"
+
+    def test_unknown_defaults_to_relaxation(self):
+        from shalom.direct_run import _resolve_calc_type
+        result = _resolve_calc_type("imaginary_calc", "vasp")
+        assert result == "relaxation"
+
+    def test_aimd_alias(self):
+        from shalom.direct_run import _resolve_calc_type
+        assert _resolve_calc_type("aimd", "vasp") == "aimd"
+
+
+class TestWriteRunInfo:
+    """Test _write_run_info (direct_run.py lines 282-315)."""
+
+    def test_writes_json_file(self, tmp_path):
+        import json
+        from shalom.direct_run import _write_run_info
+        _write_run_info(
+            str(tmp_path), "qe", "scf", {"source": "test"}, {"ecutwfc": 60},
+            ["pw.in"], structure_analysis={"formula": "Si"},
+        )
+        info_path = tmp_path / "run_info.json"
+        assert info_path.exists()
+        data = json.loads(info_path.read_text())
+        assert data["backend"] == "qe"
+        assert data["structure_analysis"]["formula"] == "Si"
+
+    def test_oserror_no_crash(self, tmp_path):
+        from shalom.direct_run import _write_run_info
+        with patch("builtins.open", side_effect=OSError("disk full")):
+            # Should not raise
+            _write_run_info(
+                str(tmp_path), "vasp", "relaxation", None, None, [],
+            )
+
+
+class TestDirectRunLAMMPSPath:
+    """Test direct_run with LAMMPS backend (direct_run.py lines 559-584)."""
+
+    def test_lammps_backend_calls_get_lammps_preset(self, tmp_path):
+        from shalom.direct_run import direct_run, DirectRunConfig
+
+        config = DirectRunConfig(
+            backend_name="lammps",
+            calc_type="md",
+            output_dir=str(tmp_path),
+        )
+
+        mock_lammps_config = MagicMock()
+        mock_lammps_config.pair_style = "lj/cut"
+        mock_lammps_config.detected_ff = "LJ"
+        mock_lammps_config.timestep = 1.0
+        mock_lammps_config.is_2d = False
+        mock_lammps_config.to_summary_dict.return_value = {}
+        mock_lammps_config._detection_log = ["auto LJ"]
+        mock_lammps_config.potential_files = []
+
+        mock_backend = MagicMock()
+        mock_backend.name = "lammps"
+        mock_backend.write_input.return_value = str(tmp_path)
+
+        with patch("shalom.direct_run.get_backend", return_value=mock_backend), \
+             patch("shalom.backends.lammps_config.get_lammps_preset", return_value=mock_lammps_config) as mock_preset, \
+             patch("shalom.direct_run._resolve_workspace", return_value=str(tmp_path)), \
+             patch("shalom.direct_run.ase_read") as mock_read:
+            mock_atoms = MagicMock()
+            mock_atoms.get_chemical_formula.return_value = "Ar"
+            mock_read.return_value = mock_atoms
+            result = direct_run("Ar", config)
+
+        mock_preset.assert_called_once()
+        assert result.success
+
+    def test_lammps_pair_style_override_clears_potentials(self, tmp_path):
+        from shalom.direct_run import direct_run, DirectRunConfig
+
+        config = DirectRunConfig(
+            backend_name="lammps",
+            calc_type="md",
+            output_dir=str(tmp_path),
+            user_settings={"pair_style": "lj/cut 10.0", "pair_coeff": "* * 1.0 3.4"},
+        )
+
+        mock_lammps_config = MagicMock()
+        mock_lammps_config.pair_style = "eam/alloy"
+        mock_lammps_config.detected_ff = "EAM"
+        mock_lammps_config.timestep = 1.0
+        mock_lammps_config.is_2d = False
+        mock_lammps_config.to_summary_dict.return_value = {}
+        mock_lammps_config._detection_log = []
+        mock_lammps_config.potential_files = ["Fe.eam.alloy"]
+
+        mock_backend = MagicMock()
+        mock_backend.name = "lammps"
+        mock_backend.write_input.return_value = str(tmp_path)
+
+        with patch("shalom.direct_run.get_backend", return_value=mock_backend), \
+             patch("shalom.backends.lammps_config.get_lammps_preset", return_value=mock_lammps_config), \
+             patch("shalom.direct_run._resolve_workspace", return_value=str(tmp_path)), \
+             patch("shalom.direct_run.ase_read") as mock_read:
+            mock_atoms = MagicMock()
+            mock_atoms.get_chemical_formula.return_value = "Fe"
+            mock_read.return_value = mock_atoms
+            result = direct_run("Fe", config)
+
+        # potential_files should be cleared when pair_style is overridden
+        assert mock_lammps_config.potential_files == []
+
+
+class TestBuildStructureAnalysis:
+    """Test _build_structure_analysis (direct_run.py lines 95-112)."""
+
+    def test_magnetic_elements_detected(self):
+        from shalom.direct_run import _build_structure_analysis
+        from ase import Atoms
+        atoms = Atoms("Fe2O3", positions=[[0]*3]*5,
+                       cell=[5, 5, 5], pbc=True)
+        result = _build_structure_analysis(atoms)
+        assert result["is_magnetic"] is True
+        assert "Fe" in result["magnetic_elements"]
+
+    def test_non_magnetic(self):
+        from shalom.direct_run import _build_structure_analysis
+        from ase import Atoms
+        atoms = Atoms("Si2", positions=[[0, 0, 0], [1.35, 1.35, 1.35]],
+                       cell=[2.7, 2.7, 2.7], pbc=True)
+        result = _build_structure_analysis(atoms)
+        assert result["is_magnetic"] is False
+        assert "magnetic_elements" not in result

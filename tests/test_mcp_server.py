@@ -1239,3 +1239,706 @@ class TestPipelineConfigBaseUrl:
             model_name="gpt-4o",
             base_url="http://localhost:11434/v1",
         )
+
+
+# ===========================================================================
+# Test: analyze_elastic (MCP tool 11)
+# ===========================================================================
+
+class TestAnalyzeElastic:
+    """Tests for the analyze_elastic MCP tool."""
+
+    _TENSOR_JSON = (
+        "[[165.7,63.9,63.9,0,0,0],[63.9,165.7,63.9,0,0,0],"
+        "[63.9,63.9,165.7,0,0,0],[0,0,0,79.6,0,0],"
+        "[0,0,0,0,79.6,0],[0,0,0,0,0,79.6]]"
+    )
+
+    def test_success(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            bulk_modulus_vrh=97.8,
+            shear_modulus_vrh=51.1,
+            youngs_modulus=130.0,
+            poisson_ratio=0.27,
+            universal_anisotropy=0.04,
+            is_stable=True,
+            stability_violations=[],
+        )
+        with patch("shalom.analysis.elastic.is_elastic_available", return_value=True), \
+             patch("shalom.analysis.elastic.analyze_elastic_tensor",
+                   return_value=mock_result):
+            result = mod.analyze_elastic(elastic_tensor_json=self._TENSOR_JSON)
+
+        assert result["success"] is True
+        assert result["bulk_modulus_GPa"] == 97.8
+        assert result["is_mechanically_stable"] is True
+
+    def test_unavailable(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.elastic.is_elastic_available", return_value=False):
+            result = mod.analyze_elastic(elastic_tensor_json=self._TENSOR_JSON)
+
+        assert result["success"] is False
+        assert "pymatgen" in result["error"]
+
+    def test_invalid_json(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.elastic.is_elastic_available", return_value=True):
+            result = mod.analyze_elastic(elastic_tensor_json="not json")
+
+        assert result["success"] is False
+        assert "Invalid JSON" in result["error"]
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.elastic.is_elastic_available", return_value=True), \
+             patch("shalom.analysis.elastic.analyze_elastic_tensor",
+                   side_effect=ValueError("Bad tensor shape")):
+            result = mod.analyze_elastic(elastic_tensor_json=self._TENSOR_JSON)
+
+        assert result["success"] is False
+        assert "Bad tensor shape" in result["error"]
+
+
+# ===========================================================================
+# Test: analyze_phonon_properties (MCP tool 12)
+# ===========================================================================
+
+class TestAnalyzePhononProperties:
+    """Tests for the analyze_phonon_properties MCP tool."""
+
+    def test_phonopy_unavailable(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.phonon.is_phonopy_available", return_value=False):
+            result = mod.analyze_phonon_properties(structure_file="POSCAR")
+
+        assert result["success"] is False
+        assert "phonopy" in result["error"]
+
+    def test_invalid_supercell(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.phonon.is_phonopy_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")):
+            result = mod.analyze_phonon_properties(
+                structure_file="POSCAR", supercell="2,2",
+            )
+
+        assert result["success"] is False
+        assert "Invalid supercell" in result["error"]
+
+    def test_no_force_data(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.phonon.is_phonopy_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")):
+            result = mod.analyze_phonon_properties(structure_file="POSCAR")
+
+        assert result["success"] is False
+        assert "force_sets_file" in result["error"]
+
+    def test_with_force_constants(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            is_stable=True,
+            min_frequency_THz=1.5,
+            imaginary_modes=[],
+            n_branches=6,
+            thermal_temperatures=np.array([0.0, 100.0, 200.0, 300.0, 400.0]),
+            thermal_cv=np.array([0.0, 5.0, 10.0, 15.0, 18.0]),
+            thermal_entropy=np.array([0.0, 2.0, 5.0, 8.0, 10.0]),
+            thermal_free_energy=np.array([0.0, -1.0, -3.0, -5.0, -7.0]),
+        )
+        with patch("shalom.analysis.phonon.is_phonopy_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("phonopy.file_IO.parse_FORCE_CONSTANTS", return_value=MagicMock()), \
+             patch("shalom.analysis.phonon.analyze_phonon_from_force_constants",
+                   return_value=mock_result):
+            result = mod.analyze_phonon_properties(
+                structure_file="POSCAR",
+                force_constants_file="FORCE_CONSTANTS",
+            )
+
+        assert result["success"] is True
+        assert result["is_dynamically_stable"] is True
+        assert result["cv_300K_J_per_K_mol"] == 15.0
+
+    def test_with_force_sets(self):
+        mod = _import_mcp_server()
+        mock_ph = MagicMock()
+        mock_result = MagicMock(
+            is_stable=True,
+            min_frequency_THz=2.0,
+            imaginary_modes=[],
+            n_branches=6,
+            thermal_temperatures=None,
+            thermal_cv=None,
+            thermal_entropy=None,
+            thermal_free_energy=None,
+        )
+        with patch("shalom.analysis.phonon.is_phonopy_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("phonopy.file_IO.parse_FORCE_SETS", return_value={}), \
+             patch("shalom.analysis.phonon.generate_phonon_displacements",
+                   return_value=([], mock_ph)), \
+             patch("shalom.analysis.phonon._run_phonon_analysis",
+                   return_value=mock_result):
+            result = mod.analyze_phonon_properties(
+                structure_file="POSCAR",
+                force_sets_file="FORCE_SETS",
+            )
+
+        assert result["success"] is True
+        assert result["cv_300K_J_per_K_mol"] is None
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.phonon.is_phonopy_available", return_value=True), \
+             patch("ase.io.read", side_effect=FileNotFoundError("POSCAR not found")):
+            result = mod.analyze_phonon_properties(structure_file="POSCAR")
+
+        assert result["success"] is False
+        assert "POSCAR" in result["error"]
+
+
+# ===========================================================================
+# Test: analyze_electronic_structure (MCP tool 13)
+# ===========================================================================
+
+class TestAnalyzeElectronicStructure:
+    """Tests for the analyze_electronic_structure MCP tool."""
+
+    def test_no_input(self):
+        mod = _import_mcp_server()
+        result = mod.analyze_electronic_structure()
+        assert result["success"] is False
+        assert "Provide" in result["error"]
+
+    def test_xml_not_found_in_calc_dir(self, tmp_path):
+        mod = _import_mcp_server()
+        with patch("shalom.backends.qe_parser.find_xml_path", return_value=None):
+            result = mod.analyze_electronic_structure(calc_dir=str(tmp_path))
+
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_success_with_xml_path(self, tmp_path):
+        mod = _import_mcp_server()
+        xml_file = str(tmp_path / "data-file-schema.xml")
+
+        # Create a pw.out for fermi energy extraction
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("the Fermi energy is     6.48 ev\n")
+
+        mock_bs = MagicMock(eigenvalues=np.zeros((10, 5)))
+        mock_result = MagicMock(
+            is_metal=False,
+            bandgap_eV=0.61,
+            is_direct=False,
+            n_occupied_bands=4,
+            vbm_energy=5.98,
+            cbm_energy=6.59,
+            effective_mass_electron=0.54,
+            effective_mass_hole=0.19,
+            dos_at_fermi=None,
+        )
+
+        with patch("shalom.backends.qe_parser.parse_xml_bands", return_value=mock_bs), \
+             patch("shalom.backends.qe_parser.extract_fermi_energy", return_value=6.48), \
+             patch("shalom.analysis.electronic.analyze_band_structure",
+                   return_value=mock_result):
+            result = mod.analyze_electronic_structure(bands_xml_path=xml_file)
+
+        assert result["success"] is True
+        assert result["bandgap_eV"] == 0.61
+        assert result["vbm_energy_eV"] == 5.98
+        assert result["effective_mass_electron_me"] == 0.54
+
+    def test_success_with_calc_dir(self, tmp_path):
+        mod = _import_mcp_server()
+        mock_bs = MagicMock(eigenvalues=np.zeros((5, 3)))
+        mock_result = MagicMock(
+            is_metal=True, bandgap_eV=0.0, is_direct=False,
+            n_occupied_bands=3, vbm_energy=None, cbm_energy=None,
+            effective_mass_electron=None, effective_mass_hole=None,
+            dos_at_fermi=2.5,
+        )
+        xml_path = str(tmp_path / "sub" / "data.xml")
+
+        with patch("shalom.backends.qe_parser.find_xml_path", return_value=xml_path), \
+             patch("shalom.backends.qe_parser.extract_fermi_energy", return_value=5.0), \
+             patch("shalom.backends.qe_parser.parse_xml_bands", return_value=mock_bs), \
+             patch("shalom.analysis.electronic.analyze_band_structure",
+                   return_value=mock_result):
+            result = mod.analyze_electronic_structure(
+                calc_dir=str(tmp_path), fermi_energy=5.0,
+            )
+
+        assert result["success"] is True
+        assert result["is_metal"] is True
+        assert result["dos_at_fermi_states_per_eV"] == 2.5
+
+    def test_with_dos_file(self, tmp_path):
+        mod = _import_mcp_server()
+        xml_file = str(tmp_path / "data.xml")
+        dos_file = str(tmp_path / "pwscf.dos")
+
+        mock_bs = MagicMock(eigenvalues=np.zeros((5, 3)))
+        mock_dos = MagicMock(fermi_energy=5.0)
+        mock_result = MagicMock(
+            is_metal=False, bandgap_eV=1.1, is_direct=True,
+            n_occupied_bands=4, vbm_energy=None, cbm_energy=None,
+            effective_mass_electron=None, effective_mass_hole=None,
+            dos_at_fermi=0.0,
+        )
+
+        with patch("shalom.backends.qe_parser.parse_xml_bands", return_value=mock_bs), \
+             patch("shalom.backends.qe_parser.extract_fermi_energy", return_value=5.0), \
+             patch("shalom.backends.qe_parser.parse_dos_file", return_value=mock_dos), \
+             patch("shalom.analysis.electronic.analyze_band_structure",
+                   return_value=mock_result):
+            result = mod.analyze_electronic_structure(
+                bands_xml_path=xml_file, dos_file_path=dos_file,
+            )
+
+        assert result["success"] is True
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.backends.qe_parser.find_xml_path",
+                   side_effect=OSError("permission denied")):
+            result = mod.analyze_electronic_structure(calc_dir="/bad/path")
+
+        assert result["success"] is False
+        assert "permission denied" in result["error"]
+
+
+# ===========================================================================
+# Test: analyze_xrd_pattern (MCP tool 14)
+# ===========================================================================
+
+class TestAnalyzeXRDPattern:
+    """Tests for the analyze_xrd_pattern MCP tool."""
+
+    def test_xrd_unavailable(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.xrd.is_xrd_available", return_value=False):
+            result = mod.analyze_xrd_pattern(structure_file="POSCAR")
+
+        assert result["success"] is False
+        assert "pymatgen" in result["error"]
+
+    def test_success(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            two_theta=np.array([28.4, 47.3, 56.1]),
+            intensities=np.array([100.0, 55.0, 30.0]),
+            d_spacings=np.array([3.14, 1.92, 1.64]),
+            hkl_indices=[(1, 1, 1), (2, 2, 0), (3, 1, 1)],
+            n_peaks=3,
+            wavelength_angstrom=1.5406,
+        )
+        with patch("shalom.analysis.xrd.is_xrd_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("shalom.analysis.xrd.calculate_xrd", return_value=mock_result):
+            result = mod.analyze_xrd_pattern(structure_file="POSCAR")
+
+        assert result["success"] is True
+        assert result["n_peaks"] == 3
+        assert len(result["top_peaks"]) == 3
+        assert result["top_peaks"][0]["two_theta_deg"] == 28.4
+
+    def test_with_output_plot(self, tmp_path):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            two_theta=np.array([28.4]),
+            intensities=np.array([100.0]),
+            d_spacings=np.array([3.14]),
+            hkl_indices=[(1, 1, 1)],
+            n_peaks=1,
+            wavelength_angstrom=1.5406,
+        )
+        plot_path = str(tmp_path / "xrd.png")
+
+        with patch("shalom.analysis.xrd.is_xrd_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("shalom.analysis.xrd.calculate_xrd", return_value=mock_result), \
+             patch("shalom.plotting.xrd_plot.XRDPlotter") as MockPlotter:
+            result = mod.analyze_xrd_pattern(
+                structure_file="POSCAR", output_plot=plot_path,
+            )
+
+        assert result["success"] is True
+        assert result["plot_path"] == plot_path
+        MockPlotter.return_value.plot.assert_called_once()
+
+    def test_plot_import_error(self, tmp_path):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            two_theta=np.array([28.4]),
+            intensities=np.array([100.0]),
+            d_spacings=np.array([3.14]),
+            hkl_indices=[(1, 1, 1)],
+            n_peaks=1,
+            wavelength_angstrom=1.5406,
+        )
+        plot_path = str(tmp_path / "xrd.png")
+
+        with patch("shalom.analysis.xrd.is_xrd_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("shalom.analysis.xrd.calculate_xrd", return_value=mock_result), \
+             patch("shalom.plotting.xrd_plot.XRDPlotter",
+                   side_effect=ImportError("no matplotlib")):
+            result = mod.analyze_xrd_pattern(
+                structure_file="POSCAR", output_plot=plot_path,
+            )
+
+        assert result["success"] is True
+        assert "plot_warning" in result
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.xrd.is_xrd_available", return_value=True), \
+             patch("ase.io.read", side_effect=FileNotFoundError("No file")):
+            result = mod.analyze_xrd_pattern(structure_file="POSCAR")
+
+        assert result["success"] is False
+
+
+# ===========================================================================
+# Test: analyze_symmetry_properties (MCP tool 15)
+# ===========================================================================
+
+class TestAnalyzeSymmetryProperties:
+    """Tests for the analyze_symmetry_properties MCP tool."""
+
+    def test_spglib_unavailable(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.symmetry.is_spglib_available", return_value=False):
+            result = mod.analyze_symmetry_properties(structure_file="POSCAR")
+
+        assert result["success"] is False
+        assert "spglib" in result["error"]
+
+    def test_success(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            space_group_number=227,
+            space_group_symbol="Fd-3m",
+            point_group="m-3m",
+            crystal_system="cubic",
+            lattice_type="face-centered",
+            hall_symbol="-F 4vw 2vw 3",
+            n_operations=192,
+            is_primitive=True,
+            wyckoff_letters=["a", "a"],
+            equivalent_atoms=[0, 0],
+        )
+        with patch("shalom.analysis.symmetry.is_spglib_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("shalom.analysis.symmetry.analyze_symmetry",
+                   return_value=mock_result):
+            result = mod.analyze_symmetry_properties(structure_file="POSCAR")
+
+        assert result["success"] is True
+        assert result["space_group_number"] == 227
+        assert result["crystal_system"] == "cubic"
+
+    def test_custom_symprec(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            space_group_number=1, space_group_symbol="P1",
+            point_group="1", crystal_system="triclinic",
+            lattice_type="primitive", hall_symbol="P 1",
+            n_operations=1, is_primitive=True,
+            wyckoff_letters=["a"], equivalent_atoms=[0],
+        )
+        with patch("shalom.analysis.symmetry.is_spglib_available", return_value=True), \
+             patch("ase.io.read", return_value=bulk("Si")), \
+             patch("shalom.analysis.symmetry.analyze_symmetry",
+                   return_value=mock_result) as mock_fn:
+            result = mod.analyze_symmetry_properties(
+                structure_file="POSCAR", symprec="0.1",
+            )
+
+        assert result["success"] is True
+        # Verify symprec was passed as float
+        assert mock_fn.call_args[1]["symprec"] == 0.1
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.symmetry.is_spglib_available", return_value=True), \
+             patch("ase.io.read", side_effect=FileNotFoundError("No POSCAR")):
+            result = mod.analyze_symmetry_properties(structure_file="POSCAR")
+
+        assert result["success"] is False
+
+
+# ===========================================================================
+# Test: analyze_magnetic_properties (MCP tool 16)
+# ===========================================================================
+
+class TestAnalyzeMagneticProperties:
+    """Tests for the analyze_magnetic_properties MCP tool."""
+
+    def test_with_site_mags(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.magnetic.extract_site_magnetization",
+                   return_value=[4.5, 4.5, -0.1, -0.1]), \
+             patch("shalom.analysis.magnetic.extract_lowdin_charges",
+                   return_value=None):
+            result = mod.analyze_magnetic_properties(pw_out_path="pw.out")
+
+        assert result["success"] is True
+        assert len(result["site_magnetizations_bohr_mag"]) == 4
+        assert result["n_atoms"] == 4
+        assert result["lowdin_total_charges"] is None
+
+    def test_no_site_mags(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.magnetic.extract_site_magnetization",
+                   return_value=None), \
+             patch("shalom.analysis.magnetic.extract_lowdin_charges",
+                   return_value=None):
+            result = mod.analyze_magnetic_properties(pw_out_path="pw.out")
+
+        assert result["success"] is True
+        assert result["site_magnetizations_bohr_mag"] is None
+
+    def test_with_lowdin(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.magnetic.extract_site_magnetization",
+                   return_value=None), \
+             patch("shalom.analysis.magnetic.extract_lowdin_charges",
+                   return_value={"total_charges": [3.0, 3.0], "spd_charges": []}):
+            result = mod.analyze_magnetic_properties(pw_out_path="pw.out")
+
+        assert result["success"] is True
+        assert result["lowdin_total_charges"] == [3.0, 3.0]
+
+    def test_with_structure_file(self, tmp_path):
+        mod = _import_mcp_server()
+        # Create a fake pw.out with total magnetization
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text(
+            "     total magnetization       =    20.00 Bohr mag/cell\n"
+        )
+
+        mock_mag_result = MagicMock(
+            total_magnetization=20.0,
+            is_magnetic=True,
+            is_spin_polarized=True,
+            magnetic_elements=["Fe"],
+            dominant_moment_element="Fe",
+        )
+
+        with patch("shalom.analysis.magnetic.extract_site_magnetization",
+                   return_value=None), \
+             patch("shalom.analysis.magnetic.extract_lowdin_charges",
+                   return_value=None), \
+             patch("ase.io.read", return_value=bulk("Fe")), \
+             patch("shalom.analysis.magnetic.analyze_magnetism",
+                   return_value=mock_mag_result):
+            result = mod.analyze_magnetic_properties(
+                pw_out_path=str(pw_out),
+                structure_file=str(tmp_path / "POSCAR"),
+            )
+
+        assert result["success"] is True
+        assert result["total_magnetization_bohr_mag"] == 20.0
+        assert result["magnetic_elements"] == ["Fe"]
+
+    def test_structure_file_oserror(self, tmp_path):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.magnetic.extract_site_magnetization",
+                   return_value=None), \
+             patch("shalom.analysis.magnetic.extract_lowdin_charges",
+                   return_value=None), \
+             patch("ase.io.read", side_effect=FileNotFoundError("No POSCAR")):
+            result = mod.analyze_magnetic_properties(
+                pw_out_path="pw.out",
+                structure_file="/nonexistent/POSCAR",
+            )
+
+        assert result["success"] is False
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.analysis.magnetic.extract_site_magnetization",
+                   side_effect=OSError("read error")):
+            result = mod.analyze_magnetic_properties(pw_out_path="pw.out")
+
+        assert result["success"] is False
+
+
+# ===========================================================================
+# Test: run_md (MCP tool 17)
+# ===========================================================================
+
+class TestRunMD:
+    """Tests for the run_md MCP tool."""
+
+    def test_lammps_success(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            success=True,
+            output_dir="/tmp/fe_md",
+            files_generated=["data.lammps", "in.lammps"],
+            auto_detected={"pair_style": "eam/alloy"},
+            structure_analysis={"formula": "Fe"},
+            calculation_parameters={"timestep": 0.001},
+            detection_log=["EAM detected for Fe"],
+            error=None,
+        )
+        with patch("shalom.direct_run.direct_run", return_value=mock_result):
+            result = mod.run_md(material="Fe", backend="lammps")
+
+        assert result["success"] is True
+        assert result["output_dir"] == "/tmp/fe_md"
+        assert result["auto_detected"]["pair_style"] == "eam/alloy"
+
+    def test_vasp_aimd(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            success=True,
+            output_dir="/tmp/si_aimd",
+            files_generated=["POSCAR", "INCAR", "KPOINTS"],
+            auto_detected=None,
+            structure_analysis=None,
+            calculation_parameters=None,
+            detection_log=None,
+            error=None,
+        )
+        with patch("shalom.direct_run.direct_run", return_value=mock_result) as mock_dr:
+            result = mod.run_md(material="Si", backend="vasp")
+
+        assert result["success"] is True
+        config = mock_dr.call_args[0][1]
+        assert config.calc_type == "aimd"
+
+    def test_with_pair_style_override(self):
+        mod = _import_mcp_server()
+        mock_result = MagicMock(
+            success=True, output_dir="/tmp/test",
+            files_generated=[], auto_detected=None,
+            structure_analysis=None, calculation_parameters=None,
+            detection_log=None, error=None,
+        )
+        with patch("shalom.direct_run.direct_run", return_value=mock_result) as mock_dr:
+            result = mod.run_md(
+                material="Fe", pair_style="eam/alloy",
+                pair_coeff="* * Fe.eam.alloy Fe",
+            )
+
+        assert result["success"] is True
+        config = mock_dr.call_args[0][1]
+        assert config.user_settings["pair_style"] == "eam/alloy"
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.direct_run.direct_run",
+                   side_effect=RuntimeError("No structure")):
+            result = mod.run_md(material="XYZ")
+
+        assert result["success"] is False
+        assert "No structure" in result["error"]
+
+
+# ===========================================================================
+# Test: analyze_md_trajectory (MCP tool 18)
+# ===========================================================================
+
+class TestAnalyzeMDTrajectory:
+    """Tests for the analyze_md_trajectory MCP tool."""
+
+    def test_success(self, tmp_path):
+        mod = _import_mcp_server()
+        mock_traj = MagicMock(n_frames=100, n_atoms=54, source="lammps")
+        mock_result = MagicMock(
+            avg_temperature=305.2,
+            temperature_std=12.3,
+            avg_energy=-3.45,
+            avg_pressure=1.2,
+            diffusion_coefficient=2.5e-5,
+            energy_drift_per_atom=1e-6,
+            is_equilibrated=True,
+            equilibration_step=20,
+        )
+        mock_result.to_dict.return_value = {"avg_temperature": 305.2}
+
+        with patch("shalom.backends.get_backend") as mock_gb, \
+             patch("shalom.analysis.md.analyze_md_trajectory",
+                   return_value=mock_result), \
+             patch("shalom.analysis._base.save_result_json", return_value=None):
+            mock_gb.return_value.parse_trajectory.return_value = mock_traj
+            result = mod.analyze_md_trajectory(
+                calc_dir=str(tmp_path), backend="lammps",
+            )
+
+        assert result["success"] is True
+        assert result["n_frames"] == 100
+        assert result["avg_temperature_K"] == 305.2
+        assert result["is_equilibrated"] is True
+
+    def test_auto_save_json(self, tmp_path):
+        mod = _import_mcp_server()
+        mock_traj = MagicMock(n_frames=50, n_atoms=10, source="lammps")
+        mock_result = MagicMock(
+            avg_temperature=300.0, temperature_std=10.0,
+            avg_energy=-2.0, avg_pressure=0.0,
+            diffusion_coefficient=1e-5,
+            energy_drift_per_atom=0.0,
+            is_equilibrated=True, equilibration_step=10,
+        )
+        mock_result.to_dict.return_value = {"test": True}
+        json_path = str(tmp_path / "md_analysis_results.json")
+
+        with patch("shalom.backends.get_backend") as mock_gb, \
+             patch("shalom.analysis.md.analyze_md_trajectory",
+                   return_value=mock_result), \
+             patch("shalom.analysis._base.save_result_json",
+                   return_value=json_path) as mock_save:
+            mock_gb.return_value.parse_trajectory.return_value = mock_traj
+            result = mod.analyze_md_trajectory(
+                calc_dir=str(tmp_path), backend="lammps",
+            )
+
+        assert result["success"] is True
+        assert result["results_json_path"] == json_path
+        mock_save.assert_called_once()
+
+    def test_save_json_failure(self, tmp_path):
+        """save_result_json fails but tool still returns success."""
+        mod = _import_mcp_server()
+        mock_traj = MagicMock(n_frames=50, n_atoms=10, source="lammps")
+        mock_result = MagicMock(
+            avg_temperature=300.0, temperature_std=10.0,
+            avg_energy=-2.0, avg_pressure=0.0,
+            diffusion_coefficient=1e-5,
+            energy_drift_per_atom=0.0,
+            is_equilibrated=True, equilibration_step=10,
+        )
+        mock_result.to_dict.return_value = {}
+
+        with patch("shalom.backends.get_backend") as mock_gb, \
+             patch("shalom.analysis.md.analyze_md_trajectory",
+                   return_value=mock_result), \
+             patch("shalom.analysis._base.save_result_json",
+                   side_effect=OSError("write error")):
+            mock_gb.return_value.parse_trajectory.return_value = mock_traj
+            result = mod.analyze_md_trajectory(
+                calc_dir=str(tmp_path), backend="lammps",
+            )
+
+        assert result["success"] is True
+        assert "results_json_path" not in result
+
+    def test_exception(self):
+        mod = _import_mcp_server()
+        with patch("shalom.backends.get_backend",
+                   side_effect=ValueError("Unknown backend")):
+            result = mod.analyze_md_trajectory(
+                calc_dir="/nonexistent", backend="bad",
+            )
+
+        assert result["success"] is False
+        assert "Unknown backend" in result["error"]

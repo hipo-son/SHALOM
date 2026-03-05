@@ -1116,3 +1116,193 @@ class TestWSLPatcherEncoding:
         assert "/mnt/c/" in result
         # Non-ASCII preserved
         assert "한국어" in result
+
+
+# =========================================================================
+# Phase 3: detect_wsl_executable, create_runner, validate_prerequisites WSL
+# =========================================================================
+
+
+class TestDetectWSLExecutable:
+    """Test detect_wsl_executable (runner.py lines 151-169)."""
+
+    def test_non_win32_returns_false(self):
+        from shalom.backends.runner import detect_wsl_executable
+
+        with patch("shalom.backends.runner.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            assert detect_wsl_executable("pw.x") is False
+
+    def test_full_path_uses_test_x(self):
+        from shalom.backends.runner import detect_wsl_executable
+
+        with patch("shalom.backends.runner.sys") as mock_sys, patch(
+            "shalom.backends.runner.subprocess"
+        ) as mock_sub:
+            mock_sys.platform = "win32"
+            mock_sub.run.return_value = MagicMock(returncode=0)
+            result = detect_wsl_executable("/opt/qe/bin/pw.x")
+            assert result is True
+            args = mock_sub.run.call_args[0][0]
+            assert args == ["wsl", "-e", "test", "-x", "/opt/qe/bin/pw.x"]
+
+    def test_bare_command_uses_which(self):
+        from shalom.backends.runner import detect_wsl_executable
+
+        with patch("shalom.backends.runner.sys") as mock_sys, patch(
+            "shalom.backends.runner.subprocess"
+        ) as mock_sub:
+            mock_sys.platform = "win32"
+            mock_sub.run.return_value = MagicMock(returncode=0)
+            result = detect_wsl_executable("pw.x")
+            assert result is True
+            args = mock_sub.run.call_args[0][0]
+            assert args == ["wsl", "-e", "which", "pw.x"]
+
+    def test_timeout_returns_false(self):
+        import subprocess as real_subprocess
+        from shalom.backends.runner import detect_wsl_executable
+
+        with patch("shalom.backends.runner.sys") as mock_sys, patch(
+            "shalom.backends.runner.subprocess.run",
+            side_effect=real_subprocess.TimeoutExpired("wsl", 5),
+        ):
+            mock_sys.platform = "win32"
+            assert detect_wsl_executable("pw.x") is False
+
+    def test_file_not_found_returns_false(self):
+        from shalom.backends.runner import detect_wsl_executable
+
+        with patch("shalom.backends.runner.sys") as mock_sys, patch(
+            "shalom.backends.runner.subprocess.run",
+            side_effect=FileNotFoundError("wsl not installed"),
+        ):
+            mock_sys.platform = "win32"
+            assert detect_wsl_executable("pw.x") is False
+
+
+class TestCreateRunner:
+    """Test create_runner factory (runner.py lines 608-625)."""
+
+    def test_create_runner_local(self):
+        from shalom.backends.runner import create_runner
+
+        runner = create_runner(ExecutionConfig())
+        assert isinstance(runner, ExecutionRunner)
+
+    def test_create_runner_with_slurm(self):
+        from shalom.backends.runner import create_runner
+
+        mock_slurm_config = MagicMock()
+        with patch("shalom.backends.slurm.SlurmRunner") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            runner = create_runner(ExecutionConfig(), mock_slurm_config)
+            mock_cls.assert_called_once()
+
+    def test_create_runner_none_config(self):
+        from shalom.backends.runner import create_runner
+
+        runner = create_runner()
+        assert isinstance(runner, ExecutionRunner)
+
+
+class TestValidatePrerequisitesWSL:
+    """Test validate_prerequisites WSL mode (runner.py lines 235-254)."""
+
+    def test_wsl_command_not_found(self):
+        config = ExecutionConfig(wsl=True, command="pw.x")
+        runner = ExecutionRunner(config=config)
+        with patch(
+            "shalom.backends.runner.detect_wsl_executable", return_value=False
+        ):
+            errors = runner.validate_prerequisites(".")
+        assert any("not found in WSL" in e for e in errors)
+
+    def test_wsl_mpi_not_found(self):
+        config = ExecutionConfig(wsl=True, command="pw.x", nprocs=4)
+        runner = ExecutionRunner(config=config)
+        with patch(
+            "shalom.backends.runner.detect_wsl_executable"
+        ) as mock_detect:
+            # pw.x found, mpirun not
+            mock_detect.side_effect = lambda cmd: cmd == "pw.x"
+            errors = runner.validate_prerequisites(".")
+        assert any("MPI" in e and "not found in WSL" in e for e in errors)
+
+
+class TestKillProcessAndCancel:
+    """Test _kill_process and cancel OSError paths."""
+
+    def test_kill_process_oserror(self):
+        mock_proc = MagicMock()
+        mock_proc.kill.side_effect = OSError("already dead")
+        # Should not raise
+        ExecutionRunner._kill_process(mock_proc)
+
+    def test_cancel_oserror(self):
+        runner = ExecutionRunner(config=ExecutionConfig())
+        runner._process = MagicMock()
+        runner._process.kill.side_effect = OSError("gone")
+        # Should not raise
+        runner.cancel()
+
+
+class TestRecoveryEdgeCases:
+    """Test error recovery edge cases in execute_with_recovery."""
+
+    def test_output_read_oserror_breaks_loop(self, tmp_path):
+        """Cannot read pw.out → break recovery loop."""
+        backend = MagicMock()
+        config = ExecutionConfig()
+        runner = ExecutionRunner(config=config)
+        recovery = QEErrorRecoveryEngine()
+        mock_config = MagicMock()
+        atoms = Atoms("Si")
+
+        # First run fails
+        exec_result = ExecutionResult(
+            success=False, wall_time_seconds=1.0,
+            error_message="pw.x failed", stderr_tail="ERROR",
+        )
+        runner.run = MagicMock(return_value=exec_result)
+        backend.parse_output.return_value = DFTResult(
+            energy=None, is_converged=False,
+        )
+
+        # No pw.out file exists → OSError when reading
+        result, dft_result, history = execute_with_recovery(
+            backend, runner, recovery, str(tmp_path),
+            mock_config, atoms, max_retries=2,
+        )
+        assert not result.success
+
+    def test_rewrite_input_exception_breaks(self, tmp_path):
+        """backend.write_input raises → break recovery loop."""
+        backend = MagicMock()
+        config = ExecutionConfig()
+        runner = ExecutionRunner(config=config)
+        recovery = QEErrorRecoveryEngine()
+        mock_config = MagicMock()
+        atoms = Atoms("Si")
+
+        exec_result = ExecutionResult(
+            success=False, wall_time_seconds=1.0,
+            error_message="fail", stderr_tail="",
+        )
+        runner.run = MagicMock(return_value=exec_result)
+        backend.parse_output.return_value = DFTResult(
+            energy=None, is_converged=False,
+        )
+
+        # Write pw.out with a scannable error
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("convergence NOT achieved after 100 iterations\n")
+
+        # write_input will raise
+        backend.write_input.side_effect = RuntimeError("disk full")
+
+        result, dft_result, history = execute_with_recovery(
+            backend, runner, recovery, str(tmp_path),
+            mock_config, atoms, max_retries=2,
+        )
+        assert not result.success

@@ -241,3 +241,55 @@ class TestPackageImports:
         assert "XRDResult" in shalom.analysis.__all__
         assert "calculate_xrd" in shalom.analysis.__all__
         assert "is_xrd_available" in shalom.analysis.__all__
+
+
+# ---------------------------------------------------------------------------
+# _extract_hkl edge cases (covers lines 125-138)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractHkl:
+    """Test _extract_hkl helper with all pymatgen hkl formats."""
+
+    def test_modern_format_list_of_dicts(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Modern pymatgen: list of dicts with "hkl" key
+        entry = [{"hkl": (1, 1, 1), "multiplicity": 8}]
+        assert _extract_hkl(entry) == (1, 1, 1)
+
+    def test_legacy_format_list_of_dicts_with_tuple_key(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Legacy wrapped in list: [{(h,k,l): m}]
+        entry = [{(2, 2, 0): 12}]
+        assert _extract_hkl(entry) == (2, 2, 0)
+
+    def test_legacy_dict_with_hkl_key(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Single dict with "hkl" key
+        entry = {"hkl": (3, 1, 1)}
+        assert _extract_hkl(entry) == (3, 1, 1)
+
+    def test_legacy_dict_with_tuple_key(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Legacy: {(h,k,l): multiplicity}
+        entry = {(4, 0, 0): 6}
+        assert _extract_hkl(entry) == (4, 0, 0)
+
+    def test_unrecognized_format_returns_000(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Unknown format → (0, 0, 0)
+        assert _extract_hkl("unknown") == (0, 0, 0)
+        assert _extract_hkl(42) == (0, 0, 0)
+        assert _extract_hkl([]) == (0, 0, 0)
+
+    def test_list_of_dicts_no_hkl_no_tuple_key(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Dict in list but no "hkl" key and non-tuple key
+        entry = [{"multiplicity": 8}]
+        assert _extract_hkl(entry) == (0, 0, 0)
+
+    def test_legacy_dict_with_list_key(self):
+        from shalom.analysis.xrd import _extract_hkl
+        # Dict key is a list (not tuple) — should still work
+        entry = {(1, 0, 0): 2}
+        assert _extract_hkl(entry) == (1, 0, 0)

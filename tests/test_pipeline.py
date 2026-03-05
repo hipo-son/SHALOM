@@ -1098,3 +1098,364 @@ class TestPipelineExecutionValidation:
         config = PipelineConfig()
         pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
         assert "execution" not in pipeline._effective_steps
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Execution step runtime, MP fetch, _create_dft_config, _save_state
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineExecutionStepRuntime:
+    """Test actual execution step code (pipeline.py lines 592-669)."""
+
+    def test_execution_step_success(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """Execution step succeeds → COMPLETED status."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            execute=True,
+            skip_review=True,
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        mock_exec_result = MagicMock()
+        mock_exec_result.success = True
+        mock_exec_result.wall_time_seconds = 42.0
+        mock_exec_result.error_message = None
+
+        mock_dft_result = MagicMock()
+        mock_dft_result.is_converged = True
+        mock_dft_result.quality_warnings = []
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop, patch(
+            "shalom.backends.runner.create_runner"
+        ) as mock_cr, patch(
+            "shalom.backends.runner.execute_with_recovery"
+        ) as mock_ewr:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "struct"))
+            mock_cr.return_value = MagicMock()
+            mock_ewr.return_value = (mock_exec_result, mock_dft_result, [])
+
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED
+        assert "execution" in result.steps_completed
+        assert result.execution_wall_time == 42.0
+
+    def test_execution_step_failure(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """Execution step fails → FAILED_EXECUTION status."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            execute=True,
+            skip_review=True,
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        mock_exec_result = MagicMock()
+        mock_exec_result.success = False
+        mock_exec_result.wall_time_seconds = 10.0
+        mock_exec_result.error_message = "pw.x crashed"
+
+        mock_dft_result = MagicMock()
+        mock_dft_result.is_converged = False
+        mock_dft_result.quality_warnings = []
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop, patch(
+            "shalom.backends.runner.create_runner"
+        ) as mock_cr, patch(
+            "shalom.backends.runner.execute_with_recovery"
+        ) as mock_ewr:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "struct"))
+            mock_cr.return_value = MagicMock()
+            mock_ewr.return_value = (mock_exec_result, mock_dft_result, [{"err": "x"}])
+
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.FAILED_EXECUTION
+        assert result.error_message == "pw.x crashed"
+
+    def test_execution_loads_atoms_from_pw_in(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path,
+    ):
+        """When simulation is skipped (input_structure_path set), atoms loaded from pw.in."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        pw_in = tmp_path / "struct" / "pw.in"
+        pw_in.parent.mkdir()
+        pw_in.write_text("dummy")
+
+        config = PipelineConfig(
+            execute=True,
+            skip_review=True,
+            output_dir=str(tmp_path),
+            save_state=False,
+            input_structure_path=str(tmp_path / "struct"),
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        mock_exec_result = MagicMock()
+        mock_exec_result.success = True
+        mock_exec_result.wall_time_seconds = 5.0
+        mock_exec_result.error_message = None
+        mock_dft_result = MagicMock()
+        mock_dft_result.is_converged = True
+        mock_dft_result.quality_warnings = []
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop, patch("ase.io.read") as mock_read, patch(
+            "shalom.backends.runner.create_runner"
+        ) as mock_cr, patch(
+            "shalom.backends.runner.execute_with_recovery"
+        ) as mock_ewr:
+            mock_loop.return_value = (True, None, str(tmp_path / "struct"))
+            mock_read.return_value = MagicMock()
+            mock_cr.return_value = MagicMock()
+            mock_ewr.return_value = (mock_exec_result, mock_dft_result, [])
+
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED
+
+    def test_execution_with_slurm_config(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """Slurm partition → SlurmConfig is created."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            execute=True,
+            skip_review=True,
+            output_dir=str(tmp_path),
+            save_state=False,
+            slurm_partition="compute",
+            slurm_account="mat_sci",
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        mock_exec_result = MagicMock()
+        mock_exec_result.success = True
+        mock_exec_result.wall_time_seconds = 1.0
+        mock_exec_result.error_message = None
+        mock_dft_result = MagicMock()
+        mock_dft_result.is_converged = True
+        mock_dft_result.quality_warnings = []
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop, patch(
+            "shalom.backends.runner.create_runner"
+        ) as mock_cr, patch(
+            "shalom.backends.runner.execute_with_recovery"
+        ) as mock_ewr:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "s"))
+            mock_cr.return_value = MagicMock()
+            mock_ewr.return_value = (mock_exec_result, mock_dft_result, [])
+
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.COMPLETED
+        # create_runner called with slurm_config
+        call_args = mock_cr.call_args
+        assert call_args is not None
+        slurm_arg = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("slurm_config")
+        assert slurm_arg is not None
+
+
+class TestPipelineMPFetch:
+    """Test Materials Project fetch path (pipeline.py lines 503-538)."""
+
+    def test_mp_fetch_success(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """MP fetch succeeds → uses fetched atoms."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        mock_mp_result = MagicMock()
+        mock_mp_result.atoms = MagicMock()
+
+        with patch(
+            "shalom.mp_client.is_mp_available", return_value=True
+        ), patch(
+            "shalom.mp_client.fetch_structure", return_value=mock_mp_result
+        ) as mock_fetch, patch(
+            "shalom.agents.simulation_layer._apply_structure_hints"
+        ), patch.object(
+            pipeline.backend, "write_input", return_value=str(tmp_path / "POSCAR")
+        ):
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.AWAITING_DFT
+        assert "structure_generation" in result.steps_completed
+        mock_fetch.assert_called_once()
+
+    def test_mp_fetch_fallback(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """MP fetch fails → falls back to AI Geometry Generator."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.mp_client.is_mp_available", return_value=True
+        ), patch(
+            "shalom.mp_client.fetch_structure", side_effect=RuntimeError("No API key")
+        ), patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.AWAITING_DFT
+        mock_loop.assert_called_once()
+
+
+class TestPipelineCreateDftConfig:
+    """Test _create_dft_config method (pipeline.py lines 810-837)."""
+
+    def test_create_dft_config_qe(self, mock_llm):
+        config = PipelineConfig(backend_name="qe", calc_type="scf")
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        dft_config = pipeline._create_dft_config()
+        assert dft_config is not None
+        # QE config has system dict
+        assert hasattr(dft_config, "system")
+
+    def test_create_dft_config_unknown_backend(self, mock_llm):
+        # Construct with valid backend, then override config.backend_name
+        config = PipelineConfig(backend_name="vasp")
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+        pipeline.config.backend_name = "abacus"
+        dft_config = pipeline._create_dft_config()
+        assert dft_config is None
+
+
+class TestPipelineOuterLoop:
+    """Test outer loop exhaustion (pipeline.py line 369)."""
+
+    def test_outer_loop_exhausted_returns_last_result(self, mock_llm, tmp_path):
+        """Two outer loops, both fail review → returns last result."""
+        call_count = {"value": 0}
+
+        def side_effect(**kwargs):
+            call_count["value"] += 1
+            if call_count["value"] % 2 == 1:
+                mock_resp = MagicMock()
+                mock_resp.candidates = [
+                    MaterialCandidate(
+                        material_name="X",
+                        elements=["X"],
+                        reasoning="test",
+                        expected_properties={},
+                    )
+                ]
+                return mock_resp
+            else:
+                return RankedMaterial(
+                    candidate=MaterialCandidate(
+                        material_name="X",
+                        elements=["X"],
+                        reasoning="test",
+                        expected_properties={},
+                    ),
+                    score=0.5,
+                    ranking_justification="test",
+                )
+
+        mock_llm.generate_structured_output.side_effect = side_effect
+        config = PipelineConfig(
+            max_outer_loops=2,
+            skip_review=False,
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop, patch(
+            "shalom.agents.review_layer.ReviewAgent.review_with_backend"
+        ) as mock_review:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            mock_review.return_value = ReviewResult(
+                is_successful=False,
+                energy=None,
+                forces_max=None,
+                feedback_for_design="Try harder",
+            )
+
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.FAILED_REVIEW
+
+
+class TestPipelineAuditLog:
+    """Test audit log exception path (pipeline.py lines 337-338)."""
+
+    def test_audit_log_event_exception(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """Audit log exception is silently caught."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            output_dir=str(tmp_path),
+            save_state=False,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.core.audit.log_event", side_effect=RuntimeError("audit fail")
+        ), patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        # Should not crash
+        assert result.status == PipelineStatus.AWAITING_DFT
+
+
+class TestPipelineSaveState:
+    """Test _save_state (pipeline.py lines 847-866)."""
+
+    def test_save_state_writes_files(
+        self, mock_llm, sample_candidates, sample_ranked, tmp_path
+    ):
+        """save_state=True creates pipeline_state.json and pipeline_config.json."""
+        _mock_design_steps(mock_llm, sample_candidates, sample_ranked)
+        config = PipelineConfig(
+            output_dir=str(tmp_path),
+            save_state=True,
+            skip_review=True,
+        )
+        pipeline = Pipeline(objective="test", llm_provider=mock_llm, config=config)
+
+        with patch(
+            "shalom.agents.simulation_layer.GeometryReviewer.run_creation_loop"
+        ) as mock_loop:
+            mock_loop.return_value = (True, MagicMock(), str(tmp_path / "POSCAR"))
+            result = pipeline.run()
+
+        assert result.status == PipelineStatus.AWAITING_DFT
+        state_file = tmp_path / "pipeline_state.json"
+        config_file = tmp_path / "pipeline_config.json"
+        assert state_file.exists()
+        assert config_file.exists()

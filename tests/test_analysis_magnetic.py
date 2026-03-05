@@ -330,3 +330,114 @@ class TestPackageImports:
 
         assert "MagneticResult" in shalom.analysis.__all__
         assert "analyze_magnetism" in shalom.analysis.__all__
+
+
+# ---------------------------------------------------------------------------
+# extract_total_magnetization tests (covers lines 100-113)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTotalMagnetization:
+    """Test extract_total_magnetization from pw.out."""
+
+    def test_found(self, tmp_path):
+        from shalom.analysis.magnetic import extract_total_magnetization
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text(
+            "Some header\n"
+            "     total magnetization       =     3.4567 Bohr mag/cell\n"
+            "more text\n"
+            "     total magnetization       =     4.0000 Bohr mag/cell\n"
+        )
+        result = extract_total_magnetization(str(pw_out))
+        # Should return the LAST match
+        assert abs(result - 4.0) < 1e-4
+
+    def test_not_found(self, tmp_path):
+        from shalom.analysis.magnetic import extract_total_magnetization
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("No magnetization data here\n")
+        result = extract_total_magnetization(str(pw_out))
+        assert result is None
+
+    def test_file_not_found(self):
+        from shalom.analysis.magnetic import extract_total_magnetization
+        result = extract_total_magnetization("/nonexistent/path/pw.out")
+        assert result is None
+
+    def test_oserror_returns_none(self, tmp_path):
+        from shalom.analysis.magnetic import extract_total_magnetization
+        from unittest.mock import patch
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("dummy")
+        with patch("builtins.open", side_effect=OSError("disk error")):
+            result = extract_total_magnetization(str(pw_out))
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# extract_site_magnetization edge cases (covers lines 140-142, 157)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSiteMagnetizationEdgeCases:
+    """Test extract_site_magnetization edge cases."""
+
+    def test_oserror_returns_none(self, tmp_path):
+        from shalom.analysis.magnetic import extract_site_magnetization
+        from unittest.mock import patch
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("dummy")
+        with patch("builtins.open", side_effect=OSError("disk error")):
+            result = extract_site_magnetization(str(pw_out))
+        assert result is None
+
+    def test_multiple_blocks_returns_last(self, tmp_path):
+        from shalom.analysis.magnetic import extract_site_magnetization
+        pw_out = tmp_path / "pw.out"
+        # Two blocks: first block has 2 atoms, second block has 2 atoms
+        pw_out.write_text(
+            "     atom:    1    charge:   3.0000    magn:   1.0000    constr:   0.0000\n"
+            "     atom:    2    charge:   3.0000    magn:   2.0000    constr:   0.0000\n"
+            "     atom:    1    charge:   3.0000    magn:   3.0000    constr:   0.0000\n"
+            "     atom:    2    charge:   3.0000    magn:   4.0000    constr:   0.0000\n"
+        )
+        result = extract_site_magnetization(str(pw_out))
+        assert result is not None
+        # Should return last block [3.0, 4.0]
+        assert abs(result[0] - 3.0) < 1e-4
+        assert abs(result[1] - 4.0) < 1e-4
+
+
+# ---------------------------------------------------------------------------
+# extract_lowdin_charges edge cases (covers lines 216-224, 233)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractLowdinEdgeCases:
+    """Test extract_lowdin_charges edge cases."""
+
+    def test_file_not_found(self):
+        from shalom.analysis.magnetic import extract_lowdin_charges
+        result = extract_lowdin_charges("/nonexistent/path/pw.out")
+        assert result is None
+
+    def test_oserror_returns_none(self, tmp_path):
+        from shalom.analysis.magnetic import extract_lowdin_charges
+        from unittest.mock import patch
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text("dummy")
+        with patch("builtins.open", side_effect=OSError("read error")):
+            result = extract_lowdin_charges(str(pw_out))
+        assert result is None
+
+    def test_lowdin_header_but_no_atom_lines(self, tmp_path):
+        from shalom.analysis.magnetic import extract_lowdin_charges
+        pw_out = tmp_path / "pw.out"
+        pw_out.write_text(
+            "Lowdin Charges:\n"
+            "\n"
+            "No atom data here\n"
+        )
+        result = extract_lowdin_charges(str(pw_out))
+        assert result is None
